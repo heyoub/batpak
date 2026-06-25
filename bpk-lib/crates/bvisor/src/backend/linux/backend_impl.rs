@@ -267,6 +267,10 @@ impl LinuxBackend {
     }
 }
 
+#[cfg(feature = "dangerous-test-hooks")]
+#[path = "backend_impl_proof.rs"]
+mod proof_hooks;
+
 impl Default for LinuxBackend {
     fn default() -> Self {
         Self::new()

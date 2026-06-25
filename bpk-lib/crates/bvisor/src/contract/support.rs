@@ -110,6 +110,27 @@ pub enum RequirementKind {
 }
 
 impl RequirementKind {
+    /// Every requirement key, in declaration order. Exhaustive by construction (a
+    /// new variant that is not added here fails the `all_is_exhaustive` test), so a
+    /// gate that must scan EVERY kind (e.g. the qualification coupling gate) can
+    /// enumerate them without a runtime registry.
+    pub const ALL: [Self; 14] = [
+        Self::Filesystem,
+        Self::NetworkDenyAll,
+        Self::NetworkAllowList,
+        Self::ChildSpawn,
+        Self::Environment,
+        Self::InheritedFds,
+        Self::LaunchWorkload,
+        Self::CaptureStreams,
+        Self::TempRoot,
+        Self::ExposePath,
+        Self::CommitArtifact,
+        Self::DiscardArtifact,
+        Self::Kill,
+        Self::ListOutputs,
+    ];
+
     /// Derive the classification key from a concrete requirement.
     #[must_use]
     pub fn of(req: &BoundaryRequirement) -> Self {
@@ -189,5 +210,56 @@ impl BackendProfile {
             .get(&kind)
             .cloned()
             .unwrap_or_else(SupportVerdict::unsupported)
+    }
+
+    /// The requirement kinds this ceiling advertises at [`Enforcement::Enforced`],
+    /// in canonical order — exactly the cells the qualification coupling gate must
+    /// find a `Proven` ledger row for.
+    #[must_use]
+    pub fn enforced_kinds(&self) -> Vec<RequirementKind> {
+        RequirementKind::ALL
+            .into_iter()
+            .filter(|&k| {
+                self.ceiling_for(k).enforcement
+                    == crate::contract::capability::Enforcement::Enforced
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod requirement_kind_tests {
+    use super::RequirementKind;
+
+    /// `RequirementKind::ALL` must list EVERY variant (the coupling gate enumerates
+    /// it). A new variant added without extending `ALL` makes this `match` fail to
+    /// compile — the exhaustiveness tripwire — and the count assert backs it up.
+    #[test]
+    fn all_is_exhaustive() {
+        for kind in RequirementKind::ALL {
+            // Exhaustive match: a new variant forces this to be updated.
+            match kind {
+                RequirementKind::Filesystem
+                | RequirementKind::NetworkDenyAll
+                | RequirementKind::NetworkAllowList
+                | RequirementKind::ChildSpawn
+                | RequirementKind::Environment
+                | RequirementKind::InheritedFds
+                | RequirementKind::LaunchWorkload
+                | RequirementKind::CaptureStreams
+                | RequirementKind::TempRoot
+                | RequirementKind::ExposePath
+                | RequirementKind::CommitArtifact
+                | RequirementKind::DiscardArtifact
+                | RequirementKind::Kill
+                | RequirementKind::ListOutputs => {}
+            }
+        }
+        // No duplicates.
+        let mut seen = std::collections::BTreeSet::new();
+        for kind in RequirementKind::ALL {
+            assert!(seen.insert(kind), "duplicate kind in ALL: {kind:?}");
+        }
+        assert_eq!(seen.len(), RequirementKind::ALL.len());
     }
 }

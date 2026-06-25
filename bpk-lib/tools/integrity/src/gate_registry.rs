@@ -397,6 +397,36 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    //     `bvisor-qualification-coupling` (S1): the §1 COUPLING LAW gate. For
+    //     representative machine profiles, it asserts that EVERY production-ceiling
+    //     cell advertised `Enforced` has a `Proven` row in the committed Linux
+    //     qualification ledger whose ProfileFloor the profile satisfies AND whose
+    //     MechanismDigest matches the backend's live mechanism. Under
+    //     `gauntlet_red_fixture` the red branch plants an Enforced `NetworkDenyAll`
+    //     cell with NO Proven ledger row (it is FailClosed) and asserts the coupling
+    //     check PASSED; a biting gate returns NotProven, so the red half FAILS —
+    //     proving the gate is anti-vacuous.
+    Gate {
+        slug: "bvisor-qualification-coupling",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/coupling_proof.rs::coupling_red_fixture_enforced_without_proven_row_must_fail",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
+    //     `bvisor-proof-receipt-resolution` (S1): the ANTI-FABRICATION half of the
+    //     coupling law — `Proven ⟹ a real oracle exists`. It resolves EVERY proof
+    //     receipt cited by a `Proven` ledger row to a real `#[test]` fn (file exists +
+    //     declares the named test). Runs on the DEFAULT build (text resolution). Red
+    //     fixture plants a ghost file/fn citation and asserts the resolver `Err`s.
+    Gate {
+        slug: "bvisor-proof-receipt-resolution",
+        red_fixture_test: Some(
+            "crates/bvisor/src/contract/qualification_tests.rs::ghost_receipt_is_rejected",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
     //     `bvisor-reconciliation`: the startup-reconciliation oracle (G13). It sweeps
     //     `(crash_boundary × seed)` and classifies each in-flight boundary as EXACTLY
     //     one of {Completed | RolledBack | CanonicalRefusal}, reading ONLY the

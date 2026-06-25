@@ -17,6 +17,7 @@ pub(crate) mod lifecycle;
 pub(crate) mod lowering;
 pub(crate) mod plan;
 pub(crate) mod primitive;
+pub(crate) mod qualification;
 pub(crate) mod recovery;
 pub(crate) mod registry;
 pub(crate) mod report;
