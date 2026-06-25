@@ -6,7 +6,8 @@
     feature = "dangerous-test-hooks",
     target_os = "linux"
 ))]
-//! GAUNTLET bvisor — REAL landlock FS confinement, lie-caught by an INDEPENDENT
+//! GAUNTLET bvisor — REAL landlock FS confinement THROUGH `execute()`→the host-side
+//! LAUNCHER (backend→launcher rewire step 7b), lie-caught by an INDEPENDENT
 //! GroundTruth.
 //!
 //! THE BACKEND NEVER GRADES ITSELF. The harness owns a [`FsGroundTruth`] that
@@ -16,10 +17,18 @@
 //! asked (landlock blocking an access the test never recorded is fine), but it may
 //! NEVER REPORT LESS DANGER THAN OCCURRED (a leak/escape the report hides).
 //!
-//! The oracle's observation channel is the REAL DISK, so it needs no re-run and no
-//! test-side syscalls: each workload's only observable side effect is a file it
-//! tries to create. If that file (with the planted marker) exists after the run,
-//! the dangerous effect occurred; if not, the confinement held.
+//! WHAT CHANGED AT 7b: `execute()` no longer self-spawns + confines via a backend
+//! `pre_exec`. It builds a launch plan and runs the `bvisor-linux-launcher`, which
+//! applies the landlock ruleset in its single-threaded child window
+//! (`restrict_self`, after the fd scrub, before `fexecve`). So:
+//!   - the SAFETY verdict is STILL the independent on-disk oracle (the secret did
+//!     not leak / the escape did not land);
+//!   - the launcher does NOT capture the workload's stdout/stderr back to the
+//!     backend (the workload inherits the launcher's stdio — captured-stdio slot
+//!     wiring is a later step), so the report no longer carries a stderr-derived
+//!     `denied`. A held confinement is an HONEST `Outcome::Completed` with the
+//!     launcher's `confinement_installed` mechanism attestation; the DENIAL is
+//!     proven by the disk (no danger to report because confinement held).
 //!
 //! G1 (secret-read-denied): the workload `cat`s a secret OUTSIDE the declared root
 //! and redirects into a file INSIDE the (writable) root. If landlock blocks the
@@ -29,6 +38,10 @@
 //! G3 (write-only-in-quarantine): the workload writes a file OUTSIDE the write
 //! root. GroundTruth stats the REAL disk: the escape file existing ⇒ the write
 //! escaped quarantine.
+//!
+//! LIVE-ABI GATE: the confinement assertions run ONLY at/above the landlock floor;
+//! below it (kernel lacks landlock, or the sandbox blocks it) they are SKIPPED with
+//! an explicit message — never silently passed.
 //!
 //! RED FIXTURE (`--cfg gauntlet_red_fixture`): runs the SAME G3 workload UNCONFINED
 //! (the backend lying that it confined), then asserts GroundTruth is clean — which
@@ -42,6 +55,55 @@ use bvisor::{
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// The test-compiled launcher bin `execute()` must run. `execute()` resolves the
+/// launcher via the backend's INJECTED path (constructor injection — see
+/// [`LinuxBackend::with_launcher_path`]) FIRST, so each test injects this path rather
+/// than mutating the process environment (`std::env::set_var` is banned as thread-unsafe,
+/// BANNED-003; concurrent tests in this binary would race it).
+fn test_launcher_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_bvisor-linux-launcher"))
+}
+
+/// Probe the LIVE landlock ABI exactly as the backend/launcher do (`>=1`, or `0`
+/// when unavailable). The G1/G3 confinement assertions run ONLY at/above the floor;
+/// otherwise the test SKIPS them with an explicit message (never a silent pass).
+const LANDLOCK_ABI_FLOOR: i64 = 1;
+
+fn live_landlock_abi() -> i64 {
+    const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
+    // SAFETY: documented version-query form (NULL attr, 0 size); reads no user
+    // memory, creates no fd, mutates nothing. Test-only probe.
+    let raw = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0usize,
+            LANDLOCK_CREATE_RULESET_VERSION,
+        )
+    };
+    if raw < 0 {
+        0
+    } else {
+        raw
+    }
+}
+
+fn landlock_available() -> bool {
+    live_landlock_abi() >= LANDLOCK_ABI_FLOOR
+}
+
+/// Emit an explicit skip line (never a silent pass) and return.
+fn skip(test: &str) {
+    use std::io::Write;
+    let mut sink = std::io::stderr();
+    let _ = writeln!(
+        sink,
+        "SKIP {test}: live landlock ABI {} < floor {LANDLOCK_ABI_FLOOR} \
+         (kernel lacks landlock or the sandbox blocks it)",
+        live_landlock_abi()
+    );
+}
 
 /// Per-test scratch dir under a unique path so concurrent tests never collide.
 struct Scratch {
@@ -120,9 +182,10 @@ fn fs_spec(args: Vec<String>, access: FsAccess, root: &Path) -> BoundarySpec {
     }
 }
 
-/// Run the spec through the registered LinuxBackend, returning the sealed body.
+/// Run the spec through the registered LinuxBackend (whose `execute()` now drives
+/// the launcher), returning the sealed body.
 fn run(spec: &BoundarySpec) -> BoundaryReportBody {
-    let backend = Arc::new(LinuxBackend::new());
+    let backend = Arc::new(LinuxBackend::with_launcher_path(test_launcher_path()));
     let id: BackendId = backend.id();
     let mut registry = BackendRegistry::new();
     registry.register(Arc::clone(&backend) as Arc<dyn Backend>);
@@ -136,18 +199,33 @@ fn run(spec: &BoundarySpec) -> BoundaryReportBody {
         .body
 }
 
-/// Whether the report HONESTLY records a filesystem denial (the danger the
-/// confinement produced). The report must not REPORT LESS than the GroundTruth.
-fn report_records_denial(body: &BoundaryReportBody) -> bool {
-    !body.denied.is_empty()
-        || body
-            .observed
-            .iter()
-            .any(|f| f.kind == "filesystem_access_denied")
+/// Whether the report HONESTLY records that the launcher INSTALLED the landlock
+/// confinement — the new honest confinement evidence (the launcher applies the
+/// ruleset, so the backend's mechanism attestation reflects the launcher install).
+/// The `filesystem_confined` fact names the launcher mechanism; the `launcher_note`
+/// facts carry the launcher's own `confinement=Applied installed=true` attestation.
+fn report_records_confinement_installed(body: &BoundaryReportBody) -> bool {
+    let named = body
+        .observed
+        .iter()
+        .any(|f| f.kind == "filesystem_confined" && f.detail.contains("launcher restrict_self"));
+    let attested = body
+        .observed
+        .iter()
+        .any(|f| f.kind == "launcher_note" && f.detail.contains("installed=true"));
+    let not_under_claimed = !body
+        .observed
+        .iter()
+        .any(|f| f.kind == "confinement_not_installed");
+    named && attested && not_under_claimed
 }
 
 #[test]
 fn g1_landlock_denies_secret_read_outside_declared_root() {
+    if !landlock_available() {
+        skip("g1");
+        return;
+    }
     let scratch = Scratch::new("g1");
     // Declared root: the writable quarantine the workload MAY read+write.
     let root = scratch.path("quarantine");
@@ -175,24 +253,34 @@ fn g1_landlock_denies_secret_read_outside_declared_root() {
     };
     assert!(
         !gt.danger_occurred(),
-        "GROUNDTRUTH: landlock must block the out-of-root secret read; the secret \
-         leaked into the in-root exfil sink on disk"
-    );
-    // Inversion rule: a real denial occurred → the report must record it.
-    assert!(
-        report_records_denial(&body),
-        "report must record the landlock read denial it produced: {:?}",
+        "GROUNDTRUTH: landlock (launcher restrict_self) must block the out-of-root \
+         secret read; the secret leaked into the in-root exfil sink on disk. report:\n{:?}",
         body.observed
     );
+    // Inversion rule: confinement HELD ⇒ no danger to report, and the report must
+    // HONESTLY attest the launcher installed the confinement (not under-claim it).
     assert!(
-        matches!(body.outcome, Outcome::Denied | Outcome::Failed),
-        "a blocked out-of-root read is not a clean Completed: {:?}",
-        body.outcome
+        report_records_confinement_installed(&body),
+        "report must HONESTLY attest the launcher installed the confinement it ran \
+         under: {:?}",
+        body.observed
+    );
+    // The workload exec'd under confinement ⇒ the honest 7b terminal is Completed
+    // (the launcher reports its setup terminal, not the workload's own exit code).
+    assert_eq!(
+        body.outcome,
+        Outcome::Completed,
+        "a confined run that exec'd is an honest Completed: {:?}",
+        body.observed
     );
 }
 
 #[test]
 fn g3_landlock_denies_write_outside_quarantine() {
+    if !landlock_available() {
+        skip("g3");
+        return;
+    }
     let scratch = Scratch::new("g3");
     // Declared WRITE root: the quarantine the workload MAY write into.
     let root = scratch.path("quarantine");
@@ -213,12 +301,13 @@ fn g3_landlock_denies_write_outside_quarantine() {
     };
     assert!(
         !gt.danger_occurred(),
-        "GROUNDTRUTH: landlock must block the out-of-quarantine write; the escape \
-         file exists on disk"
+        "GROUNDTRUTH: landlock (launcher restrict_self) must block the \
+         out-of-quarantine write; the escape file exists on disk. report:\n{:?}",
+        body.observed
     );
     assert!(
-        report_records_denial(&body),
-        "report must record the landlock write denial it produced: {:?}",
+        report_records_confinement_installed(&body),
+        "report must HONESTLY attest the launcher installed the confinement: {:?}",
         body.observed
     );
 }
@@ -228,6 +317,10 @@ fn g3_landlock_denies_write_outside_quarantine() {
 /// (no false positive that would make the deny-tests vacuous).
 #[test]
 fn control_in_root_write_is_allowed_and_completes() {
+    if !landlock_available() {
+        skip("control");
+        return;
+    }
     let scratch = Scratch::new("ctl");
     let root = scratch.path("quarantine");
     std::fs::create_dir_all(&root).expect("quarantine dir");
@@ -245,7 +338,12 @@ fn control_in_root_write_is_allowed_and_completes() {
     let landed = std::fs::read(&inside)
         .map(|b| String::from_utf8_lossy(&b).contains(&marker))
         .unwrap_or(false);
-    assert!(landed, "an in-root write must be allowed through landlock");
+    assert!(
+        landed,
+        "an in-root write must be allowed through landlock (launcher restrict_self). \
+         report:\n{:?}",
+        body.observed
+    );
     assert_eq!(
         body.outcome,
         Outcome::Completed,
@@ -253,8 +351,9 @@ fn control_in_root_write_is_allowed_and_completes() {
         body.observed
     );
     assert!(
-        !report_records_denial(&body),
-        "no denial must be reported for an allowed write"
+        report_records_confinement_installed(&body),
+        "the launcher installed the confinement the allowed write ran under: {:?}",
+        body.observed
     );
 }
 
@@ -272,7 +371,8 @@ fn g3_red_fixture_unconfined_backend_is_caught() {
         "echo {marker} > {escape}",
         escape = escape.to_string_lossy()
     );
-    // The LYING backend: spawn the workload with NO confinement.
+    // The LYING backend: spawn the workload with NO confinement (NOT through the
+    // launcher path — a backend that skipped confinement entirely).
     let _ = std::process::Command::new("/bin/sh")
         .args(["-c", &cmd])
         .output()

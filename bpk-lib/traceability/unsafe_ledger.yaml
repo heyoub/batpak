@@ -28,8 +28,14 @@
 #   safety_invariant:   the invariant the caller upholds to make it sound
 #   requirement:        the RequirementKind the unsafe backs (e.g. "ChildSpawn")
 #
-# STEP (b) part 1 — REAL Linux filesystem confinement (landlock). Two `unsafe`
-# blocks in the Linux basement, both registered below. Budget/seccomp/namespace
+# STEP (b) part 1 — REAL Linux filesystem confinement (landlock). The backend's
+# ONLY remaining filesystem `unsafe` is the live ABI probe below (it backs
+# profile()'s Filesystem=Enforced cell). The landlock ENFORCEMENT (ruleset build +
+# restrict_self) moved to the LAUNCHER child window (launcher/linux/sys.rs); the
+# backend's old self-spawn pre_exec confinement (`spawn_confined`, anchor
+# `linux-landlock-pre-exec-apply`) was REMOVED in the backend→launcher rewire
+# (step 7b) — execute() now drives the launcher harness — so its block + ledger
+# entry are gone (one confinement path, not two). Budget/seccomp/namespace
 # basements remain unimplemented (their profile() cells stay Unsupported), so no
 # further unsafe is registered until those chunks land.
 entries:
@@ -42,22 +48,6 @@ entries:
       user memory, creates no fd, and mutates nothing — it only returns the
       supported ABI integer (>=0) or -1/errno. Sound for any caller state; the
       NULL/0 pair is exactly what the version query requires.
-    requirement: Filesystem
-  - file: crates/bvisor/src/backend/linux/sys.rs
-    anchor: linux-landlock-pre-exec-apply
-    syscall: pre_exec (fork child applies the parent-built landlock ruleset via restrict_self before execve)
-    safety_invariant: >-
-      The pre_exec closure runs in the forked child between fork and exec and is
-      async-signal-safe. The ruleset — including ALL heap allocation, the path-fd
-      opens, and the landlock_create_ruleset/landlock_add_rule syscalls — is built
-      BEFORE the fork by build_ruleset() in the parent; the created ruleset fd is
-      inherited by the child. The post-fork closure therefore performs NO heap
-      allocation and takes no lock: it calls only RulesetCreated::restrict_self(),
-      i.e. prctl(PR_SET_NO_NEW_PRIVS) plus landlock_restrict_self on the inherited
-      fd (both async-signal-safe syscalls). It captures only an owned
-      Option<RulesetCreated> (an owned fd), moves it out via .take() on its single
-      invocation, and on any error returns an io::Error that pre_exec propagates as
-      a FAILED spawn, so the workload never runs unconfined (fail closed).
     requirement: Filesystem
 
   # ── STEP 7a: the HOST-SIDE launcher harness basement (backend→launcher rewire).

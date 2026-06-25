@@ -159,6 +159,12 @@ mod backend_impl;
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub use backend_impl::LinuxBackend;
 
+// HOST-SIDE launcher-plan construction (descriptor table + lowering schedule +
+// authority handles), split out of `backend_impl` to keep each production file under
+// the structural-check size cap. SAFE std (`File::open`) — no OS confinement here.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+mod plan_build;
+
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub(crate) mod sys;
 

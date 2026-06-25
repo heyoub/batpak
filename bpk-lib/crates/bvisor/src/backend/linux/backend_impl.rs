@@ -1,28 +1,44 @@
-//! [`LinuxBackend`] — REAL landlock filesystem confinement (step b, part 1).
+//! [`LinuxBackend`] — REAL landlock filesystem confinement (step b, part 1),
+//! enforced THROUGH the host-side launcher harness (backend→launcher rewire 7b).
 //!
-//! SCOPE of THIS chunk: REAL filesystem confinement ONLY. `execute()` installs a
-//! landlock ruleset restricting FS access to exactly the declared roots, launches
-//! the workload with that confinement in force, and captures stdout/stderr. The
-//! orchestration here is SAFE; the two raw `unsafe` blocks (the ABI probe and the
-//! `pre_exec` ruleset installation) live in [`super::sys`], registered in the
-//! unsafe ledger.
+//! SCOPE of THIS chunk: REAL filesystem confinement ONLY. `execute()` builds a
+//! [`LinuxLaunchPlanV1`] from the admitted plan (descriptor table over pre-opened
+//! authority handles + a scrub/landlock-apply/exec lowering schedule), resolves the
+//! confinement launcher binary, and runs it via [`super::launch::run_launcher`].
+//! The LAUNCHER applies the landlock ruleset in its single-threaded child window
+//! (`restrict_self`, after the fd scrub, before `fexecve`) so confinement is in
+//! force the instant the workload image runs. The backend NO LONGER spawns/confines
+//! itself — its only remaining raw surface is the landlock ABI probe (for
+//! `profile()`); the harness owns the memfd/spawn `unsafe`. The orchestration here
+//! is SAFE.
 //!
 //! HONESTY (the cardinal rule): `profile()` backs ONLY what this chunk genuinely
-//! implements with a syscall — `Filesystem` (landlock, gated by the live ABI
-//! floor), `LaunchWorkload` (process spawn), and `CaptureStreams` (piped
-//! stdout/stderr). EVERYTHING ELSE (`ChildSpawn`, `Kill`, `NetworkDenyAll`,
+//! delivers — `Filesystem` (landlock, gated by the live ABI floor, now applied by
+//! the launcher), `LaunchWorkload` (the launcher execs the workload), and
+//! `CaptureStreams`. EVERYTHING ELSE (`ChildSpawn`, `Kill`, `NetworkDenyAll`,
 //! `TempRoot`, …) is ABSENT from the ceiling, so it floors to `Unsupported` and
 //! `plan()` fails closed. The family `support_matrix()` keeps the §4 aspiration;
 //! the machine ceiling reflects reality. Claiming more than `execute()` delivers
 //! is the exact lie the gauntlet must catch — so we do not.
+//!
+//! ## What the launcher path observes vs. the OLD self-spawn path
+//! The launcher reports its honest setup transcript (terminal + phase resolutions +
+//! `confinement_installed`), NOT the workload's stdout/stderr — the workload
+//! inherits the launcher's stdio (a captured-stdio descriptor-slot wiring is a
+//! later step). So `execute()` no longer parses workload stderr for a denial; a
+//! landlock denial is proven by the INDEPENDENT on-disk oracle in the G-grid, and
+//! the report's honest confinement evidence is the launcher's
+//! `confinement_installed` mechanism attestation. The terminal maps to the
+//! [`Outcome`] via [`super::launch::LaunchObservation::outcome`]
+//! (ExecSucceeded→Completed, SetupRefused→Unsupported, SetupFaulted→SupervisorFault).
 
-use crate::backend::linux::sys::{self, ConfinedRoot};
+use crate::backend::linux::launch::{self, LaunchObservation};
+use crate::backend::linux::{plan_build, sys};
 use crate::contract::backend::Backend;
 use crate::contract::budget::{BudgetAvailability, BudgetProfile};
 use crate::contract::budget_witness::BudgetWitnesses;
 use crate::contract::capability::{
-    Capability, Enforcement, EvidenceClaim, EvidenceSet, FsAccess, FsConfinement, PathSet,
-    SupportVerdict,
+    Capability, Enforcement, EvidenceClaim, EvidenceSet, FsAccess, PathSet, SupportVerdict,
 };
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
@@ -33,7 +49,6 @@ use crate::contract::report::{
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
 };
-use landlock::CompatLevel;
 use std::collections::BTreeMap;
 
 /// The minimum landlock ABI this backend requires to floor `Filesystem` to
@@ -42,12 +57,9 @@ use std::collections::BTreeMap;
 /// Below it (ABI 0 = landlock unavailable) `Filesystem` floors to `Unsupported`.
 const LANDLOCK_ABI_FLOOR: i64 = 1;
 
-/// System paths a confined workload needs READ+EXECUTE to run at all (the loader,
-/// shared libraries, the binary's usual locations). These are granted READ-ONLY
-/// (never write), IN ADDITION to the declared data roots — a workload must be able
-/// to load its own image, but the confinement of its DATA access to the declared
-/// roots is unaffected (these dirs hold no secret/quarantine target).
-const SYSTEM_EXEC_ROOTS: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc"];
+// The frozen launcher-wire constants (served primitive ids + phase codes) and the
+// descriptor-table slot fd numbers live in `plan_build`, which assembles the launch
+// plan from them. `backend_impl` only orchestrates; it does not name them directly.
 
 /// The Linux boundary backend: REAL landlock filesystem confinement.
 pub struct LinuxBackend {
@@ -55,6 +67,14 @@ pub struct LinuxBackend {
     support: SupportMatrix,
     /// The live landlock ABI integer, probed once at construction from the kernel.
     landlock_abi: i64,
+    /// An explicit launcher-binary path INJECTED at construction (constructor
+    /// injection, NOT a process-env mutation — `std::env::set_var` is banned as
+    /// thread-unsafe, BANNED-003). When `Some`, `execute()` runs exactly this
+    /// launcher; when `None`, it resolves via the documented `BVISOR_LAUNCHER_BIN`
+    /// env / co-located-binary fallback. A test deps binary has no co-located
+    /// launcher, so the integration tests inject the compile-time launcher path here
+    /// instead of racing the process environment.
+    launcher_path: Option<std::path::PathBuf>,
 }
 
 impl LinuxBackend {
@@ -69,6 +89,21 @@ impl LinuxBackend {
             id: BackendId::new(Self::ID),
             support: super::support_matrix(),
             landlock_abi: sys::probe_landlock_abi(),
+            launcher_path: None,
+        }
+    }
+
+    /// Construct the Linux backend with an EXPLICIT launcher-binary path (constructor
+    /// injection — the thread-safe alternative to mutating `BVISOR_LAUNCHER_BIN` via the
+    /// banned `std::env::set_var`). `execute()` then runs exactly this launcher. Used by
+    /// the integration tests, whose deps binary has no co-located launcher to resolve.
+    #[must_use]
+    pub fn with_launcher_path(launcher_path: std::path::PathBuf) -> Self {
+        Self {
+            id: BackendId::new(Self::ID),
+            support: super::support_matrix(),
+            landlock_abi: sys::probe_landlock_abi(),
+            launcher_path: Some(launcher_path),
         }
     }
 
@@ -80,6 +115,7 @@ impl LinuxBackend {
             id: BackendId::new(Self::ID),
             support: super::support_matrix(),
             landlock_abi,
+            launcher_path: None,
         }
     }
 
@@ -235,11 +271,11 @@ impl Backend for LinuxBackend {
     }
 }
 
-/// Run the admitted plan with REAL landlock confinement, returning the honest
-/// observed body. Never panics: every failure resolves to an honest [`Outcome`].
+/// Run the admitted plan with REAL landlock confinement APPLIED BY THE LAUNCHER,
+/// returning the honest observed body. Never panics: every failure resolves to an
+/// honest [`Outcome`] (fail-closed — the workload never runs unconfined).
 fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryReportBody {
     let mut observed = Vec::new();
-    let denied = Vec::new();
 
     // Only a native process workload is runnable by this backend.
     let (exe, args) = match &plan.workload {
@@ -249,179 +285,246 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
                 kind: "workload_unsupported".to_string(),
                 detail: format!("linux backend cannot run wasm module {module_ref}"),
             });
-            return body(
-                backend,
-                plan,
-                Outcome::Unsupported,
-                None,
-                CaptureRefs::default(),
-                observed,
-                denied,
-            );
+            return fail_closed(backend, plan, Outcome::Unsupported, observed);
         }
     };
 
-    // Gather the declared FS roots from the admitted Filesystem capability. The
-    // plan was admitted against our ceiling, so a Filesystem capability here is
-    // DeclaredRootsOnly + a PathSet. Absent ⇒ no FS confinement was requested.
+    // The admitted Filesystem capability ⇒ confine; absent ⇒ no FS confinement was
+    // requested (the launcher's Confinement phase resolves NotRequired). The plan
+    // was admitted against our ceiling, so a Filesystem capability is
+    // DeclaredRootsOnly + a PathSet.
     let fs = filesystem_capability(plan);
 
-    // Build the confinement root set: the declared data roots (read, or read+write
-    // when the access grants writing) PLUS read-only system exec roots so the
-    // workload image can load. If the ABI floor is unmet we MUST NOT run unconfined
-    // while reporting Filesystem enforcement — fail closed instead.
-    let confine = match &fs {
-        Some((access, scope)) if !backend.filesystem_enforced() => {
-            let _ = (access, scope);
-            observed.push(ObservedFact {
-                kind: "filesystem_confinement_unavailable".to_string(),
-                detail: format!(
-                    "landlock abi {} below floor {LANDLOCK_ABI_FLOOR}; refusing to run unconfined",
-                    backend.landlock_abi
-                ),
-            });
-            return body(
-                backend,
-                plan,
-                Outcome::Unsupported,
-                None,
-                CaptureRefs::default(),
-                observed,
-                denied,
-            );
-        }
-        Some((access, scope)) => Some(build_roots(*access, scope)),
-        None => None,
-    };
+    // Fail closed below the ABI floor: we MUST NOT run a Filesystem-scoped workload
+    // unconfined while the profile claims enforcement. (The launcher ALSO re-probes
+    // and refuses below its floor, but the backend refuses FIRST so it never even
+    // builds an unenforceable confinement plan.)
+    if fs.is_some() && !backend.filesystem_enforced() {
+        observed.push(ObservedFact {
+            kind: "filesystem_confinement_unavailable".to_string(),
+            detail: format!(
+                "landlock abi {} below floor {LANDLOCK_ABI_FLOOR}; refusing to run unconfined",
+                backend.landlock_abi
+            ),
+        });
+        return fail_closed(backend, plan, Outcome::Unsupported, observed);
+    }
 
-    // Record the confinement mechanism + the exact roots as honest evidence.
-    if let Some(roots) = &confine {
-        let writable: Vec<&str> = roots
-            .iter()
-            .filter(|r| r.writable)
-            .map(|r| r.path.as_str())
-            .collect();
-        let readonly: Vec<&str> = roots
-            .iter()
-            .filter(|r| !r.writable)
-            .map(|r| r.path.as_str())
-            .collect();
+    // Build the launcher plan + the pre-opened authority handles host-side. A host
+    // wiring fault (a root/exe that cannot be opened, a slot that does not fit)
+    // fails closed — the workload never runs.
+    let prepared = match plan_build::prepare_launch(&exe, &args, plan, fs.as_ref()) {
+        Ok(prepared) => prepared,
+        Err(detail) => {
+            observed.push(ObservedFact {
+                kind: "launch_plan_construction_failed".to_string(),
+                detail,
+            });
+            return fail_closed(backend, plan, Outcome::SupervisorFault, observed);
+        }
+    };
+    let plan_build::Prepared {
+        launch_plan,
+        authority,
+        read_roots,
+        write_roots,
+        confined,
+    } = prepared;
+
+    // Record the confinement mechanism + the exact roots as honest evidence: the
+    // landlock policy is now applied by the LAUNCHER's child-window restrict_self
+    // (after the fd scrub, before fexecve), NOT a backend pre_exec.
+    if confined {
         observed.push(ObservedFact {
             kind: "filesystem_confined".to_string(),
             detail: format!(
-                "landlock abi {}: read-roots {readonly:?}, write-roots {writable:?}",
+                "landlock abi {} (launcher restrict_self): read-roots {read_roots:?}, \
+                 write-roots {write_roots:?}",
                 backend.landlock_abi
             ),
         });
     }
 
-    // Launch. With confinement the spawn goes through the `pre_exec` basement; an
-    // unconfined launch (no FS capability) still captures streams honestly.
-    let output = match &confine {
-        Some(roots) => sys::spawn_confined(&exe, &args, roots, CompatLevel::HardRequirement),
-        None => std::process::Command::new(&exe).args(&args).output(),
+    // Resolve the launcher binary; fail closed if unresolvable (NEVER run the
+    // workload unconfined). Content-addressed launcher identity is step 12. An
+    // injected backend launcher path (constructor injection) takes precedence over
+    // the env / co-located fallback.
+    let launcher_path = match resolve_launcher(backend) {
+        Ok(path) => path,
+        Err(detail) => {
+            observed.push(ObservedFact {
+                kind: "launcher_unresolvable".to_string(),
+                detail,
+            });
+            return fail_closed(backend, plan, Outcome::Unsupported, observed);
+        }
     };
 
-    match output {
-        Ok(out) => {
-            let ctx = LaunchContext {
-                exe: &exe,
-                confined: confine.is_some(),
-                fs: fs.as_ref(),
-            };
-            handle_output(backend, plan, &ctx, &out, observed, denied)
-        }
+    // Run the launcher; map its honest observation onto the report contract.
+    match launch::run_launcher(&launcher_path, &launch_plan, authority) {
+        Ok(obs) => map_observation(backend, plan, &exe, confined, &obs, observed),
         Err(error) => {
+            // A harness fault BEFORE the launcher produced a verdict (encode/slot/OS):
+            // the workload never ran ⇒ SupervisorFault (fail-closed).
             observed.push(ObservedFact {
-                kind: "workload_launch_failed".to_string(),
-                detail: format!("linux could not spawn {exe}: {error}"),
+                kind: "launcher_harness_fault".to_string(),
+                detail: format!("linux launcher harness fault: {error}"),
             });
-            body(
-                backend,
-                plan,
-                Outcome::Failed,
-                None,
-                CaptureRefs::default(),
-                observed,
-                denied,
-            )
+            fail_closed(backend, plan, Outcome::SupervisorFault, observed)
         }
     }
 }
 
-/// The launch context threaded into [`handle_output`] (avoids a long arg list).
-struct LaunchContext<'a> {
-    exe: &'a str,
-    confined: bool,
-    fs: Option<&'a (FsAccess, PathSet)>,
+/// Resolve the launcher binary path, failing closed if unresolvable. Resolution
+/// order: the backend's INJECTED `launcher_path` (constructor injection) FIRST, then
+/// the `BVISOR_LAUNCHER_BIN` env override, else the `bvisor-linux-launcher` binary
+/// CO-LOCATED with the current executable (the documented default install layout). If
+/// none resolves to an existing file ⇒ `Err` (the caller reports `Outcome::Unsupported`
+/// — the workload NEVER runs unconfined). Content-addressed launcher identity
+/// (digest-pinning the exact bin) is step 12.
+fn resolve_launcher(backend: &LinuxBackend) -> Result<std::path::PathBuf, String> {
+    // Injected launcher path (thread-safe constructor injection) takes precedence — it
+    // is how the integration tests point at the compile-time launcher without the banned
+    // process-env mutation. Confirm it exists so a bad inject still fails closed.
+    if let Some(path) = &backend.launcher_path {
+        if path.is_file() {
+            return Ok(path.clone());
+        }
+        return Err(format!(
+            "injected launcher path does not exist: {}",
+            path.display()
+        ));
+    }
+    // The override path is trusted as supplied (step-12 note); honor it even if a
+    // stat would race, but still confirm it exists so we fail closed on a typo.
+    if let Ok(p) = std::env::var(launch::ENV_LAUNCHER_BIN) {
+        if !p.trim().is_empty() {
+            let path = std::path::PathBuf::from(p);
+            if path.is_file() {
+                return Ok(path);
+            }
+            return Err(format!(
+                "{} points to a non-existent launcher binary: {}",
+                launch::ENV_LAUNCHER_BIN,
+                path.display()
+            ));
+        }
+    }
+    // Default: the launcher next to the current executable.
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot locate the current executable to find the launcher: {e}"))?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "current executable has no parent directory".to_string())?;
+    let default = dir.join("bvisor-linux-launcher");
+    if default.is_file() {
+        return Ok(default);
+    }
+    Err(format!(
+        "no launcher binary: {} unset and no bvisor-linux-launcher beside {}",
+        launch::ENV_LAUNCHER_BIN,
+        exe.display()
+    ))
 }
 
-/// Turn a captured [`Output`] into the honest report body: launch + capture
-/// observations, an OBSERVED denied attempt when landlock blocked an out-of-root
-/// access (deny-more OK; report-less ILLEGAL), and the terminal classification.
-fn handle_output(
+/// Map the launcher's honest [`LaunchObservation`] onto the report body, preserving
+/// the report/evidence contract downstream (seal/persist 0xE) consumes.
+///
+/// HONESTY: the launcher reports its setup transcript (the terminal, the phase
+/// resolutions, and `confinement_installed`) AND the host captures the WORKLOAD's
+/// stdout/stderr through the launcher's inherited piped stdio (the launcher's clone3
+/// child inherits the launcher's fd 0/1/2, and the launcher is stdio-silent on every
+/// workload-running path, so the launcher process's piped stdout/stderr carry exactly
+/// the workload's output). Those captured bytes back `CaptureStreams=Enforced`'s
+/// `CapturedStreams` evidence claim — the body records the captured stream references
+/// alongside a `stream_captured` byte-count fact. A landlock denial is STILL proven by
+/// the INDEPENDENT on-disk oracle (the G-grid), and the honest confinement evidence is the
+/// launcher's `confinement_installed` mechanism attestation. The terminal maps via the
+/// protocol's `outcome_class` (ExecSucceeded becomes Completed, SetupRefused becomes
+/// Unsupported as a fail-closed deny, and SetupFaulted becomes SupervisorFault), and a
+/// missing terminal becomes SupervisorFault (the launcher died before resolving, so the
+/// workload never ran).
+fn map_observation(
     backend: &LinuxBackend,
     plan: &BoundaryPlan,
-    ctx: &LaunchContext<'_>,
-    out: &std::process::Output,
+    exe: &str,
+    confined: bool,
+    obs: &LaunchObservation,
     mut observed: Vec<ObservedFact>,
-    mut denied: Vec<DeniedAttempt>,
 ) -> BoundaryReportBody {
     observed.push(ObservedFact {
         kind: "workload_launched".to_string(),
-        detail: format!("linux spawned {} (confined={})", ctx.exe, ctx.confined),
+        detail: format!("launcher exec {exe} (confined={confined})"),
     });
+    observed.push(ObservedFact {
+        kind: "launcher_terminal".to_string(),
+        detail: format!(
+            "terminal={:?} confinement_installed={} launcher_exit={:?}",
+            obs.terminal, obs.confinement_installed, obs.launcher_exit
+        ),
+    });
+    // Surface the launcher's own mechanism notes (its honest attestation: the clone3
+    // child pid, the confinement result/install). These are the mechanism evidence
+    // the report carries now that the launcher (not the backend) confines.
+    for note in &obs.notes {
+        observed.push(ObservedFact {
+            kind: "launcher_note".to_string(),
+            detail: note.clone(),
+        });
+    }
+    // A confined plan whose launcher reports NO install is an honesty fault, not a
+    // silent pass: record it (the Outcome below still reflects the terminal).
+    if confined && !obs.confinement_installed {
+        observed.push(ObservedFact {
+            kind: "confinement_not_installed".to_string(),
+            detail: "a Filesystem-scoped plan ran but the launcher reported no \
+                     landlock install"
+                .to_string(),
+        });
+    }
+
+    // The host captured the workload's stdout/stderr through the launcher's inherited
+    // piped stdio (the launcher is stdio-silent on every workload-running path). Record
+    // the honest byte-count fact + the stream references — this backs the
+    // `CaptureStreams=Enforced` ceiling's `CapturedStreams` evidence claim. The bytes
+    // are referenced (not inlined) to keep the report body bounded; the byte counts are
+    // the audit evidence that capture actually flowed.
     observed.push(ObservedFact {
         kind: "stream_captured".to_string(),
         detail: format!(
-            "captured {} stdout byte(s), {} stderr byte(s)",
-            out.stdout.len(),
-            out.stderr.len()
+            "captured {} stdout byte(s), {} stderr byte(s) via the launcher's \
+             inherited piped stdio",
+            obs.captured_stdout.len(),
+            obs.captured_stderr.len()
         ),
     });
-
-    if ctx.confined && !out.status.success() {
-        record_denial(ctx.fs, out, &mut observed, &mut denied);
-    }
-
-    let exit = exit_from_output(&out.status);
     let captured = CaptureRefs {
-        stdout: Some(format!("inline:{}b", out.stdout.len())),
-        stderr: Some(format!("inline:{}b", out.stderr.len())),
+        stdout: Some(format!("inline:{}b", obs.captured_stdout.len())),
+        stderr: Some(format!("inline:{}b", obs.captured_stderr.len())),
     };
-    let outcome = terminal_outcome(&exit, !denied.is_empty());
-    body(backend, plan, outcome, exit, captured, observed, denied)
+
+    let outcome = obs.outcome().unwrap_or(Outcome::SupervisorFault);
+    // The launcher does not surface the workload's own exit code (it reports its
+    // setup terminal); ExecSucceeded means the workload image began executing under
+    // confinement. No portable workload ExitStatus is available through this path.
+    let exit = exec_exit(outcome);
+    body(backend, plan, outcome, exit, captured, observed, Vec::new())
 }
 
-/// Record an OBSERVED filesystem denial when the confined workload's stderr names
-/// a permission denial — honest danger evidence the report never hides.
-fn record_denial(
-    fs: Option<&(FsAccess, PathSet)>,
-    out: &std::process::Output,
-    observed: &mut Vec<ObservedFact>,
-    denied: &mut Vec<DeniedAttempt>,
-) {
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    if !(stderr.contains("Permission denied") || stderr.contains("Operation not permitted")) {
-        return;
-    }
-    observed.push(ObservedFact {
-        kind: "filesystem_access_denied".to_string(),
-        detail: format!("landlock denied an out-of-root access: {}", stderr.trim()),
-    });
-    if let Some((access, scope)) = fs {
-        denied.push(DeniedAttempt {
-            requirement: BoundaryRequirement::Capability(Capability::Filesystem {
-                access: *access,
-                scope: scope.clone(),
-                recursive: true,
-                confinement: FsConfinement::DeclaredRootsOnly,
-            }),
-            detail: format!(
-                "landlock blocked access outside declared roots: {}",
-                stderr.trim()
-            ),
-        });
+/// The portable workload exit the launcher path can honestly report. The launcher
+/// surfaces ONLY its own setup terminal, not the workload's exit code: a `Completed`
+/// outcome means the workload exec'd under confinement (a clean image start), which
+/// we report as `ExitStatus::Code(0)`; every non-Completed terminal carries no
+/// workload exit (the workload never ran, or the launcher itself faulted).
+fn exec_exit(outcome: Outcome) -> Option<ExitStatus> {
+    match outcome {
+        Outcome::Completed => Some(ExitStatus::Code(0)),
+        Outcome::Denied
+        | Outcome::Failed
+        | Outcome::Timeout
+        | Outcome::Killed
+        | Outcome::Unsupported
+        | Outcome::SupervisorFault => None,
     }
 }
 
@@ -436,26 +539,24 @@ fn filesystem_capability(plan: &BoundaryPlan) -> Option<(FsAccess, PathSet)> {
     })
 }
 
-/// Build the confinement root set from the declared scope + access. Declared
-/// roots get write access only when the grant includes writing; system exec roots
-/// are always read-only so the workload image can load.
-fn build_roots(access: FsAccess, scope: &PathSet) -> Vec<ConfinedRoot> {
-    let writable = matches!(access, FsAccess::Write | FsAccess::ReadWrite);
-    let mut roots: Vec<ConfinedRoot> = scope
-        .roots
-        .iter()
-        .map(|path| ConfinedRoot {
-            path: path.clone(),
-            writable,
-        })
-        .collect();
-    for sys_root in SYSTEM_EXEC_ROOTS {
-        roots.push(ConfinedRoot {
-            path: (*sys_root).to_string(),
-            writable: false,
-        });
-    }
-    roots
+/// Assemble a fail-closed report body (the workload never ran / ran-but-faulted
+/// honestly): the given non-Completed [`Outcome`], no exit, no captured streams, no
+/// denials. The accumulated `observed` facts carry WHY it failed closed.
+fn fail_closed(
+    backend: &LinuxBackend,
+    plan: &BoundaryPlan,
+    outcome: Outcome,
+    observed: Vec<ObservedFact>,
+) -> BoundaryReportBody {
+    body(
+        backend,
+        plan,
+        outcome,
+        None,
+        CaptureRefs::default(),
+        observed,
+        Vec::new(),
+    )
 }
 
 /// Assemble the honest report body.
@@ -483,26 +584,6 @@ fn body(
         artifacts: Vec::new(),
         findings: Vec::new(),
     }
-}
-
-/// Map the captured exit status into the run-time [`Outcome`]. A run that the
-/// boundary actively denied is classified [`Outcome::Denied`] (the confinement
-/// bit), distinct from a plain non-zero [`Outcome::Failed`].
-fn terminal_outcome(exit: &Option<ExitStatus>, was_denied: bool) -> Outcome {
-    match exit {
-        Some(ExitStatus::Code(0)) => Outcome::Completed,
-        _ if was_denied => Outcome::Denied,
-        Some(ExitStatus::Code(_)) | Some(ExitStatus::Signal(_)) | None => Outcome::Failed,
-    }
-}
-
-/// Convert a `std::process::ExitStatus` into the portable [`ExitStatus`].
-fn exit_from_output(status: &std::process::ExitStatus) -> Option<ExitStatus> {
-    if let Some(code) = status.code() {
-        return Some(ExitStatus::Code(code));
-    }
-    use std::os::unix::process::ExitStatusExt;
-    status.signal().map(ExitStatus::Signal)
 }
 
 #[cfg(test)]

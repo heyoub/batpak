@@ -131,6 +131,16 @@ pub struct LaunchObservation {
     pub confinement_installed: bool,
     /// The launcher process's exit status (its own exit code, NOT the workload's).
     pub launcher_exit: std::process::ExitStatus,
+    /// The WORKLOAD's captured stdout bytes. The launcher's clone3 child inherits the
+    /// launcher's fd 1 (the scrub allowlists stdio), and the launcher is stdio-silent on
+    /// every path where a workload runs, so the launcher process's own piped stdout
+    /// carries ONLY the workload's output — the host reads it here. This is the honest
+    /// backing for `CaptureStreams=Enforced` the backend→launcher cutover must restore.
+    pub captured_stdout: Vec<u8>,
+    /// The WORKLOAD's captured stderr bytes (same mechanism as [`Self::captured_stdout`]
+    /// over the launcher's inherited fd 2). The launcher writes NO diagnostics to its own
+    /// stderr on any workload-running path, so this carries only the workload's stderr.
+    pub captured_stderr: Vec<u8>,
 }
 
 impl LaunchObservation {
@@ -258,13 +268,18 @@ pub fn run_launcher(
 
     // 5. Spawn the launcher (basement, ledgered pre_exec). The relocated source fds come
     //    back so the parent can drop them AFTER spawn (the child holds its own copies).
+    //    The launcher's own stdout/stderr are piped (set in `spawn_launcher_with_fds`) so
+    //    the host captures the WORKLOAD's inherited stdout/stderr here.
     let (mut child, relocated) = sys::spawn_launcher_with_fds(launcher_path, &env, fds)?;
     // Drop the parent's copies of every launcher-side fd so the launcher solely owns its
     // channels (the error read end then reaches EOF when the child's fexecve closes the
     // child write copy). `control_host` is intentionally KEPT (the host reads it).
     drop(relocated);
 
-    // 6. Drain the control transcript to EOF, then wait the launcher.
+    // 6. Take the piped stdout/stderr handles BEFORE wait (so the child still owns the
+    //    write ends), drain the control transcript to EOF, then wait the launcher.
+    let mut launcher_stdout = child.stdout.take();
+    let mut launcher_stderr = child.stderr.take();
     let mut transcript_text = String::new();
     {
         let mut control = control_host;
@@ -272,13 +287,52 @@ pub fn run_launcher(
     }
     let launcher_exit = child.wait()?;
 
-    Ok(parse_observation(&transcript_text, launcher_exit))
+    // 7. READ-AFTER-EXIT capture of the workload's inherited stdout/stderr. The launcher
+    //    (and its workload child) have terminated, so the pipe write ends are closed and
+    //    these reads see clean EOF without deadlock for the small workloads here.
+    //
+    //    LARGE-OUTPUT CAVEAT / FOLLOW-UP: reading AFTER wait can DEADLOCK if a workload
+    //    floods a pipe past its kernel buffer before the host drains it (the workload
+    //    blocks on a full pipe, never exits, so `wait` above never returns). The control
+    //    transcript is drained concurrently with the run, but stdout/stderr are not. The
+    //    workloads driven through this path today are small (sh one-liners), so
+    //    read-after-exit is sufficient; a CONCURRENT-DRAIN / bounded-capture rework
+    //    (drain stdout+stderr on threads or via poll while the launcher runs) is the
+    //    follow-up before any large-output workload uses this path. We do NOT silently
+    //    cap the capture — we read it all.
+    let captured_stdout = read_pipe_to_end(launcher_stdout.as_mut())?;
+    let captured_stderr = read_pipe_to_end(launcher_stderr.as_mut())?;
+
+    Ok(parse_observation(
+        &transcript_text,
+        launcher_exit,
+        captured_stdout,
+        captured_stderr,
+    ))
+}
+
+/// Read a piped child stream fully to EOF, returning the captured bytes. `None` (the
+/// stream handle was not present) yields empty bytes — never a fault. Generic over the
+/// concrete pipe type so the same drain serves both `ChildStdout` and `ChildStderr`.
+fn read_pipe_to_end<R: Read>(stream: Option<&mut R>) -> Result<Vec<u8>, HarnessError> {
+    let mut buf = Vec::new();
+    if let Some(s) = stream {
+        s.read_to_end(&mut buf)?;
+    }
+    Ok(buf)
 }
 
 /// Parse the launcher's newline-delimited transcript into a structured observation.
 /// State lines are the `LauncherState` `Debug` names the launcher emits; note lines are
-/// prefixed `# `. The terminal is the last recognised state line.
-fn parse_observation(text: &str, launcher_exit: std::process::ExitStatus) -> LaunchObservation {
+/// prefixed `# `. The terminal is the last recognised state line. The captured workload
+/// `stdout`/`stderr` (read from the launcher's piped stdio) ride into the observation
+/// unchanged — they are the workload's output, NOT part of the control transcript.
+fn parse_observation(
+    text: &str,
+    launcher_exit: std::process::ExitStatus,
+    captured_stdout: Vec<u8>,
+    captured_stderr: Vec<u8>,
+) -> LaunchObservation {
     let mut transcript: Vec<LauncherState> = Vec::new();
     let mut notes: Vec<String> = Vec::new();
     let mut installed = false;
@@ -300,6 +354,8 @@ fn parse_observation(text: &str, launcher_exit: std::process::ExitStatus) -> Lau
         notes,
         confinement_installed: installed,
         launcher_exit,
+        captured_stdout,
+        captured_stderr,
     }
 }
 

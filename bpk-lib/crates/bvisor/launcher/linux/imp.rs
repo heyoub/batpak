@@ -111,8 +111,16 @@ enum Verdict {
 
 /// Run the coordinator. Establishes the control channel, drives the validate→decide→
 /// (maybe) clone3→wait sequence, emits the transcript, and maps the terminal to an
-/// exit code. A boot fault BEFORE the control channel exists is reported to stderr
-/// (via `Write`, not the denied print macros) and exits non-zero.
+/// exit code.
+///
+/// STDIO-SILENCE CONTRACT (host capture honesty): the launcher writes ALL diagnostics
+/// to the CONTROL fd transcript — it NEVER writes to its own stdout/stderr on any path
+/// where the workload runs. The launcher's child inherits the launcher's fd 0/1/2 (the
+/// scrub allowlists stdio), so the host captures the launcher's piped stdout/stderr AS
+/// the workload's output; a launcher diagnostic on stderr would corrupt that capture.
+/// The SOLE exception is a pre-control [`BootError::NoControlChannel`] boot fault: no
+/// control fd exists yet to carry the diagnostic AND no workload runs in that case, so
+/// the one-line `boot_fault` stderr write cannot contaminate any workload capture.
 pub(crate) fn run() -> std::process::ExitCode {
     // The control channel must exist before ANY transcript can be emitted.
     let control_fd = match fd_from_env(ENV_CONTROL_FD) {
@@ -123,11 +131,12 @@ pub(crate) fn run() -> std::process::ExitCode {
 
     match drive(&mut control) {
         Ok(Verdict::ExecSucceeded) => std::process::ExitCode::SUCCESS,
-        Ok(Verdict::Refused(reason)) => {
-            // The reason was already noted on the wire by `refuse`; record it on the
-            // boot sink too so a refusal is diagnosable even without the control fd.
-            let mut sink = std::io::stderr();
-            let _ = writeln!(sink, "bvisor-linux-launcher: SetupRefused {reason:?}");
+        Ok(Verdict::Refused(_reason)) => {
+            // The refusal reason is ALREADY on the control-fd transcript (via `refuse`).
+            // We deliberately write NOTHING to stderr here: the workload inherits the
+            // launcher's stdio, so any stderr diagnostic would contaminate the host's
+            // workload-stream capture. The exit code (3) plus the control transcript
+            // carry the refusal honestly. (See the run() stdio-silence contract.)
             std::process::ExitCode::from(3)
         }
         Ok(Verdict::Faulted) => std::process::ExitCode::from(4),
@@ -760,7 +769,11 @@ impl Transcript {
 }
 
 /// Report a boot fault that happened BEFORE a control channel existed: write a typed
-/// line to stderr (via `Write`, not the denied `eprintln!`) and exit non-zero.
+/// line to stderr (via `Write`, not the denied `eprintln!`) and exit non-zero. This is
+/// the SOLE path on which the launcher writes to its own stderr — and only because no
+/// control fd exists yet to carry the diagnostic AND no workload runs in this case, so
+/// the write cannot contaminate the host's workload-stream capture (see the run()
+/// stdio-silence contract).
 fn boot_fault(err: &BootError) -> std::process::ExitCode {
     let mut sink = std::io::stderr();
     let _ = writeln!(sink, "bvisor-linux-launcher: {err}");
