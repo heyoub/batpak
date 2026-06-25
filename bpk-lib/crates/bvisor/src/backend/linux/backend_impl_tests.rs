@@ -71,8 +71,9 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
     let profile = backend.profile(&backend.probe());
     for kind in [
         RequirementKind::NetworkDenyAll,
-        RequirementKind::ChildSpawnDeny,
-        RequirementKind::ChildSpawnAllow,
+        RequirementKind::ChildSpawnDenyNewTasks,
+        RequirementKind::ChildSpawnAllowThreads,
+        RequirementKind::ChildSpawnAllowDescendants,
         RequirementKind::TempRoot,
         // InheritedFds::None is now Enforced (proof-spine S5) — see the dedicated test.
         // InheritedFds::Only STAYS backed out: the scrub realizes only `None`.

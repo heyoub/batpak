@@ -85,11 +85,8 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::DeniedAttempts],
     );
 
-    // InheritedFds: a wasm guest inherits NO host file descriptors by
-    // construction (it sees only the WASI preopens it was explicitly granted), so
-    // `None` is STRUCTURALLY Enforced. `Only` (selectively passing arbitrary host
-    // fds into the guest) has no WASI mechanism — UNSUPPORTED. Both stated
-    // EXPLICITLY so the per-profile completeness gate sees an answer for every key.
+    // InheritedFds: a wasm guest inherits NO host fds (only its WASI preopens), so
+    // `None` is structurally Enforced; `Only` has no WASI mechanism — Unsupported.
     insert(
         &mut best,
         RequirementKind::InheritedFdsNone,
@@ -105,15 +102,23 @@ pub fn support_matrix() -> SupportMatrix {
 
     // STRUCTURALLY UNSUPPORTED — no native fork/kill/mount in a wasm guest, no
     // allow-list broker. Listed explicitly so the honesty is a stated answer.
+    // The three FROZEN S6 child-task semantics: all structurally UNSUPPORTED — a wasm
+    // guest has no native fork/thread-spawn. Stated explicitly per key.
     insert(
         &mut best,
-        RequirementKind::ChildSpawnDeny,
+        RequirementKind::ChildSpawnDenyNewTasks,
         Enforcement::Unsupported,
         &[],
     );
     insert(
         &mut best,
-        RequirementKind::ChildSpawnAllow,
+        RequirementKind::ChildSpawnAllowThreads,
+        Enforcement::Unsupported,
+        &[],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllowDescendants,
         Enforcement::Unsupported,
         &[],
     );
@@ -169,8 +174,9 @@ mod tests {
         // SCOPE §4 load-bearing honest cells: no native fork/kill/mount/broker.
         let m = support_matrix();
         for kind in [
-            RequirementKind::ChildSpawnDeny,
-            RequirementKind::ChildSpawnAllow,
+            RequirementKind::ChildSpawnDenyNewTasks,
+            RequirementKind::ChildSpawnAllowThreads,
+            RequirementKind::ChildSpawnAllowDescendants,
             RequirementKind::Kill,
             RequirementKind::ExposePath,
             RequirementKind::NetworkAllowList,

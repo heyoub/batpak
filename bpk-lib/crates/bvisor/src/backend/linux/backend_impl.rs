@@ -414,8 +414,9 @@ impl Backend for LinuxBackend {
             RequirementKind::InheritedFdsNone => "fd_scrub",
             RequirementKind::NetworkDenyAll
             | RequirementKind::NetworkAllowList
-            | RequirementKind::ChildSpawnDeny
-            | RequirementKind::ChildSpawnAllow
+            | RequirementKind::ChildSpawnDenyNewTasks
+            | RequirementKind::ChildSpawnAllowThreads
+            | RequirementKind::ChildSpawnAllowDescendants
             | RequirementKind::InheritedFdsOnly
             | RequirementKind::TempRoot
             | RequirementKind::ExposePath

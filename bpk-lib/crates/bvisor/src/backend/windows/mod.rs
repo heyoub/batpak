@@ -36,7 +36,6 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::CapturedStreams],
     );
 
-    // FS via AppContainer capability SIDs + DACLs.
     insert(
         &mut best,
         RequirementKind::Filesystem,
@@ -49,14 +48,13 @@ pub fn support_matrix() -> SupportMatrix {
         ],
     );
 
-    // Deny-all net: AppContainer with no network capability SID.
+    // Network: deny-all Enforced (no net capability SID); allow-list Mediated (WFP).
     insert(
         &mut best,
         RequirementKind::NetworkDenyAll,
         Enforcement::Enforced,
         &[EvidenceClaim::DeniedAttempts],
     );
-    // NetworkAllowList: MEDIATED via WFP (per-attempt filter, not structural).
     insert(
         &mut best,
         RequirementKind::NetworkAllowList,
@@ -67,15 +65,24 @@ pub fn support_matrix() -> SupportMatrix {
         ],
     );
 
+    // The three FROZEN S6 child-task semantics via Job Objects: DenyNewTasks +
+    // AllowDescendants=Enforced (process limit / job inheritance); AllowThreads=
+    // Unsupported (no demonstrated threads-within-boundary mechanism).
     insert(
         &mut best,
-        RequirementKind::ChildSpawnDeny,
+        RequirementKind::ChildSpawnDenyNewTasks,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
     insert(
         &mut best,
-        RequirementKind::ChildSpawnAllow,
+        RequirementKind::ChildSpawnAllowThreads,
+        Enforcement::Unsupported,
+        &[],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllowDescendants,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
@@ -104,8 +111,8 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::MechanismAttestation],
     );
 
-    // ExposePath(Mount): MEDIATED — no first-class bind mount; symlink/junction
-    // shim only, and it cannot deliver a private-to-boundary view. Honest cell.
+    // ExposePath(Mount): MEDIATED — symlink/junction shim only (no bind mount,
+    // no private-to-boundary view). Honest cell.
     insert(
         &mut best,
         RequirementKind::ExposePath,
@@ -132,7 +139,6 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::ArtifactLineage],
     );
 
-    // Kill: Job Object Terminate = atomic subtree teardown.
     insert(
         &mut best,
         RequirementKind::Kill,

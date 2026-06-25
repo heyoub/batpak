@@ -206,7 +206,7 @@ fn dangerous_spec() -> BoundarySpec {
                 policy: NetPolicy::DenyAll,
             },
             Capability::ChildSpawn {
-                policy: SpawnPolicy::Deny,
+                policy: SpawnPolicy::DenyNewTasks,
             },
             Capability::Environment {
                 policy: EnvPolicy::Exact(Vec::new()),

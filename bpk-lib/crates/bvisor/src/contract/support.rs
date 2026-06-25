@@ -98,7 +98,7 @@ impl SupportMatrix {
 /// [`crate::contract::canonical_policy::CanonicalPolicy`] ⇒ distinct key), so each
 /// capability variant that carries a distinct policy gets its OWN key
 /// (`Network { DenyAll }` vs `Network { AllowList }`, `InheritedFds { None }` vs
-/// `{ Only }`, `ChildSpawn { Deny }` vs `{ Allow }`). A future backend could
+/// `{ Only }`, the three `ChildSpawn` child-task semantics). A future backend could
 /// differentiate cells we currently lower identically, so we never pre-collapse
 /// them. `Environment` carries a single policy variant (`Exact`), so it is one key
 /// (the per-entry name/value/source detail rides the canonical-policy PAYLOAD, not
@@ -112,10 +112,12 @@ pub enum RequirementKind {
     NetworkDenyAll,
     /// [`Capability::Network`] with `AllowList`.
     NetworkAllowList,
-    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::Deny`].
-    ChildSpawnDeny,
-    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::Allow`].
-    ChildSpawnAllow,
+    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::DenyNewTasks`].
+    ChildSpawnDenyNewTasks,
+    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::AllowThreadsWithinBoundary`].
+    ChildSpawnAllowThreads,
+    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::AllowDescendantsWithinBoundary`].
+    ChildSpawnAllowDescendants,
     /// [`Capability::Environment`].
     Environment,
     /// [`Capability::InheritedFds`] with [`crate::FdPolicy::None`].
@@ -145,12 +147,13 @@ impl RequirementKind {
     /// new variant that is not added here fails the `all_is_exhaustive` test), so a
     /// gate that must scan EVERY kind (e.g. the qualification coupling gate) can
     /// enumerate them without a runtime registry.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Filesystem,
         Self::NetworkDenyAll,
         Self::NetworkAllowList,
-        Self::ChildSpawnDeny,
-        Self::ChildSpawnAllow,
+        Self::ChildSpawnDenyNewTasks,
+        Self::ChildSpawnAllowThreads,
+        Self::ChildSpawnAllowDescendants,
         Self::Environment,
         Self::InheritedFdsNone,
         Self::InheritedFdsOnly,
@@ -176,8 +179,8 @@ impl RequirementKind {
     /// Derive the policy-aware key (proof-spine §2): each capability's distinct
     /// CANONICAL POLICY maps to a distinct key. POLICY-AWARE for ALL kinds — no
     /// policy-blind collapse — so two semantically-distinct policies under the same
-    /// capability variant (`InheritedFds::None` vs `::Only`, `ChildSpawn::Deny` vs
-    /// `::Allow`, `Network::DenyAll` vs `::AllowList`) never share a key.
+    /// capability variant (`InheritedFds::None` vs `::Only`, the three `ChildSpawn`
+    /// child-task semantics, `Network::DenyAll` vs `::AllowList`) never share a key.
     /// `Environment` has a single policy variant (`Exact`), so one key.
     fn of_capability(cap: &Capability) -> Self {
         use crate::contract::capability::{FdPolicy, NetPolicy, SpawnPolicy};
@@ -190,11 +193,14 @@ impl RequirementKind {
                 policy: NetPolicy::AllowList(_),
             } => Self::NetworkAllowList,
             Capability::ChildSpawn {
-                policy: SpawnPolicy::Deny,
-            } => Self::ChildSpawnDeny,
+                policy: SpawnPolicy::DenyNewTasks,
+            } => Self::ChildSpawnDenyNewTasks,
             Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow,
-            } => Self::ChildSpawnAllow,
+                policy: SpawnPolicy::AllowThreadsWithinBoundary,
+            } => Self::ChildSpawnAllowThreads,
+            Capability::ChildSpawn {
+                policy: SpawnPolicy::AllowDescendantsWithinBoundary,
+            } => Self::ChildSpawnAllowDescendants,
             Capability::Environment { .. } => Self::Environment,
             Capability::InheritedFds {
                 policy: FdPolicy::None,
@@ -300,8 +306,9 @@ mod requirement_kind_tests {
                 RequirementKind::Filesystem
                 | RequirementKind::NetworkDenyAll
                 | RequirementKind::NetworkAllowList
-                | RequirementKind::ChildSpawnDeny
-                | RequirementKind::ChildSpawnAllow
+                | RequirementKind::ChildSpawnDenyNewTasks
+                | RequirementKind::ChildSpawnAllowThreads
+                | RequirementKind::ChildSpawnAllowDescendants
                 | RequirementKind::Environment
                 | RequirementKind::InheritedFdsNone
                 | RequirementKind::InheritedFdsOnly

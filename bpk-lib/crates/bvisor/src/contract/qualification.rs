@@ -268,8 +268,8 @@ pub fn linux_mechanism(primitive: &str, enforcement: Enforcement) -> String {
 /// NON-PROVEN cells are stated explicitly (the coupling test asserts they are NOT
 /// advertised `Enforced` in production): `InheritedFdsOnly` is `Incomplete` (the scrub
 /// realizes only `None`; the selective-keep allowlist has no lowering + no oracle); every
-/// other capability — including both `ChildSpawn` policy keys (proof-spine §2 split) — is
-/// `FailClosed`.
+/// other capability — including all THREE `ChildSpawn` child-task keys (proof-spine
+/// §2 split + the S6 3-variant freeze) — is `FailClosed`.
 pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
@@ -415,9 +415,15 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
         status: QualificationStatus::FailClosed,
         proof_receipts: &[],
     },
+    // The three FROZEN child-task semantics (proof-spine S6). S6 freezes the
+    // taxonomy + the clone3-pointer/classic-BPF enforcement CONSTRAINT (see
+    // `SpawnPolicy`); it does NOT implement enforcement (that is S10, seccomp +
+    // cgroup). So ALL THREE stay FailClosed here with NO oracle (empty receipts) —
+    // none is advertised Enforced in the production ceiling, so the coupling gate
+    // never demands a Proven row for them.
     QualificationRow {
         backend: "linux",
-        key: RequirementKind::ChildSpawnDeny,
+        key: RequirementKind::ChildSpawnDenyNewTasks,
         profile_floor: ProfileFloor::structural(),
         mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
         status: QualificationStatus::FailClosed,
@@ -425,7 +431,15 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     },
     QualificationRow {
         backend: "linux",
-        key: RequirementKind::ChildSpawnAllow,
+        key: RequirementKind::ChildSpawnAllowThreads,
+        profile_floor: ProfileFloor::structural(),
+        mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
+        status: QualificationStatus::FailClosed,
+        proof_receipts: &[],
+    },
+    QualificationRow {
+        backend: "linux",
+        key: RequirementKind::ChildSpawnAllowDescendants,
         profile_floor: ProfileFloor::structural(),
         mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
         status: QualificationStatus::FailClosed,

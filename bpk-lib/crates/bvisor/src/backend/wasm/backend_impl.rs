@@ -86,8 +86,9 @@ impl Backend for WasmBackend {
             RequirementKind::CommitArtifact | RequirementKind::DiscardArtifact => "preopen_commit",
             RequirementKind::ListOutputs => "preopen_readdir",
             // Structurally unsupported on wasm — named honestly.
-            RequirementKind::ChildSpawnDeny
-            | RequirementKind::ChildSpawnAllow
+            RequirementKind::ChildSpawnDenyNewTasks
+            | RequirementKind::ChildSpawnAllowThreads
+            | RequirementKind::ChildSpawnAllowDescendants
             | RequirementKind::Kill
             | RequirementKind::ExposePath
             | RequirementKind::NetworkAllowList
