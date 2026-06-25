@@ -165,6 +165,12 @@ pub use backend_impl::LinuxBackend;
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 mod plan_build;
 
+// Per-run cgroup lifecycle helpers (pids cap / required-backing / create / teardown),
+// split out of `backend_impl` to keep each production file under the size cap. PURE of
+// any `LinuxBackend` private state; SAFE `std::fs`, no `unsafe`.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+mod cgroup_run;
+
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub(crate) mod sys;
 

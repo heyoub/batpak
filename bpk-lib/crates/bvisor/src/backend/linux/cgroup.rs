@@ -21,9 +21,10 @@
 //!     and holds processes — the no-internal-process trap) up to the
 //!     controller-delegating ancestor (`app.slice`), where a limit is genuinely
 //!     enforced rather than refused;
-//!   - [`probe_atomic_kill`] (8b-ii-b1) — confirm `cgroup.kill` is really present under a
-//!     base (create probe leaf → check → remove); the honest backing for the backend's
-//!     `Kill{RunTree,Atomic}=Enforced` claim;
+//!   - [`probe_leaf_caps`] (8b-ii-b1 / review fix) — confirm in ONE probe leaf which
+//!     interface files the kernel materialises: `cgroup.kill` (atomic kill, backs
+//!     `Kill{RunTree,Atomic}=Enforced`) and `pids.peak` (the process-count usage WITNESS,
+//!     backs advertising `ResourceUsage` evidence — DISTINCT from the `pids.max` cap);
 //!   - [`CgroupLeaf`] — create/configure a leaf, set `pids.max`/`memory.max`
 //!     (ONLY for controllers actually delegated — an un-delegated limit is a
 //!     typed error, never a silent no-op), read `cgroup.procs`, read the
@@ -439,24 +440,41 @@ pub fn probe_cgroup_delegation() -> Option<PathBuf> {
     None
 }
 
-/// Probe whether cgroup v2 ATOMIC kill (`cgroup.kill`, kernel ≥ 5.14) is available
-/// under `base`, by creating a throwaway probe leaf, checking the kernel materialised
-/// `cgroup.kill`, and removing it. Returns `false` on any failure (cannot create the
-/// probe leaf, or no `cgroup.kill` file) — an HONEST "atomic kill unavailable", never
-/// an assumption from the kernel version. This backs the backend's
-/// `Kill{RunTree,Atomic}=Enforced` ceiling: atomic, no-escape-window subtree teardown
-/// is claimed ONLY when this probe confirms the mechanism is really present.
+/// The cgroup v2 leaf capabilities a host can actually back, PROBED (never assumed from
+/// the kernel version) by materialising a throwaway leaf and checking which interface
+/// files the kernel created. These are DISTINCT capabilities a backend must NOT conflate:
+/// a kernel can have `cgroup.kill` (≥ 5.14) WITHOUT `pids.peak` (≥ 6.1), so advertising a
+/// `ResourceUsage` (peak) witness off the kill probe would over-claim.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct CgroupLeafCaps {
+    /// `cgroup.kill` is present ⇒ atomic, no-escape-window run-tree teardown is real
+    /// (backs `Kill{RunTree,Atomic}=Enforced`).
+    pub atomic_kill: bool,
+    /// `pids.peak` is present ⇒ a real process-count high-water-mark WITNESS is available
+    /// (backs advertising the `ResourceUsage` evidence claim for the process_count budget;
+    /// the `pids.max` Hard CAP is independent and does NOT depend on this).
+    pub pids_peak: bool,
+}
+
+/// Probe the leaf capabilities under `base` in ONE create-check-remove round-trip:
+/// whether the kernel materialises `cgroup.kill` (atomic kill) and `pids.peak` (usage
+/// witness). All-`false` on any failure (cannot create the probe leaf) — an HONEST
+/// "unavailable", never an assumption from the kernel version.
 #[must_use]
-pub fn probe_atomic_kill(base: &Path) -> bool {
+pub fn probe_leaf_caps(base: &Path) -> CgroupLeafCaps {
     let suffix = PROBE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
-    let probe = base.join(format!(".bvisor-kill-probe-{pid}-{suffix}"));
+    let probe = base.join(format!(".bvisor-caps-probe-{pid}-{suffix}"));
     if fs::create_dir(&probe).is_err() {
-        return false;
+        return CgroupLeafCaps::default();
     }
-    let has_kill = probe.join(KILL_FILE).exists();
+    let caps = CgroupLeafCaps {
+        atomic_kill: probe.join(KILL_FILE).exists(),
+        pids_peak: probe.join(PIDS_PEAK_FILE).exists(),
+    };
     let _ = fs::remove_dir(&probe);
-    has_kill
+    caps
 }
 
 /// Probe for the nearest WRITABLE ancestor cgroup that DELEGATES every controller
@@ -722,15 +740,16 @@ mod topology_tests {
     }
 
     #[test]
-    fn probe_atomic_kill_is_false_when_no_kill_file_materialises() {
+    fn probe_leaf_caps_are_false_when_no_cgroup_files_materialise() {
         // A plain tempdir is not a real cgroup, so a probe leaf created under it gets
-        // NO kernel `cgroup.kill` file ⇒ honest false (never assumed-present). The
-        // true path (a real delegated leaf does expose cgroup.kill) is proven live by
-        // the backend integration test.
+        // NEITHER `cgroup.kill` NOR `pids.peak` ⇒ honest all-false (never assumed-present).
+        // The true paths (a real delegated leaf exposes these) are proven live by the
+        // backend integration tests.
         let tmp = tempfile::tempdir().expect("tempdir");
+        let caps = probe_leaf_caps(tmp.path());
         assert!(
-            !probe_atomic_kill(tmp.path()),
-            "no cgroup.kill under a non-cgroup dir ⇒ atomic kill unavailable"
+            !caps.atomic_kill && !caps.pids_peak,
+            "no cgroup interface files under a non-cgroup dir ⇒ all capabilities unavailable"
         );
     }
 

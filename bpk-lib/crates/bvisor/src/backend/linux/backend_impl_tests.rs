@@ -3,9 +3,16 @@
 //! structural-check size cap). `super` is the `backend_impl` module.
 
 use super::{LinuxBackend, LANDLOCK_ABI_FLOOR};
+use crate::backend::linux::cgroup_run::{cgroup_for_run, pids_cap_for, requires_cgroup_backing};
 use crate::contract::backend::Backend;
-use crate::contract::capability::{Capability, Enforcement, FsAccess, FsConfinement, PathSet};
-use crate::contract::plan::BoundaryRequirement;
+use crate::contract::budget::{budget_admit, BudgetRequirements, DerivedMinimums, MinGuarantee};
+use crate::contract::capability::{
+    Capability, Enforcement, EvidenceClaim, EvidenceSet, FsAccess, FsConfinement, PathSet,
+};
+use crate::contract::ids::{BackendId, BoundaryPlanHash};
+use crate::contract::plan::{
+    BoundaryPlan, BoundaryRequirement, EvidenceRequirements, Workload, BOUNDARY_PLAN_SCHEMA_VERSION,
+};
 use crate::contract::support::RequirementKind;
 
 fn fs_requirement() -> BoundaryRequirement {
@@ -79,7 +86,7 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
 fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {
     // WITH a probed cgroup base (atomic cgroup.kill): Kill{RunTree,Atomic} is
     // Enforced — the workload runs in a cgroup leaf the host can SIGKILL atomically.
-    let with = LinuxBackend::with_cgroup_for_test();
+    let with = LinuxBackend::with_cgroup_for_test(true);
     assert_eq!(
         with.profile(&with.probe())
             .ceiling_for(RequirementKind::Kill)
@@ -102,9 +109,8 @@ fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {
 
 #[test]
 fn process_count_budget_is_enforced_only_with_a_cgroup_base() {
-    // WITH a cgroup base: process_count is a structural cgroup pids.max cap ⇒
-    // Enforced; the witness reads pids.peak (ResourceUsage evidence).
-    let with = LinuxBackend::with_cgroup_for_test();
+    // WITH a cgroup base: process_count is a structural cgroup pids.max cap ⇒ Enforced.
+    let with = LinuxBackend::with_cgroup_for_test(true);
     let with_budget = with.probe().budget;
     assert_eq!(
         with_budget.process_count.enforcement,
@@ -128,5 +134,90 @@ fn process_count_budget_is_enforced_only_with_a_cgroup_base() {
         without.probe().budget.process_count.enforcement,
         Enforcement::Mediated,
         "no cgroup base ⇒ process_count Mediated (no unbacked pids cap)"
+    );
+}
+
+#[test]
+fn resource_usage_evidence_is_advertised_only_when_pids_peak_is_witnessable() {
+    // The codex-review split: the Hard pids.max CAP (enforcement) is independent of the
+    // pids.peak WITNESS (evidence). With peak present ⇒ ResourceUsage advertised; on a
+    // kernel that caps pids but has no pids.peak (≥4.3 cap, <6.1 peak) ⇒ NO ResourceUsage
+    // evidence, so a plan requiring that witness never admits on a kernel that can't deliver.
+    let resource_usage: EvidenceSet = [EvidenceClaim::ResourceUsage].into_iter().collect();
+
+    let with_peak = LinuxBackend::with_cgroup_for_test(true).probe().budget;
+    assert_eq!(
+        with_peak.process_count.enforcement,
+        Enforcement::Enforced,
+        "the pids.max cap is Enforced regardless of the peak witness"
+    );
+    assert_eq!(
+        with_peak.process_count.evidence, resource_usage,
+        "pids.peak present ⇒ ResourceUsage evidence advertised"
+    );
+
+    let no_peak = LinuxBackend::with_cgroup_for_test(false).probe().budget;
+    assert_eq!(
+        no_peak.process_count.enforcement,
+        Enforcement::Enforced,
+        "the cap stays Enforced even without the peak witness (cap != witness)"
+    );
+    assert_eq!(
+        no_peak.process_count.evidence,
+        EvidenceSet::new(),
+        "no pids.peak ⇒ NO ResourceUsage evidence (no over-claim of an absent witness)"
+    );
+}
+
+/// A `BoundaryPlan` whose process_count budget admitted `Enforced` against `backend`'s
+/// probed (cgroup-backed) profile — i.e. a plan that REQUIRES cgroup backing. Built by
+/// hand (not the planner) so the fail-closed unit test stays self-contained.
+fn cgroup_required_plan(backend: &LinuxBackend) -> BoundaryPlan {
+    let snap = backend.probe();
+    let budgets = budget_admit(
+        &BudgetRequirements::uniform(8, MinGuarantee::Mediated),
+        &snap.budget,
+        &DerivedMinimums::default(),
+        [0u8; 32],
+    )
+    .expect("budgets admit against the cgroup-backed profile");
+    BoundaryPlan {
+        schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
+        plan_id: BoundaryPlanHash([0u8; 32]),
+        backend: BackendId::new(LinuxBackend::ID),
+        profile: snap,
+        admitted: Vec::new(),
+        workload: Workload::Process {
+            exe: "/bin/true".to_string(),
+            args: Vec::new(),
+        },
+        budgets,
+        evidence: EvidenceRequirements::default(),
+    }
+}
+
+#[test]
+fn cgroup_for_run_fails_closed_when_a_required_leaf_cannot_be_created() {
+    // The HIGH codex finding: a plan admitted with cgroup-backed guarantees must NOT run
+    // uncgrouped if the per-run leaf can't be created. `with_cgroup_for_test` advertises a
+    // cgroup base (so process_count admits Enforced) but its base is a non-creatable
+    // placeholder, so the real leaf creation FAILS — `cgroup_for_run` must fail CLOSED.
+    let backend = LinuxBackend::with_cgroup_for_test(true);
+    let plan = cgroup_required_plan(&backend);
+    assert!(
+        requires_cgroup_backing(&plan) && pids_cap_for(&plan).is_some(),
+        "the hand-built plan must genuinely require cgroup backing (Enforced process_count)"
+    );
+
+    // The fail-closed path returns Err(observed) — the caller (execute) maps it to a
+    // SupervisorFault report. Assert the refusal happened and recorded WHY.
+    let observed = cgroup_for_run(&backend, &plan, Vec::new()).expect_err(
+        "a required-but-uncreatable cgroup leaf MUST fail closed, never run uncgrouped",
+    );
+    assert!(
+        observed
+            .iter()
+            .any(|f| f.kind == "cgroup_required_but_unavailable"),
+        "the refusal must record WHY it failed closed: {observed:?}"
     );
 }

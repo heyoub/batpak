@@ -40,6 +40,7 @@
 //! [`Outcome`] via [`super::launch::LaunchObservation::outcome`]
 //! (ExecSucceeded→Completed, SetupRefused→Unsupported, SetupFaulted→SupervisorFault).
 
+use crate::backend::linux::cgroup_run::{cgroup_for_run, finish};
 use crate::backend::linux::launch::{self, LaunchObservation};
 use crate::backend::linux::{cgroup, plan_build, sys};
 use crate::contract::backend::Backend;
@@ -89,18 +90,34 @@ pub struct LinuxBackend {
     /// via the launcher's `CLONE_INTO_CGROUP`) whose run tree the host can atomically
     /// `cgroup.kill`, so the ceiling backs `Kill{RunTree,Atomic}=Enforced`. `None` ⇒
     /// no cgroup confinement, so `Kill` is absent from the ceiling ⇒ Unsupported ⇒
-    /// `plan()` fails closed for a kill spec (no unbacked guarantee).
-    cgroup_base: Option<std::path::PathBuf>,
+    /// `plan()` fails closed for a kill spec (no unbacked guarantee). `pub(super)` so the
+    /// `cgroup_run` lifecycle module can read it.
+    pub(super) cgroup_base: Option<std::path::PathBuf>,
+    /// Whether `pids.peak` (the process-count usage WITNESS, cgroup v2 ≥ 6.1) is present
+    /// under the cgroup base, PROBED at construction. DISTINCT from the `pids.max` Hard
+    /// cap (which `cgroup_base` already backs): a kernel can cap pids without exposing a
+    /// peak. The profile advertises the `ResourceUsage` evidence claim ONLY when this is
+    /// true, so a plan requiring that evidence never admits on a kernel that cannot
+    /// witness it. Always `false` when `cgroup_base` is `None`.
+    cgroup_pids_peak: bool,
 }
 
-/// Probe the cgroup v2 confinement base ONCE at construction: the nearest writable
-/// `pids`-delegating ancestor (where a leaf can be created and a child placed via
-/// `CLONE_INTO_CGROUP`) that ALSO exposes atomic `cgroup.kill`. `Some(base)` ⇒ the
-/// backend can run the workload in a real cgroup leaf and atomically kill its run
-/// tree; `None` ⇒ no cgroup confinement (the `Kill` capability is honestly absent).
-fn probe_cgroup_base() -> Option<std::path::PathBuf> {
-    let base = cgroup::probe_controller_base(&["pids"])?;
-    cgroup::probe_atomic_kill(&base).then_some(base)
+/// Probe the cgroup v2 confinement capabilities ONCE at construction. Returns the base —
+/// the nearest writable `pids`-delegating ancestor that ALSO exposes atomic `cgroup.kill`
+/// (where a leaf can be created and a child placed via `CLONE_INTO_CGROUP`) — paired with
+/// whether `pids.peak` (the usage witness) is present. `(None, false)` ⇒ no cgroup
+/// confinement. Atomic kill is REQUIRED for a usable base (the Kill capability); the peak
+/// witness is OPTIONAL (gates only the `ResourceUsage` evidence claim, never the cap).
+fn probe_cgroup() -> (Option<std::path::PathBuf>, bool) {
+    let Some(base) = cgroup::probe_controller_base(&["pids"]) else {
+        return (None, false);
+    };
+    let caps = cgroup::probe_leaf_caps(&base);
+    if caps.atomic_kill {
+        (Some(base), caps.pids_peak)
+    } else {
+        (None, false)
+    }
 }
 
 impl LinuxBackend {
@@ -111,12 +128,14 @@ impl LinuxBackend {
     /// (the raw probe is the sanctioned `super::sys` basement).
     #[must_use]
     pub fn new() -> Self {
+        let (cgroup_base, cgroup_pids_peak) = probe_cgroup();
         Self {
             id: BackendId::new(Self::ID),
             support: super::support_matrix(),
             landlock_abi: sys::probe_landlock_abi(),
             launcher_path: None,
-            cgroup_base: probe_cgroup_base(),
+            cgroup_base,
+            cgroup_pids_peak,
         }
     }
 
@@ -126,12 +145,14 @@ impl LinuxBackend {
     /// the integration tests, whose deps binary has no co-located launcher to resolve.
     #[must_use]
     pub fn with_launcher_path(launcher_path: std::path::PathBuf) -> Self {
+        let (cgroup_base, cgroup_pids_peak) = probe_cgroup();
         Self {
             id: BackendId::new(Self::ID),
             support: super::support_matrix(),
             landlock_abi: sys::probe_landlock_abi(),
             launcher_path: Some(launcher_path),
-            cgroup_base: probe_cgroup_base(),
+            cgroup_base,
+            cgroup_pids_peak,
         }
     }
 
@@ -146,21 +167,25 @@ impl LinuxBackend {
             landlock_abi,
             launcher_path: None,
             cgroup_base: None,
+            cgroup_pids_peak: false,
         }
     }
 
     /// Construct a backend with a FORCED cgroup confinement base (at the FS ABI floor),
-    /// for proving the `Kill{RunTree,Atomic}=Enforced` ceiling WITHOUT a real cgroup —
-    /// the ceiling never touches disk, so a placeholder base path exercises the claim.
-    /// Test-only.
+    /// for proving the `Kill`/`process_count`-Enforced ceiling + the fail-closed path
+    /// WITHOUT a real cgroup. The base path is a non-creatable placeholder, so the ceiling
+    /// (which never touches disk) sees cgroup backing while any actual leaf creation FAILS
+    /// — exactly the input the fail-closed `cgroup_for_run` test needs. `pids_peak`
+    /// controls whether the `ResourceUsage` evidence claim is advertised. Test-only.
     #[cfg(test)]
-    fn with_cgroup_for_test() -> Self {
+    fn with_cgroup_for_test(pids_peak: bool) -> Self {
         Self {
             id: BackendId::new(Self::ID),
             support: super::support_matrix(),
             landlock_abi: LANDLOCK_ABI_FLOOR,
             launcher_path: None,
             cgroup_base: Some(std::path::PathBuf::from("/sys/fs/cgroup/test-placeholder")),
+            cgroup_pids_peak: pids_peak,
         }
     }
 
@@ -233,14 +258,15 @@ impl Default for LinuxBackend {
 }
 
 /// The honest budget profile. PROCESS COUNT is STRUCTURALLY enforced via the cgroup
-/// v2 `pids` controller (`pids.max`) — but ONLY when a cgroup base was probed
-/// (`cgroup_pids_enforced`); then it is `Enforced`/Hard with a `ResourceUsage`
-/// evidence claim (the witness reads `pids.peak`). Every OTHER dimension is `Mediated`
-/// (supervised, not structurally capped) with no resource evidence — the OS accounts a
-/// spawned process's resources and the runner observes its terminal, but no cap is
-/// installed, so claiming `Enforced` there would be the over-claim the gauntlet hunts.
-/// With no cgroup base, process count is `Mediated` too (no unbacked cap).
-fn observed_budget_profile(cgroup_pids_enforced: bool) -> BudgetProfile {
+/// v2 `pids` controller (`pids.max`) when a cgroup base was probed (`cgroup_pids_enforced`)
+/// — then it is `Enforced`/Hard. The `ResourceUsage` evidence claim (the `pids.peak`
+/// usage witness) is advertised SEPARATELY, ONLY when `pids_peak_witness` was probed: a
+/// kernel can cap pids (≥ 4.3) WITHOUT exposing `pids.peak` (≥ 6.1), so a Hard cap does
+/// NOT imply a witness — advertising the witness off the cap would be the over-claim
+/// codex caught. Every OTHER dimension is `Mediated` (supervised, not structurally capped)
+/// with no resource evidence — no cap is installed, so claiming `Enforced` there would
+/// over-claim. With no cgroup base, process count is `Mediated` too (no unbacked cap).
+fn observed_budget_profile(cgroup_pids_enforced: bool, pids_peak_witness: bool) -> BudgetProfile {
     let observed = |mechanism: &str| BudgetAvailability {
         // Headroom only — we do NOT cap, so we never refuse on capacity here; the
         // honest signal is the `Mediated` (not `Enforced`) guarantee + empty
@@ -250,13 +276,19 @@ fn observed_budget_profile(cgroup_pids_enforced: bool) -> BudgetProfile {
         evidence: EvidenceSet::new(),
         mechanism: mechanism.to_string(),
     };
-    // ProcessCount: a real structural cap (cgroup pids.max) when cgroup is available.
+    // ProcessCount: a real structural cap (cgroup pids.max) when cgroup is available. The
+    // ResourceUsage evidence is advertised ONLY when the pids.peak witness is also present.
     let process_count = if cgroup_pids_enforced {
+        let evidence = if pids_peak_witness {
+            [EvidenceClaim::ResourceUsage].into_iter().collect()
+        } else {
+            EvidenceSet::new()
+        };
         BudgetAvailability {
             // The pids controller caps any count up to the kernel's pid ceiling.
             available: u64::MAX,
             enforcement: Enforcement::Enforced,
-            evidence: [EvidenceClaim::ResourceUsage].into_iter().collect(),
+            evidence,
             mechanism: "cgroup_v2_pids:enforced".to_string(),
         }
     } else {
@@ -298,7 +330,7 @@ impl Backend for LinuxBackend {
         BackendProfileSnapshot {
             backend: self.id.clone(),
             probed,
-            budget: observed_budget_profile(self.cgroup_base.is_some()),
+            budget: observed_budget_profile(self.cgroup_base.is_some(), self.cgroup_pids_peak),
         }
     }
 
@@ -385,12 +417,13 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
         return fail_closed(backend, plan, Outcome::Unsupported, observed);
     }
 
-    // Create the per-run cgroup leaf when a confinement base was probed, recording the
-    // honest placement evidence. The launcher births the workload child INTO the leaf via
-    // CLONE_INTO_CGROUP; the host tears it down (kill → drain → remove) AFTER the run via
-    // `finish`. A `None` leaf ⇒ no cgroup confinement this run — never a silent claim.
-    let (cgroup_leaf, cgroup_dir_fd) =
-        setup_cgroup_leaf(backend, &mut observed, pids_cap_for(plan));
+    // Prepare the per-run cgroup leaf; FAIL CLOSED if the plan admitted cgroup-backed
+    // guarantees but the leaf cannot be created (see `cgroup_for_run`). The launcher births
+    // the child INTO the leaf via CLONE_INTO_CGROUP; `finish` tears it down after the run.
+    let (cgroup_leaf, cgroup_dir_fd, mut observed) = match cgroup_for_run(backend, plan, observed) {
+        Ok(triple) => triple,
+        Err(observed) => return fail_closed(backend, plan, Outcome::SupervisorFault, observed),
+    };
 
     // Build the launcher plan + the pre-opened authority handles host-side (now
     // including the optional CgroupDir slot). A host wiring fault (a root/exe that
@@ -477,95 +510,15 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
     finish(cgroup_leaf, report)
 }
 
-/// The cgroup `pids.max` cap to install on the run leaf: the plan's admitted
-/// process_count limit, but ONLY when it admitted as `Enforced` (which happens IFF a
-/// cgroup base was probed — `observed_budget_profile` offers process_count Enforced only
-/// then). A Mediated process_count installs NO cap (Budget stays observed-not-capped); the
-/// leaf is then created bare (placement + atomic kill) without a structural pid limit.
-fn pids_cap_for(plan: &BoundaryPlan) -> Option<u64> {
-    (plan.budgets.process_count.selected_guarantee == Enforcement::Enforced)
-        .then_some(plan.budgets.process_count.effective_limit)
-}
-
-/// Create the per-run cgroup leaf (when a base was probed) and record the honest
-/// placement evidence onto `observed`, returning `(the leaf to tear down, the dir fd for
-/// the launcher's CgroupDir slot)`. A `None` dir fd with a probed base records the honest
-/// `cgroup_placement_unavailable` fact (the run proceeds uncgrouped); no base ⇒ neither.
-fn setup_cgroup_leaf(
-    backend: &LinuxBackend,
-    observed: &mut Vec<ObservedFact>,
-    pids_cap: Option<u64>,
-) -> (Option<cgroup::CgroupLeaf>, Option<std::os::fd::OwnedFd>) {
-    let leaf = backend
-        .cgroup_base
-        .as_ref()
-        .and_then(|base| create_run_leaf(base, pids_cap));
-    // A SEPARATE dir fd (`File::open` on the leaf) the launcher inherits for the
-    // CgroupDir slot; the `CgroupLeaf` retains its path for teardown.
-    let dir_fd = leaf.as_ref().and_then(|l| l.dir_fd().ok());
-    if dir_fd.is_some() {
-        let leaf_path = leaf
-            .as_ref()
-            .and_then(|l| l.dir().ok())
-            .map(|d| d.display().to_string())
-            .unwrap_or_default();
-        observed.push(ObservedFact {
-            kind: "cgroup_confined".to_string(),
-            detail: format!(
-                "workload placed in cgroup leaf {leaf_path} via launcher CLONE_INTO_CGROUP; \
-                 atomic run-tree teardown available (cgroup.kill)"
-            ),
-        });
-    } else if backend.cgroup_base.is_some() {
-        observed.push(ObservedFact {
-            kind: "cgroup_placement_unavailable".to_string(),
-            detail: "cgroup base probed but the per-run leaf could not be created; the \
-                     workload runs without cgroup placement this run"
-                .to_string(),
-        });
-    }
-    (leaf, dir_fd)
-}
-
-/// Tear down the per-run cgroup leaf (kill → bounded drain → remove) and return the
-/// report unchanged. `cgroup.kill` is async, so the bounded drain bridges the SIGKILL
-/// window the rmdir would race; a still-running workload (a hang) is atomically killed
-/// here — the atomic run-tree teardown the `Kill` ceiling claims. A `None` leaf (no
-/// cgroup confinement this run) is a no-op. Called on EVERY post-creation return path so
-/// a leaf can never leak.
-fn finish(leaf: Option<cgroup::CgroupLeaf>, report: BoundaryReportBody) -> BoundaryReportBody {
-    if let Some(mut leaf) = leaf {
-        let _ = leaf.kill();
-        let _ = leaf.wait_until_empty(50, std::time::Duration::from_millis(10));
-        let _ = leaf.remove();
-    }
-    report
-}
-
-/// Create the per-run cgroup leaf under the probed confinement `base`. A unique name
-/// (pid + a process-local counter, no clock/RNG). `pids_cap` installs a structural
-/// `pids.max` limit (the admitted process_count budget, enforced) when `Some`; `None`
-/// creates a bare leaf (placement + atomic kill only, no pid cap — Budget then stays
-/// Mediated). `None` return on any create failure (the launch then proceeds WITHOUT
-/// cgroup placement, reported honestly — the workload runs in the launcher's cgroup).
-fn create_run_leaf(base: &std::path::Path, pids_cap: Option<u64>) -> Option<cgroup::CgroupLeaf> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let suffix = RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let name = format!("bvisor-run-{}-{suffix}", std::process::id());
-    let limits = match pids_cap {
-        Some(max) => cgroup::CgroupLimits::with_pids_max(max),
-        None => cgroup::CgroupLimits::default(),
-    };
-    cgroup::CgroupLeaf::create(base, &name, limits).ok()
-}
-
-/// Attest the launcher binary's CONTENT identity: record its BLAKE3 digest as an honest
-/// evidence fact, so the report provenance-binds the EXACT launcher that confined the
-/// workload — not merely the resolved path. A read failure is silently skipped (the
-/// launch still proceeds — this is provenance EVIDENCE, not a gate). Digest PINNING
-/// (refusing a launcher whose digest does not match an expected value) is the follow-on;
-/// recording the digest already closes the [`resolve_launcher`] "trusted as supplied" gap.
+/// Record the BLAKE3 digest of the launcher binary observed AT THE RESOLVED PATH, BEFORE
+/// spawn, as a provenance evidence fact.
+///
+/// HONEST SCOPE (the codex-review correction): this proves "the bytes at `path` when read
+/// here", NOT "the exact bytes the kernel exec'd" — `run_launcher` later spawns by PATH
+/// (`Command::new`), so a swap/symlink between this read and the exec is a TOCTOU window.
+/// The fact wording reflects that. Closing the race (hash an OPENED fd and `fexecve` that
+/// SAME fd) and digest PINNING (refuse on mismatch) are the follow-ons; this is provenance
+/// EVIDENCE, not a gate, so a read failure is silently skipped (the launch still proceeds).
 fn attest_launcher(path: &std::path::Path, observed: &mut Vec<ObservedFact>) {
     let Ok(bytes) = std::fs::read(path) else {
         return;
@@ -574,7 +527,11 @@ fn attest_launcher(path: &std::path::Path, observed: &mut Vec<ObservedFact>) {
     let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     observed.push(ObservedFact {
         kind: "launcher_identity".to_string(),
-        detail: format!("blake3={hex} path={}", path.display()),
+        detail: format!(
+            "blake3={hex} observed_at_path={} (pre-spawn; not the exec'd-fd bytes — \
+             fd-exec pinning is the follow-on)",
+            path.display()
+        ),
     });
 }
 
