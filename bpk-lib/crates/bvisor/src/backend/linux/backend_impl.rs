@@ -21,6 +21,9 @@
 //!   - `Environment` — always Enforced: the launcher serves an EXPLICIT envp to
 //!     `fexecve` (nothing inherited from launcher/host), proven by the independent
 //!     `tests/launcher_env_linux.rs` env-isolation oracle;
+//!   - `InheritedFds` — always Enforced: the child-side scrub closes every
+//!     non-allowlisted fd before `fexecve`, proven by the independent host-side
+//!     pipe oracle in `tests/launcher_inherited_fds_linux.rs`;
 //!   - `Kill{RunTree,Atomic}` (cgroup `cgroup.kill`) — Enforced ONLY when a cgroup base
 //!     with atomic kill was probed, else ABSENT ⇒ Unsupported;
 //!   - Budget `process_count` (cgroup `pids.max`, witnessed from `pids.peak`) — Enforced
@@ -247,6 +250,20 @@ impl LinuxBackend {
         // launcher's `BVISOR_*_FD` channel vars absent (no inheritance).
         ceiling.insert(
             RequirementKind::Environment,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::MechanismAttestation].into_iter().collect(),
+            ),
+        );
+        // InheritedFds is Enforced structurally: the child-side fd-scrub closes EVERY
+        // non-allowlisted fd before `fexecve` (`launcher/linux/imp.rs` G6 scrub), so an
+        // undeclared host fd inherited into the launcher cannot survive into the
+        // workload. INDEPENDENT ORACLE: `tests/launcher_inherited_fds_linux.rs` injects
+        // a real pipe write end as an undeclared inherited fd and confirms, via a
+        // HOST-SIDE pipe read (nothing leaked) AND the workload's own report, that the
+        // scrub closed it.
+        ceiling.insert(
+            RequirementKind::InheritedFds,
             SupportVerdict::new(
                 Enforcement::Enforced,
                 [EvidenceClaim::MechanismAttestation].into_iter().collect(),

@@ -105,6 +105,29 @@ fn environment_is_enforced_via_explicit_envp() {
 }
 
 #[test]
+fn inherited_fds_are_enforced_via_the_scrub() {
+    // The child-side scrub closes every non-allowlisted inherited fd before fexecve,
+    // so the ceiling backs InheritedFds=Enforced unconditionally. The independent
+    // effect oracle is tests/launcher_inherited_fds_linux.rs (a host-side pipe shows
+    // an undeclared inherited fd never carries data across the boundary).
+    let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
+    let verdict = backend
+        .profile(&backend.probe())
+        .ceiling_for(RequirementKind::InheritedFds);
+    assert_eq!(
+        verdict.enforcement,
+        Enforcement::Enforced,
+        "InheritedFds must be Enforced (undeclared inherited fds are scrubbed)"
+    );
+    assert!(
+        verdict
+            .evidence
+            .contains(EvidenceClaim::MechanismAttestation),
+        "InheritedFds carries MechanismAttestation (the fd-scrub phase)"
+    );
+}
+
+#[test]
 fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {
     // WITH a probed cgroup base (atomic cgroup.kill): Kill{RunTree,Atomic} is
     // Enforced — the workload runs in a cgroup leaf the host can SIGKILL atomically.
