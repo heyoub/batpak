@@ -11,17 +11,29 @@
 //! runtime-shape-checked (not a `sys.rs` basement) and unit-testable against a
 //! FAKE cgroup tree on any host without privileges.
 //!
-//! ## What this step (8a) builds, and what it deliberately does NOT
-//! 8a is the HOST half only:
-//!   - [`probe_cgroup_delegation`] — find a writable, delegated cgroup v2 base
-//!     where the backend may create a leaf (honest `None` when there is none);
+//! ## What the HOST half builds, and what it deliberately does NOT
+//! 8a + 8b-i are the HOST half only:
+//!   - [`probe_cgroup_delegation`] (8a) — find a writable cgroup v2 base where the
+//!     backend may create a leaf (honest `None` when there is none);
+//!   - [`probe_controller_base`] (8b-i) — find the nearest writable ancestor that
+//!     DELEGATES a required controller (e.g. `pids`). Unlike the writability-only
+//!     probe, this walks past the process's own leaf SCOPE (which delegates nothing
+//!     and holds processes — the no-internal-process trap) up to the
+//!     controller-delegating ancestor (`app.slice`), where a limit is genuinely
+//!     enforced rather than refused;
 //!   - [`CgroupLeaf`] — create/configure a leaf, set `pids.max`/`memory.max`
 //!     (ONLY for controllers actually delegated — an un-delegated limit is a
 //!     typed error, never a silent no-op), read `cgroup.procs`, open the dir as
-//!     an [`OwnedFd`] (for 8b's `CLONE_INTO_CGROUP` descriptor slot), and tear
-//!     the leaf down atomically via `cgroup.kill` then `rmdir`.
+//!     an [`OwnedFd`] (for 8b-ii's `CLONE_INTO_CGROUP` descriptor slot), and tear
+//!     the leaf down atomically via `cgroup.kill` → bounded
+//!     [`CgroupLeaf::wait_until_empty`] drain (SIGKILL is async) → `rmdir`.
 //!
-//! 8b (NOT here) adds the launcher's `clone3(CLONE_INTO_CGROUP)` placement of
+//! The enforcement that this is REAL — not a cosmetic interface-file value — is
+//! proven on the live kernel by `tests/cgroup_enforcement_linux.rs` (8b-i): a
+//! fork-bomb in a capped leaf makes the kernel's own `pids.events` `max` counter
+//! climb (forks DENIED) while `pids.current` stays at/under the cap.
+//!
+//! 8b-ii (NOT here) adds the launcher's `clone3(CLONE_INTO_CGROUP)` placement of
 //! the child INTO the prepared leaf, and the `profile()` Budget/Kill honesty
 //! cells (`Enforced` ONLY when a real delegated controller backs them). NO
 //! launcher change, NO `profile()`/ceiling change, NO `unsafe` lives here.
@@ -50,6 +62,7 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 /// The conventional cgroup v2 mount point. A `cgroup.controllers` file directly
 /// under this path is the marker of a unified (v2) hierarchy.
@@ -293,6 +306,32 @@ impl CgroupLeaf {
         fs::write(&path, b"1")
     }
 
+    /// Poll the leaf's membership until it is empty or `max_attempts` reads elapse,
+    /// sleeping `poll_interval` between reads. After [`Self::kill`] the kernel
+    /// delivers SIGKILL ASYNCHRONOUSLY, so members linger in `cgroup.procs` for a
+    /// brief window during which [`Self::remove`] (rmdir) fails `EBUSY`; this bounded
+    /// poll bridges exactly that drain window. Returns `true` if the leaf drained
+    /// within the budget, `false` if it did NOT (an HONEST signal that `remove` will
+    /// still fail — never a hidden unbounded hang and never a pretend-empty). The
+    /// first read happens before any sleep, so an already-empty leaf returns
+    /// immediately with no delay.
+    ///
+    /// # Errors
+    /// The `cgroup.procs` read (e.g. the leaf was already removed).
+    pub fn wait_until_empty(&self, max_attempts: u32, poll_interval: Duration) -> io::Result<bool> {
+        for attempt in 0..max_attempts {
+            if self.member_pids()?.is_empty() {
+                return Ok(true);
+            }
+            // Sleep BETWEEN reads only (never after the last), so the worst-case wait
+            // is `(max_attempts - 1) * poll_interval` — bounded and predictable.
+            if attempt + 1 < max_attempts {
+                std::thread::sleep(poll_interval);
+            }
+        }
+        Ok(self.member_pids()?.is_empty())
+    }
+
     /// Remove the leaf directory (rmdir). MUST follow a successful [`Self::kill`]
     /// (and the members' actual exit) — the kernel refuses to remove a cgroup
     /// with live members (`EBUSY`), so kill-then-remove ordering is load-bearing.
@@ -359,6 +398,71 @@ pub fn probe_cgroup_delegation() -> Option<PathBuf> {
         return Some(parent.to_path_buf());
     }
     None
+}
+
+/// Probe for the nearest WRITABLE ancestor cgroup that DELEGATES every controller
+/// in `required` to its children (each present in that ancestor's
+/// `cgroup.subtree_control`), returning it or an honest `None`.
+///
+/// This is the base under which [`CgroupLeaf::create`] can install a leaf whose
+/// `required` limits are GENUINELY enforced — unlike [`probe_cgroup_delegation`],
+/// which proves only writability and on a typical systemd session returns the
+/// process's own leaf SCOPE: a cgroup that both holds processes (so the
+/// no-internal-process rule bars it from enabling controllers for children) AND
+/// carries an empty `cgroup.subtree_control`. A leaf created there delegates NO
+/// controller, so a `pids.max` write would be refused — the exact trap this probe
+/// avoids by walking UP to the first controller-delegating ancestor (e.g. the
+/// session's `app.slice`, whose `subtree_control` systemd populates with
+/// `cpu io memory pids`).
+///
+/// Strategy (no assumptions — every step verified): confirm a v2 hierarchy, read
+/// the process's own v2 cgroup, then walk from it toward the mount root returning
+/// the FIRST ancestor that both delegates every `required` controller AND
+/// round-trips a probe `mkdir` (writable to us). `required` empty ⇒ "any writable
+/// ancestor" (the first writable one, own cgroup first). Honest `None` when no
+/// ancestor qualifies — never a guess at a base the backend cannot use.
+#[must_use]
+pub fn probe_controller_base(required: &[&str]) -> Option<PathBuf> {
+    let root = Path::new(CGROUP_V2_ROOT);
+    if !root.join(CONTROLLERS_FILE).exists() {
+        return None;
+    }
+    let own = own_v2_cgroup_dir(root)?;
+    find_delegating_base(root, &own, required)
+}
+
+/// Walk from `start` toward `root` (inclusive), returning the first ancestor that
+/// delegates EVERY `required` controller AND round-trips a writable probe. Kept
+/// free of the `/proc/self/cgroup` parsing (that is [`probe_controller_base`]'s
+/// job) so it is unit-testable against a fake ancestor tree of tempdirs.
+///
+/// The delegation check SHORT-CIRCUITS before the writability probe, so a probe
+/// `mkdir` is attempted ONLY under an ancestor that already delegates `required` —
+/// never littering a non-delegating cgroup (e.g. the live session scope) with
+/// probe directories.
+fn find_delegating_base(root: &Path, start: &Path, required: &[&str]) -> Option<PathBuf> {
+    let mut current = Some(start);
+    while let Some(dir) = current {
+        if !dir.starts_with(root) {
+            break;
+        }
+        let delegated = read_subtree_control(dir).unwrap_or_default();
+        if delegates_all(&delegated, required) && base_is_writable(dir) {
+            return Some(dir.to_path_buf());
+        }
+        if dir == root {
+            break;
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+/// Whether `delegated` (a parent's `cgroup.subtree_control` controllers) contains
+/// EVERY controller in `required`. An empty `required` is vacuously satisfied
+/// ("any base"), so [`find_delegating_base`] then keys solely on writability.
+fn delegates_all(delegated: &[String], required: &[&str]) -> bool {
+    required.iter().all(|r| delegated.iter().any(|d| d == r))
 }
 
 /// Map the process's own unified-hierarchy cgroup (the `0::<path>` line of
@@ -605,6 +709,31 @@ mod tests {
     }
 
     #[test]
+    fn wait_until_empty_returns_immediately_on_an_empty_leaf() {
+        let (_tmp, base) = fake_base("pids");
+        let leaf =
+            CgroupLeaf::create(&base, "leaf", CgroupLimits::with_pids_max(2)).expect("create leaf");
+        fs::write(leaf.dir().expect("dir").join(PROCS_FILE), "").expect("empty procs");
+        // First read is empty ⇒ true with no sleep at all.
+        assert!(leaf
+            .wait_until_empty(1, Duration::from_millis(0))
+            .expect("wait"));
+    }
+
+    #[test]
+    fn wait_until_empty_reports_honest_false_when_members_persist() {
+        let (_tmp, base) = fake_base("pids");
+        let leaf =
+            CgroupLeaf::create(&base, "leaf", CgroupLimits::with_pids_max(2)).expect("create leaf");
+        // A fake procs that never empties ⇒ the bounded poll terminates with an
+        // honest `false` (never a hang, never a pretend-empty).
+        fs::write(leaf.dir().expect("dir").join(PROCS_FILE), "999\n").expect("persistent member");
+        assert!(!leaf
+            .wait_until_empty(2, Duration::from_millis(1))
+            .expect("wait"));
+    }
+
+    #[test]
     fn remove_then_drop_does_not_double_remove() {
         // A leaf with NO limits, so the fake leaf dir is empty — mirroring a REAL
         // cgroup leaf, whose kernel interface files (pids.max, cgroup.kill, …) do
@@ -635,6 +764,16 @@ mod tests {
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         }
     }
+}
+
+/// Topology / probe / delegation tests — kept in a focused module separate from
+/// the leaf-lifecycle `tests` above so neither inline `#[cfg(test)]` island grows
+/// past the non-overridable structural cap. These are self-contained (each builds
+/// its own fake tree or is pure) and reach the crate-private helpers via
+/// `use super::*`.
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
 
     #[test]
     fn parse_v2_relative_path_picks_the_unified_line() {
@@ -650,6 +789,71 @@ mod tests {
     fn parse_v2_relative_path_none_when_no_unified_line() {
         // A v1-only layout has no `0::` line ⇒ no v2 path.
         assert_eq!(own_v2_relative_path("3:cpu:/foo\n2:memory:/bar\n"), None);
+    }
+
+    #[test]
+    fn delegates_all_requires_every_controller() {
+        let delegated = vec!["cpu".to_string(), "pids".to_string(), "memory".to_string()];
+        assert!(delegates_all(&delegated, &["pids"]));
+        assert!(delegates_all(&delegated, &["pids", "memory"]));
+        assert!(
+            delegates_all(&delegated, &[]),
+            "empty required ⇒ vacuously true"
+        );
+        assert!(
+            !delegates_all(&delegated, &["pids", "io"]),
+            "io is absent ⇒ not all delegated"
+        );
+    }
+
+    #[test]
+    fn find_delegating_base_walks_up_past_a_nondelegating_leaf() {
+        // Mirror the live systemd topology: a writable LEAF scope that delegates
+        // NOTHING (the trap), whose parent DOES delegate `pids`. The walk must skip
+        // the leaf and return the parent — exactly app.slice on the real box.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join(CONTROLLERS_FILE), "cpu io memory pids").expect("root controllers");
+        let parent = root.join("delegating-parent"); // ~ app.slice
+        let leaf = parent.join("nondelegating-leaf"); // ~ the session scope
+        fs::create_dir_all(&leaf).expect("ancestor chain");
+        // Parent delegates pids; leaf delegates nothing.
+        fs::write(parent.join(SUBTREE_CONTROL_FILE), "cpu io memory pids").expect("parent subtree");
+        fs::write(leaf.join(SUBTREE_CONTROL_FILE), "").expect("leaf subtree empty");
+
+        let base = find_delegating_base(root, &leaf, &["pids"])
+            .expect("a pids-delegating writable ancestor exists");
+        assert_eq!(
+            base, parent,
+            "must skip the nondelegating leaf, return the parent"
+        );
+        // The non-delegating leaf must NOT have been littered with a probe dir
+        // (delegation short-circuits before the writability probe).
+        let littered = fs::read_dir(&leaf)
+            .expect("read leaf")
+            .filter_map(Result::ok)
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".bvisor-probe-")
+            });
+        assert!(!littered, "no probe dir under a non-delegating cgroup");
+    }
+
+    #[test]
+    fn find_delegating_base_is_none_when_no_ancestor_delegates() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join(CONTROLLERS_FILE), "cpu pids").expect("root controllers");
+        let leaf = root.join("a").join("b");
+        fs::create_dir_all(&leaf).expect("chain");
+        // Nobody delegates pids anywhere on the path.
+        fs::write(root.join("a").join(SUBTREE_CONTROL_FILE), "cpu").expect("a subtree");
+        fs::write(leaf.join(SUBTREE_CONTROL_FILE), "").expect("b subtree");
+        assert!(
+            find_delegating_base(root, &leaf, &["pids"]).is_none(),
+            "no pids-delegating ancestor ⇒ honest None, never a guess"
+        );
     }
 
     #[test]
