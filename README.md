@@ -102,12 +102,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Run it for real: `cargo run --example quickstart` under `bpk-lib/crates/core`.
+Run it for real: `cargo run --example quickstart` under `bpk-lib/crates/examples`.
 
 The full beginner path is eight jobs — open, append, page commit order with
 `query_entries_after`, point-read with `get`, walk hash-chain ancestry with
 `walk_ancestors`, verify receipts, derive projections, close. See
-`bpk-lib/crates/core/examples/eight_jobs.rs` for the contract example and the
+`bpk-lib/crates/examples/examples/eight_jobs.rs` for the contract example and the
 [cookbook](cookbook/README.md) for task-shaped recipes. The cookbook is the
 task-shaped field guide: each recipe maps intent to API to proof surface, and
 its index lives at [cookbook/README.md](cookbook/README.md).

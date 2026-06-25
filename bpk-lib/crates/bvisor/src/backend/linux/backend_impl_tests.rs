@@ -73,6 +73,12 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
         RequirementKind::NetworkDenyAll,
         RequirementKind::ChildSpawn,
         RequirementKind::TempRoot,
+        // Environment + InheritedFds were backed out of the ceiling after a codex
+        // review: admission is policy-blind (support.rs::of_capability), but the
+        // launcher only realises one policy shape and never lowers the admitted
+        // policy, so Enforced would over-admit unimplemented policy variants.
+        RequirementKind::Environment,
+        RequirementKind::InheritedFds,
     ] {
         assert_eq!(
             profile.ceiling_for(kind).enforcement,
@@ -82,50 +88,10 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
     }
 }
 
-#[test]
-fn environment_is_enforced_via_explicit_envp() {
-    // The launcher serves an EXPLICIT envp to fexecve (nothing inherited), so the
-    // ceiling backs Environment=Enforced unconditionally. The independent effect
-    // oracle is tests/launcher_env_linux.rs (the workload's own env output shows the
-    // declared set with the launcher's channel vars absent).
-    let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
-    let profile = backend.profile(&backend.probe());
-    let verdict = profile.ceiling_for(RequirementKind::Environment);
-    assert_eq!(
-        verdict.enforcement,
-        Enforcement::Enforced,
-        "Environment must be Enforced (explicit envp, no inheritance)"
-    );
-    assert!(
-        verdict
-            .evidence
-            .contains(EvidenceClaim::MechanismAttestation),
-        "Environment carries MechanismAttestation (the declared envp + exec phase)"
-    );
-}
-
-#[test]
-fn inherited_fds_are_enforced_via_the_scrub() {
-    // The child-side scrub closes every non-allowlisted inherited fd before fexecve,
-    // so the ceiling backs InheritedFds=Enforced unconditionally. The independent
-    // effect oracle is tests/launcher_inherited_fds_linux.rs (a host-side pipe shows
-    // an undeclared inherited fd never carries data across the boundary).
-    let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
-    let verdict = backend
-        .profile(&backend.probe())
-        .ceiling_for(RequirementKind::InheritedFds);
-    assert_eq!(
-        verdict.enforcement,
-        Enforcement::Enforced,
-        "InheritedFds must be Enforced (undeclared inherited fds are scrubbed)"
-    );
-    assert!(
-        verdict
-            .evidence
-            .contains(EvidenceClaim::MechanismAttestation),
-        "InheritedFds carries MechanismAttestation (the fd-scrub phase)"
-    );
-}
+// (Environment + InheritedFds positive ceiling tests were removed when those cells
+// were backed out of the ceiling after a codex review — see
+// unimplemented_kinds_fail_closed_this_chunk. The launcher MECHANISM proofs live in
+// tests/launcher_env_linux.rs + tests/launcher_inherited_fds_linux.rs.)
 
 #[test]
 fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {

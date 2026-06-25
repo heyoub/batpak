@@ -1,8 +1,14 @@
-// INDEPENDENT-ORACLE proof for `Environment = Enforced`: the workload's process
-// environment is EXACTLY the explicitly-declared `TargetSpecV1.envp` — nothing is
-// inherited from the launcher (or, transitively, the host). The launcher serves
-// the declared envp directly to `fexecve`, so the confined workload cannot read a
-// host secret that happens to live in an environment variable.
+// LAUNCHER MECHANISM proof (a building block, NOT a contract-admission proof): the
+// workload's process environment is EXACTLY the `TargetSpecV1.envp` the launcher is
+// handed — nothing is inherited from the launcher (or, transitively, the host). The
+// launcher serves that envp directly to `fexecve`.
+//
+// SCOPE (codex review 2026-06-25): this proves the launcher CAN serve an explicit
+// envp; it does NOT prove the `Environment` capability is admitted + honored end to
+// end. plan_build currently emits a HARDCODED envp and never lowers the spec's
+// `EnvPolicy`, so `Environment` is NOT in the ceiling (fails closed). When the policy
+// is genuinely lowered, this becomes the mechanism half + a contract-level oracle
+// (spec -> plan -> execute) is added alongside.
 //
 // WHY THIS IS A REAL ORACLE (not a self-report). The witness is the WORKLOAD's own
 // `env` output, captured through the launcher's piped stdout — never the backend's

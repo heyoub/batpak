@@ -215,7 +215,8 @@ fn cookbook_citation_to_a_missing_file_is_rejected() {
     )
     .expect("write md");
 
-    let err = cookbook_citations_resolve(&root, &cookbook)
+    // No extra_doc in the temp tree (the README path won't exist → skipped).
+    let err = cookbook_citations_resolve(&root, &cookbook, &root.join("README.md"))
         .expect_err("a missing cookbook citation must be rejected");
     assert!(
         err.to_string().contains("ghost.rs"),

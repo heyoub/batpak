@@ -30,12 +30,14 @@
 //! - AUTHORITY (exe / read+write roots / stdio): pre-opened handles placed at their
 //!   declared descriptor-table slot fd numbers (slot_index == fd number).
 //!
-//! ## Launcher binary identity (step-12 note)
+//! ## Launcher binary identity
 //! The launcher bin is a `[[bin]]` in this package. The harness locates it via the
 //! `BVISOR_LAUNCHER_BIN` env override, else the test/dev compile-time path the caller
-//! passes (`env!("CARGO_BIN_EXE_bvisor-linux-launcher")`). CONTENT-ADDRESSED launcher
-//! identity (digest-pinning the exact bin the harness will run) is step 12 — NOT done
-//! here; today the path is trusted as supplied.
+//! passes (`env!("CARGO_BIN_EXE_bvisor-linux-launcher")`). The launcher is now
+//! content-addressed: `backend_impl::attest_launcher` records the BLAKE3 digest of the
+//! bin observed at the resolved path. REMAINING (F2): the digest is computed from the
+//! file AT THE PATH and the launcher is then exec'd FROM the path — a TOCTOU window;
+//! true fd-pinning (open once, hash THAT fd, `fexecve` the SAME fd) is the follow-on.
 
 use crate::backend::linux::protocol::{LauncherState, LinuxLaunchPlanV1};
 use crate::backend::linux::sys::{self, LaunchFd};
