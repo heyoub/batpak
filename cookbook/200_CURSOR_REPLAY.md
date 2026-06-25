@@ -9,7 +9,7 @@ Correct API: `Store::cursor_guaranteed`, cursor checkpoint config, typed reactor
 helpers when routing by payload type.
 
 Minimal code is mirrored by `bpk-lib/templates/typed-reactor` and
-`bpk-lib/crates/core/examples/cursor_worker.rs`.
+`bpk-lib/crates/examples/examples/cursor_worker.rs`.
 
 Wrong tempting move: use a lossy subscription as a replay queue.
 

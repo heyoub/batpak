@@ -48,6 +48,9 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     // easy-to-look-legitimate claim that silently rots as the catalog grows). Runs in
     // both modes — it is independent of INVARIANTS.md drift.
     check_readme_counts(repo_root, invariants.len())?;
+    // Anti-rot: every `crates/.../*.rs` path the cookbook cites must resolve — this is
+    // exactly the drift that shipped 6 stale example paths when the examples were hoisted.
+    check_cookbook_citations(repo_root)?;
 
     let block = render_catalog_block(&invariants);
     // INVARIANTS.md lives at the true repo root (parent of the cargo workspace
@@ -120,6 +123,79 @@ pub(crate) fn check_readme_counts(repo_root: &Path, invariant_count: usize) -> R
         ),
     )?;
     Ok(())
+}
+
+/// Anti-rot gate: every `crates/.../<file>.rs` path the cookbook cites must resolve to a
+/// real source file. This is the lint that would have caught the 6 stale example paths
+/// when `crates/core/examples/*` was hoisted to `crates/examples/examples/*`.
+pub(crate) fn check_cookbook_citations(repo_root: &Path) -> Result<()> {
+    let cookbook_dir = project_root(repo_root).join("cookbook");
+    cookbook_citations_resolve(repo_root, &cookbook_dir)
+}
+
+/// Testable core: assert every `crates/.../*.rs` path cited under `cookbook_dir` resolves
+/// to a real file relative to `resolve_root`. Split out so a red fixture can drive a
+/// synthetic cookbook + tree.
+fn cookbook_citations_resolve(resolve_root: &Path, cookbook_dir: &Path) -> Result<()> {
+    if !cookbook_dir.is_dir() {
+        return Ok(());
+    }
+    let mut unresolved = Vec::new();
+    for entry in std::fs::read_dir(cookbook_dir).context("read cookbook dir")? {
+        let path = entry.context("cookbook dir entry")?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let text =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<cookbook>");
+        for cite in extract_crate_rs_paths(&text) {
+            // Cookbook paths are repo-root (bpk-lib) relative.
+            if !resolve_root.join(&cite).is_file() {
+                unresolved.push(format!("{name}: {cite}"));
+            }
+        }
+    }
+    ensure(
+        unresolved.is_empty(),
+        format!(
+            "cookbook cites `crates/.../*.rs` path(s) that do not resolve (a moved/renamed \
+             example?). Fix the path(s):\n  {}",
+            unresolved.join("\n  ")
+        ),
+    )
+}
+
+/// Extract every `crates/<...>.rs` path token from markdown text. A token starts at
+/// `crates/` and runs over path characters (`[A-Za-z0-9_/.-]`) up to the first `.rs`
+/// boundary (so a `path.rs::fn` citation yields just the file path). Deduplicated.
+pub(crate) fn extract_crate_rs_paths(text: &str) -> BTreeSet<String> {
+    const NEEDLE: &str = "crates/";
+    let bytes = text.as_bytes();
+    let mut found = BTreeSet::new();
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find(NEEDLE) {
+        let start = search_from + rel;
+        let mut end = start;
+        while end < bytes.len() {
+            let c = bytes[end];
+            if c.is_ascii_alphanumeric() || matches!(c, b'/' | b'_' | b'.' | b'-') {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        let token = &text[start..end];
+        // Keep only the `...rs` file portion (truncate any trailing `.` run).
+        if let Some(rs_at) = token.find(".rs") {
+            found.insert(token[..rs_at + 3].to_string());
+        }
+        search_from = end.max(start + 1);
+    }
+    found
 }
 
 /// Pull `(N, M)` out of `N named invariants traced to M concrete artifacts`. `N` is the
