@@ -23,6 +23,8 @@ ceilings:
   - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
   - { backend: linux, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: macos, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
+  - { backend: macos, kind: ChildSpawnAllow, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnDeny, enforcement: Unsupported, evidence: [] }
   - { backend: macos, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: macos, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: macos, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
@@ -44,6 +46,8 @@ ceilings:
   - { backend: wasm, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: wasm, kind: ExposePath, enforcement: Unsupported, evidence: [] }
   - { backend: wasm, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, FilesystemDelta, MechanismAttestation] }
+  - { backend: wasm, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: wasm, kind: InheritedFdsOnly, enforcement: Unsupported, evidence: [] }
   - { backend: wasm, kind: Kill, enforcement: Unsupported, evidence: [] }
   - { backend: wasm, kind: LaunchWorkload, enforcement: Enforced, evidence: [TerminalOutcome] }
   - { backend: wasm, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }

@@ -443,6 +443,38 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    //     `bvisor-injective-collapse` (S3, P0-A): promotes S2's injectivity to a
+    //     registered gate. For EVERY constructible CanonicalPolicy variant across
+    //     all four families (Fd/Spawn/Env/Net), `RequirementKind::of` must be a
+    //     well-defined function (equal canonical bytes -> equal key) AND injective
+    //     on variants (equal key -> equal canonical variant), so no key fuses two
+    //     semantically-distinct variants. Under `gauntlet_red_fixture` the red branch
+    //     drives the SAME check with a POLICY-BLIND key map collapsing
+    //     InheritedFds::None/::Only onto one key and asserts NO collapse is found; a
+    //     biting check always catches it, so the red half FAILS — anti-vacuous.
+    Gate {
+        slug: "bvisor-injective-collapse",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/collapse_gate.rs::injective_collapse_red_fixture_policy_blind_map_must_escape",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
+    //     `bvisor-support-completeness` (S3, P0-A): every `RequirementKind::ALL` key
+    //     must carry an EXPLICIT support claim (Enforced/Mediated/Unsupported — even
+    //     Unsupported must be STATED) in EVERY backend's support_matrix(); a silent
+    //     gap is a finding. Under `gauntlet_red_fixture` the red branch runs the SAME
+    //     completeness check against a matrix with the `Kill` key DROPPED and asserts
+    //     no gap is found; a biting check always catches the dropped key, so the red
+    //     half FAILS — anti-vacuous.
+    Gate {
+        slug: "bvisor-support-completeness",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/collapse_gate.rs::support_completeness_red_fixture_dropped_key_must_escape",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
     // --- Phase-B6 DST corpus currency (Thread #64-B, blocking, qualified
     //     ProductionFlip). The committed `traceability/dst_corpus.yaml` must be
     //     non-empty and every row's FNV-1a digest must replay through the real

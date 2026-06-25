@@ -103,9 +103,11 @@ fn representative_requirement(kind: RequirementKind) -> BoundaryRequirement {
                 port: 443,
             }]),
         }),
-        RequirementKind::ChildSpawnDeny => BoundaryRequirement::Capability(Capability::ChildSpawn {
-            policy: SpawnPolicy::Deny,
-        }),
+        RequirementKind::ChildSpawnDeny => {
+            BoundaryRequirement::Capability(Capability::ChildSpawn {
+                policy: SpawnPolicy::Deny,
+            })
+        }
         RequirementKind::ChildSpawnAllow => {
             BoundaryRequirement::Capability(Capability::ChildSpawn {
                 policy: SpawnPolicy::Allow,

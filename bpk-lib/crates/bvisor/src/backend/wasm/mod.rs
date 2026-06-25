@@ -85,6 +85,24 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::DeniedAttempts],
     );
 
+    // InheritedFds: a wasm guest inherits NO host file descriptors by
+    // construction (it sees only the WASI preopens it was explicitly granted), so
+    // `None` is STRUCTURALLY Enforced. `Only` (selectively passing arbitrary host
+    // fds into the guest) has no WASI mechanism — UNSUPPORTED. Both stated
+    // EXPLICITLY so the per-profile completeness gate sees an answer for every key.
+    insert(
+        &mut best,
+        RequirementKind::InheritedFdsNone,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::InheritedFdsOnly,
+        Enforcement::Unsupported,
+        &[],
+    );
+
     // STRUCTURALLY UNSUPPORTED — no native fork/kill/mount in a wasm guest, no
     // allow-list broker. Listed explicitly so the honesty is a stated answer.
     insert(

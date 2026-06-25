@@ -80,9 +80,13 @@ impl Backend for WindowsBackend {
             RequirementKind::Filesystem => "appcontainer+dacl",
             RequirementKind::NetworkDenyAll => "no_net_capability_sid",
             RequirementKind::NetworkAllowList => "wfp_filter",
-            RequirementKind::ChildSpawnDeny | RequirementKind::ChildSpawnAllow => "job_object_child",
+            RequirementKind::ChildSpawnDeny | RequirementKind::ChildSpawnAllow => {
+                "job_object_child"
+            }
             RequirementKind::Environment => "env_block",
-            RequirementKind::InheritedFdsNone | RequirementKind::InheritedFdsOnly => "handle_inherit",
+            RequirementKind::InheritedFdsNone | RequirementKind::InheritedFdsOnly => {
+                "handle_inherit"
+            }
             RequirementKind::LaunchWorkload => "createprocess+lowbox_token",
             RequirementKind::CaptureStreams => "redirected_handles",
             RequirementKind::Kill => "job_object_terminate",

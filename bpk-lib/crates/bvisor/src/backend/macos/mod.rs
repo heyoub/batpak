@@ -123,6 +123,23 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::TerminalOutcome],
     );
 
+    // ChildSpawn{Deny,Allow}: UNSUPPORTED — no demonstrated native mechanism to
+    // deny new tasks or attenuate descendant spawning within the boundary on
+    // macOS (§6 macOS SPIKE pending). Stated EXPLICITLY (never silently absent) so
+    // the per-profile completeness gate sees a real answer for every key.
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnDeny,
+        Enforcement::Unsupported,
+        &[],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllow,
+        Enforcement::Unsupported,
+        &[],
+    );
+
     SupportMatrix::from_best_case(best)
 }
 

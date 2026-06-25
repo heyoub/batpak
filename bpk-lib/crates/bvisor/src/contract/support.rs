@@ -56,6 +56,25 @@ impl SupportMatrix {
             .unwrap_or_else(SupportVerdict::unsupported)
     }
 
+    /// The requirement kinds this matrix EXPLICITLY declares a best-case verdict
+    /// for, in canonical order. UNLIKE [`Self::best_case_for`] (which folds a
+    /// missing key into the fail-closed `Unsupported` bottom), this exposes the
+    /// LITERAL key set — so a completeness gate can tell an EXPLICIT `Unsupported`
+    /// claim (key present) from a SILENT GAP (key absent). The §2 law forbids a
+    /// silent gap: every key must carry a stated answer per backend.
+    #[must_use]
+    pub fn declared_kinds(&self) -> Vec<RequirementKind> {
+        self.best_case.keys().copied().collect()
+    }
+
+    /// Whether this matrix EXPLICITLY declares a verdict for `kind` (a stated
+    /// answer, even if that answer is `Unsupported`). A `false` is a SILENT GAP —
+    /// the exact completeness violation the per-profile gate flags.
+    #[must_use]
+    pub fn declares(&self, kind: RequirementKind) -> bool {
+        self.best_case.contains_key(&kind)
+    }
+
     /// Classify a requirement against the TYPED profile (no string parsing at
     /// admission). The verdict is the family best-case MET with what the machine
     /// profile actually provides — enforcement floored, evidence intersected.
