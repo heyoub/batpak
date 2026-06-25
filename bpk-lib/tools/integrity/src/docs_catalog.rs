@@ -125,48 +125,61 @@ pub(crate) fn check_readme_counts(repo_root: &Path, invariant_count: usize) -> R
     Ok(())
 }
 
-/// Anti-rot gate: every `crates/.../<file>.rs` path the cookbook cites must resolve to a
-/// real source file. This is the lint that would have caught the 6 stale example paths
-/// when `crates/core/examples/*` was hoisted to `crates/examples/examples/*`.
+/// Anti-rot gate: every `crates/.../<file>.rs` path the COOKBOOK and the root README
+/// cite must resolve to a real source file. This is the lint that would have caught the
+/// 6 stale cookbook example paths (and the stale README `eight_jobs.rs` path) when
+/// `crates/core/examples/*` was hoisted to `crates/examples/examples/*`.
 pub(crate) fn check_cookbook_citations(repo_root: &Path) -> Result<()> {
-    let cookbook_dir = project_root(repo_root).join("cookbook");
-    cookbook_citations_resolve(repo_root, &cookbook_dir)
+    let root = project_root(repo_root);
+    cookbook_citations_resolve(repo_root, &root.join("cookbook"), &root.join("README.md"))
 }
 
-/// Testable core: assert every `crates/.../*.rs` path cited under `cookbook_dir` resolves
-/// to a real file relative to `resolve_root`. Split out so a red fixture can drive a
-/// synthetic cookbook + tree.
-fn cookbook_citations_resolve(resolve_root: &Path, cookbook_dir: &Path) -> Result<()> {
-    if !cookbook_dir.is_dir() {
-        return Ok(());
-    }
+/// Testable core: assert every `crates/.../*.rs` path cited under `cookbook_dir` (and in
+/// the optional `extra_doc`, e.g. README) resolves to a real file relative to
+/// `resolve_root`. Split out so a red fixture can drive a synthetic cookbook + tree.
+fn cookbook_citations_resolve(
+    resolve_root: &Path,
+    cookbook_dir: &Path,
+    extra_doc: &Path,
+) -> Result<()> {
     let mut unresolved = Vec::new();
-    for entry in std::fs::read_dir(cookbook_dir).context("read cookbook dir")? {
-        let path = entry.context("cookbook dir entry")?.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        let text =
-            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("<cookbook>");
-        for cite in extract_crate_rs_paths(&text) {
-            // Cookbook paths are repo-root (bpk-lib) relative.
-            if !resolve_root.join(&cite).is_file() {
-                unresolved.push(format!("{name}: {cite}"));
+    if cookbook_dir.is_dir() {
+        for entry in std::fs::read_dir(cookbook_dir).context("read cookbook dir")? {
+            let path = entry.context("cookbook dir entry")?.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                collect_unresolved_citations(resolve_root, &path, &mut unresolved)?;
             }
         }
+    }
+    if extra_doc.is_file() {
+        collect_unresolved_citations(resolve_root, extra_doc, &mut unresolved)?;
     }
     ensure(
         unresolved.is_empty(),
         format!(
-            "cookbook cites `crates/.../*.rs` path(s) that do not resolve (a moved/renamed \
+            "a doc cites `crates/.../*.rs` path(s) that do not resolve (a moved/renamed \
              example?). Fix the path(s):\n  {}",
             unresolved.join("\n  ")
         ),
     )
+}
+
+/// Append every unresolved `crates/.../*.rs` citation in one markdown file to `out`.
+fn collect_unresolved_citations(
+    resolve_root: &Path,
+    doc: &Path,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    let text = std::fs::read_to_string(doc).with_context(|| format!("read {}", doc.display()))?;
+    let name = doc.file_name().and_then(|n| n.to_str()).unwrap_or("<doc>");
+    for cite in extract_crate_rs_paths(&text) {
+        // Doc paths are repo-root (bpk-lib) relative (a leading `bpk-lib/` is ignored
+        // since extraction starts at `crates/`).
+        if !resolve_root.join(&cite).is_file() {
+            out.push(format!("{name}: {cite}"));
+        }
+    }
+    Ok(())
 }
 
 /// Extract every `crates/<...>.rs` path token from markdown text. A token starts at

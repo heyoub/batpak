@@ -32,15 +32,20 @@
 //!    authority. On the committed snapshot's diff, an enforcement rank that
 //!    DECREASED, a removed (backend,kind) row, a removed evidence claim, or a
 //!    witnessed `true->false` is a [`crate::meta_gate::WeakeningKind::CapabilityDowngraded`]
-//!    weakening — cleared only by a two-person `GAUNTLET-WEAKEN-OK` approval OR
-//!    by the SAME diff adding a matching [`crate::typed_waivers::WaiverKind::CapabilityDowngrade`]
-//!    waiver. (Mirror-check #1 keeps the diff truthful; the approval lives here.)
+//!    weakening — cleared by the meta-gate's standard two-person
+//!    `GAUNTLET-WEAKEN-OK` approval (L4 for a drop to `Unsupported` / a removed
+//!    row). (Mirror-check #1 keeps the diff truthful; the approval lives here.)
 //!
 //! 3. `WaiverKind::CapabilityDowngrade` (typed, expiring, owned, ADR-anchored):
-//!    the DURABLE justification form a sanctioned downgrade takes — owner +
-//!    expiry + ADR + (L4) independent sign-off, validated like every waiver. It
-//!    forces "complete the capability OR justify the gap with an expiry"; it is
-//!    never a silent permanent carve-out.
+//!    the DURABLE justification record a sanctioned downgrade takes — owner +
+//!    expiry + ADR + (L4) independent sign-off, validated like every waiver.
+//!    ADDING such a waiver is itself an approval-gated weakening (meta_gate's
+//!    `detect_waiver_additions`), and [`check`] validates each waiver target names
+//!    a real `backend:kind` cell (anti-rot). It forces "complete the capability OR
+//!    justify the gap with an expiry"; it is never a silent permanent carve-out.
+//!    (The meta-gate does NOT special-case the waiver as a same-diff downgrade
+//!    clearance — it stays pure-diff; the approval path above is what clears the
+//!    `CapabilityDowngraded` finding.)
 //!
 //! WHY MIRROR-AND-NOT-RATCHET HERE. Monotonic "floor only moves up" cannot be
 //! enforced on a stateless fresh checkout without git history (a hand-lowered

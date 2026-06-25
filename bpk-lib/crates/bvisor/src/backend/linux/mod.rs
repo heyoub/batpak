@@ -1,12 +1,19 @@
-//! Linux backend — landlock + cgroup-v2 + pidfd confinement (scaffolding).
+//! Linux backend — landlock + cgroup-v2 + launcher-process confinement.
 //!
-//! STEP (a) scaffolding: the HONEST per-platform [`SupportMatrix`] (pure data,
-//! always-compiled, cross-platform unit-testable) plus a [`LinuxBackend`] struct
-//! whose `execute()` is a stub returning [`Outcome::Unsupported`]. Real syscalls
-//! (probe ABI/cgroup/pidfd, landlock enforcement, cgroup.kill teardown) land in
-//! step (b), in the [`super::linux::sys`] unsafe basement. NO `unsafe` here.
+//! The HONEST per-platform [`SupportMatrix`] (pure data, always-compiled,
+//! cross-platform unit-testable) plus a [`LinuxBackend`] whose `execute()` runs the
+//! workload through the confinement launcher (a clone3 child: fd-scrub → landlock
+//! `restrict_self` → cgroup placement → `fexecve`). The unsafe OS code is quarantined
+//! to the [`super::linux::sys`] basement + the `launcher/linux/` binary; this module's
+//! orchestration is SAFE. The machine ceiling (`profile()`) advertises ONLY what
+//! `execute()` genuinely backs with a real syscall — Filesystem (landlock above the
+//! ABI floor), LaunchWorkload + CaptureStreams (always), Kill + process_count (with a
+//! cgroup base). Everything else floors to Unsupported (see `backend_impl`).
 //!
-//! HONESTY (SCOPE §4 — Linux): ~all Enforced. `NetworkAllowList` is
+//! HONESTY (SCOPE §4 — Linux): the family `support_matrix()` below is the ASPIRATION
+//! table (what the platform COULD enforce), independent of this build's machine
+//! ceiling; the mechanism notes on its cells describe the INTENDED mechanism, not
+//! necessarily one `execute()` implements yet. `NetworkAllowList` is
 //! [`Enforcement::Unsupported`] in v1 (it needs a broker that does not exist yet);
 //! claiming otherwise would be a lie the gauntlet must catch. `Kill` is Enforced
 //! (cgroup-v2 `cgroup.kill` + pidfd), `Filesystem` Enforced (landlock, fails

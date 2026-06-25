@@ -47,10 +47,13 @@ pub(crate) enum WaiverKind {
     /// `support_matrix()` cell whose enforcement was deliberately lowered, a
     /// (backend,kind) row removed, an evidence claim dropped, or a witness
     /// un-proved. The `target` is `backend:kind` (e.g. `linux:ExposePath`). This
-    /// is the DURABLE form a downgrade approval takes; the meta-gate accepts a
-    /// matching, in-date waiver added in the same diff as authorization for the
-    /// downgrade. A downgrade to `Unsupported` (a fully-lost capability) is L4
-    /// blast radius and so requires `independent_signoff: true`.
+    /// is the DURABLE record a downgrade takes — its `target` is validated against
+    /// a real cell by `capability_snapshot::check`, and ADDING it is itself an
+    /// approval-gated weakening (`meta_gate::detect_waiver_additions`). A downgrade
+    /// to `Unsupported` (a fully-lost capability) is L4 blast radius and so requires
+    /// `independent_signoff: true`. (The meta-gate clears the diff's
+    /// `CapabilityDowngraded` finding via its standard two-person approval path; it
+    /// does not special-case this waiver as a same-diff clearance.)
     #[serde(rename = "capability-downgrade")]
     CapabilityDowngrade,
 }

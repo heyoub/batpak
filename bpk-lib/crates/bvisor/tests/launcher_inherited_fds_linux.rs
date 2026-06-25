@@ -1,8 +1,14 @@
-// INDEPENDENT-ORACLE proof for `InheritedFds = Enforced`: a host file descriptor
-// that is INHERITED into the launcher but NOT declared in the plan's descriptor
-// table is CLOSED by the child-side fd-scrub before the workload `fexecve`s — so an
-// undeclared host fd (a leaked secret handle) cannot survive into the confined
+// LAUNCHER MECHANISM proof (a building block, NOT a contract-admission proof): a host
+// file descriptor INHERITED into the launcher but NOT declared in the plan's
+// descriptor table is CLOSED by the child-side fd-scrub before the workload `fexecve`s
+// — so an undeclared host fd (a leaked secret handle) cannot survive into the confined
 // workload. G6 (no-fd-escape).
+//
+// SCOPE (codex review 2026-06-25): this proves the launcher's scrub realises
+// `FdPolicy::None` (no host fds survive). It does NOT prove the `InheritedFds`
+// capability is admitted + honored end to end, and the scrub does NOT implement
+// `FdPolicy::Only(..)`. So `InheritedFds` is NOT in the ceiling (fails closed) until
+// admission is policy-aware + the contract path is proven.
 //
 // WHY THIS IS A REAL ORACLE (not a self-report), with a HOST-SIDE witness:
 //   * The host creates a pipe and keeps the READ end. It relocates the pipe's WRITE

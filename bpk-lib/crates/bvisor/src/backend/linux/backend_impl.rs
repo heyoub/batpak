@@ -18,19 +18,13 @@
 //! delivers, gated on the live probes —
 //!   - `Filesystem` (landlock) — Enforced at/above the ABI floor, else Unsupported;
 //!   - `LaunchWorkload` + `CaptureStreams` — always (process spawn + pipe capture);
-//!   - `Environment` — always Enforced: the launcher serves an EXPLICIT envp to
-//!     `fexecve` (nothing inherited from launcher/host), proven by the independent
-//!     `tests/launcher_env_linux.rs` env-isolation oracle;
-//!   - `InheritedFds` — always Enforced: the child-side scrub closes every
-//!     non-allowlisted fd before `fexecve`, proven by the independent host-side
-//!     pipe oracle in `tests/launcher_inherited_fds_linux.rs`;
 //!   - `Kill{RunTree,Atomic}` (cgroup `cgroup.kill`) — Enforced ONLY when a cgroup base
 //!     with atomic kill was probed, else ABSENT ⇒ Unsupported;
 //!   - Budget `process_count` (cgroup `pids.max`, witnessed from `pids.peak`) — Enforced
 //!     ONLY when a cgroup base was probed; every OTHER budget dimension stays `Mediated`
 //!     (observed-not-capped — no cap installed, so claiming Enforced would over-claim).
 //!
-//! EVERYTHING ELSE (`ChildSpawn`, `NetworkDenyAll`, `TempRoot`, `ExposePath`, …) is ABSENT from the
+//! EVERYTHING ELSE (`Environment`, `InheritedFds`, `ChildSpawn`, `NetworkDenyAll`, `TempRoot`, …) is ABSENT from the
 //! ceiling ⇒ `Unsupported` ⇒ `plan()` fails closed. The family `support_matrix()` keeps
 //! the §4 aspiration; the machine ceiling reflects reality. Claiming more than
 //! `execute()` delivers is the exact lie the gauntlet must catch — so we do not.
@@ -240,35 +234,21 @@ impl LinuxBackend {
                 [EvidenceClaim::CapturedStreams].into_iter().collect(),
             ),
         );
-        // Environment is Enforced structurally: the launcher serves the workload an
-        // EXPLICIT envp to `fexecve` (`launcher/linux/sys.rs::build_target`) — nothing
-        // is inherited from the launcher or host, so a host secret in an env var cannot
-        // reach the confined workload. The mechanism (the declared envp + the exec
-        // phase) is attestable via the plan + the launcher transcript. INDEPENDENT
-        // ORACLE: `tests/launcher_env_linux.rs::workload_environment_is_exactly_the_declared_envp`
-        // proves the workload's own `env` output is the declared set, with the
-        // launcher's `BVISOR_*_FD` channel vars absent (no inheritance).
-        ceiling.insert(
-            RequirementKind::Environment,
-            SupportVerdict::new(
-                Enforcement::Enforced,
-                [EvidenceClaim::MechanismAttestation].into_iter().collect(),
-            ),
-        );
-        // InheritedFds is Enforced structurally: the child-side fd-scrub closes EVERY
-        // non-allowlisted fd before `fexecve` (`launcher/linux/imp.rs` G6 scrub), so an
-        // undeclared host fd inherited into the launcher cannot survive into the
-        // workload. INDEPENDENT ORACLE: `tests/launcher_inherited_fds_linux.rs` injects
-        // a real pipe write end as an undeclared inherited fd and confirms, via a
-        // HOST-SIDE pipe read (nothing leaked) AND the workload's own report, that the
-        // scrub closed it.
-        ceiling.insert(
-            RequirementKind::InheritedFds,
-            SupportVerdict::new(
-                Enforcement::Enforced,
-                [EvidenceClaim::MechanismAttestation].into_iter().collect(),
-            ),
-        );
+        // Environment + InheritedFds are NOT in the ceiling (⇒ Unsupported ⇒ plan()
+        // fails closed). BACKED OUT after a codex adversarial review (2026-06-25): the
+        // confinement contract admits on a RequirementKind (support.rs::of_capability is
+        // policy-BLIND for these two — unlike Network, which splits DenyAll/AllowList into
+        // distinct kinds), but the launcher only implements ONE policy shape and never
+        // lowers the admitted policy. plan_build emits a HARDCODED envp regardless of the
+        // spec's `EnvPolicy::EmptyExcept(..)`, and the scrub only realises
+        // `FdPolicy::None`, never `Only(..)`. So advertising Enforced here would ADMIT
+        // `Environment{EmptyExcept(["FOO"])}` / `InheritedFds{Only(fd)}` and silently NOT
+        // deliver them — an over-claim. The launcher MECHANISM proofs survive as building
+        // blocks (`tests/launcher_env_linux.rs`, `tests/launcher_inherited_fds_linux.rs`):
+        // they prove the launcher CAN serve an explicit envp / scrub undeclared fds, NOT
+        // that the BoundaryPlanner→execute() path admits + honors the contract policy.
+        // Genuine completion (policy-aware admission + spec→envp/allowlist lowering + a
+        // CONTRACT-level oracle) is real work, tracked with NetworkDenyAll/ChildSpawn.
         // Kill{RunTree,Atomic} is Enforced ONLY when a cgroup confinement base with
         // atomic `cgroup.kill` was probed: the workload runs in a cgroup leaf (placed
         // at birth by the launcher's CLONE_INTO_CGROUP), so the host can SIGKILL the
