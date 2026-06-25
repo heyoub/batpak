@@ -1,25 +1,33 @@
-//! [`LinuxBackend`] — REAL landlock filesystem confinement (step b, part 1),
-//! enforced THROUGH the host-side launcher harness (backend→launcher rewire 7b).
+//! [`LinuxBackend`] — REAL landlock filesystem confinement + cgroup v2 resource
+//! confinement, enforced THROUGH the host-side launcher harness (backend→launcher
+//! rewire 7b; cgroup steps 8a–8b-ii-b2).
 //!
-//! SCOPE of THIS chunk: REAL filesystem confinement ONLY. `execute()` builds a
-//! [`LinuxLaunchPlanV1`] from the admitted plan (descriptor table over pre-opened
-//! authority handles + a scrub/landlock-apply/exec lowering schedule), resolves the
-//! confinement launcher binary, and runs it via [`super::launch::run_launcher`].
-//! The LAUNCHER applies the landlock ruleset in its single-threaded child window
-//! (`restrict_self`, after the fd scrub, before `fexecve`) so confinement is in
-//! force the instant the workload image runs. The backend NO LONGER spawns/confines
-//! itself — its only remaining raw surface is the landlock ABI probe (for
-//! `profile()`); the harness owns the memfd/spawn `unsafe`. The orchestration here
-//! is SAFE.
+//! SCOPE: `execute()` builds a [`LinuxLaunchPlanV1`] from the admitted plan (descriptor
+//! table over pre-opened authority handles + a scrub/landlock-apply/exec lowering
+//! schedule), creates a per-run cgroup leaf (when a cgroup base was probed), resolves the
+//! confinement launcher binary, and runs it via [`super::launch::run_launcher`]. The
+//! LAUNCHER applies the landlock ruleset in its single-threaded child window
+//! (`restrict_self`, after the fd scrub, before `fexecve`) AND births the child INSIDE
+//! the cgroup leaf via `clone3(CLONE_INTO_CGROUP)`, so both FS and resource confinement
+//! are in force the instant the workload image runs. The backend NO LONGER
+//! spawns/confines itself — its only raw surface is the landlock ABI probe (for
+//! `profile()`); the harness owns the memfd/spawn `unsafe` and the cgroup manager is pure
+//! SAFE `std::fs`. The orchestration here is SAFE.
 //!
-//! HONESTY (the cardinal rule): `profile()` backs ONLY what this chunk genuinely
-//! delivers — `Filesystem` (landlock, gated by the live ABI floor, now applied by
-//! the launcher), `LaunchWorkload` (the launcher execs the workload), and
-//! `CaptureStreams`. EVERYTHING ELSE (`ChildSpawn`, `Kill`, `NetworkDenyAll`,
-//! `TempRoot`, …) is ABSENT from the ceiling, so it floors to `Unsupported` and
-//! `plan()` fails closed. The family `support_matrix()` keeps the §4 aspiration;
-//! the machine ceiling reflects reality. Claiming more than `execute()` delivers
-//! is the exact lie the gauntlet must catch — so we do not.
+//! HONESTY (the cardinal rule): `profile()` backs ONLY what this build genuinely
+//! delivers, gated on the live probes —
+//!   - `Filesystem` (landlock) — Enforced at/above the ABI floor, else Unsupported;
+//!   - `LaunchWorkload` + `CaptureStreams` — always (process spawn + pipe capture);
+//!   - `Kill{RunTree,Atomic}` (cgroup `cgroup.kill`) — Enforced ONLY when a cgroup base
+//!     with atomic kill was probed, else ABSENT ⇒ Unsupported;
+//!   - Budget `process_count` (cgroup `pids.max`, witnessed from `pids.peak`) — Enforced
+//!     ONLY when a cgroup base was probed; every OTHER budget dimension stays `Mediated`
+//!     (observed-not-capped — no cap installed, so claiming Enforced would over-claim).
+//!
+//! EVERYTHING ELSE (`ChildSpawn`, `NetworkDenyAll`, `TempRoot`, …) is ABSENT from the
+//! ceiling ⇒ `Unsupported` ⇒ `plan()` fails closed. The family `support_matrix()` keeps
+//! the §4 aspiration; the machine ceiling reflects reality. Claiming more than
+//! `execute()` delivers is the exact lie the gauntlet must catch — so we do not.
 //!
 //! ## What the launcher path observes vs. the OLD self-spawn path
 //! The launcher reports its honest setup transcript (terminal + phase resolutions +

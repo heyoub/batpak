@@ -21,22 +21,29 @@
 //!     and holds processes — the no-internal-process trap) up to the
 //!     controller-delegating ancestor (`app.slice`), where a limit is genuinely
 //!     enforced rather than refused;
+//!   - [`probe_atomic_kill`] (8b-ii-b1) — confirm `cgroup.kill` is really present under a
+//!     base (create probe leaf → check → remove); the honest backing for the backend's
+//!     `Kill{RunTree,Atomic}=Enforced` claim;
 //!   - [`CgroupLeaf`] — create/configure a leaf, set `pids.max`/`memory.max`
 //!     (ONLY for controllers actually delegated — an un-delegated limit is a
-//!     typed error, never a silent no-op), read `cgroup.procs`, open the dir as
-//!     an [`OwnedFd`] (for 8b-ii's `CLONE_INTO_CGROUP` descriptor slot), and tear
-//!     the leaf down atomically via `cgroup.kill` → bounded
-//!     [`CgroupLeaf::wait_until_empty`] drain (SIGKILL is async) → `rmdir`.
+//!     typed error, never a silent no-op), read `cgroup.procs`, read the
+//!     [`CgroupLeaf::peak_pids`] high-water mark (the honest process-count budget
+//!     witness, 8b-ii-b2), open the dir as an [`OwnedFd`] (the launcher's
+//!     `CLONE_INTO_CGROUP` descriptor slot), and tear the leaf down atomically via
+//!     `cgroup.kill` → bounded [`CgroupLeaf::wait_until_empty`] drain (SIGKILL is
+//!     async) → `rmdir`.
 //!
 //! The enforcement that this is REAL — not a cosmetic interface-file value — is
 //! proven on the live kernel by `tests/cgroup_enforcement_linux.rs` (8b-i): a
 //! fork-bomb in a capped leaf makes the kernel's own `pids.events` `max` counter
 //! climb (forks DENIED) while `pids.current` stays at/under the cap.
 //!
-//! 8b-ii (NOT here) adds the launcher's `clone3(CLONE_INTO_CGROUP)` placement of
-//! the child INTO the prepared leaf, and the `profile()` Budget/Kill honesty
-//! cells (`Enforced` ONLY when a real delegated controller backs them). NO
-//! launcher change, NO `profile()`/ceiling change, NO `unsafe` lives here.
+//! This module is pure SAFE `std::fs` and stays so. The pieces that consume it live
+//! ELSEWHERE: the launcher's `clone3(CLONE_INTO_CGROUP)` placement is in the launcher
+//! basement (`launcher/linux/sys.rs`), and the `profile()` Budget/Kill honesty cells
+//! (`Enforced` ONLY when these probes confirm a real controller/kill) are in
+//! `backend_impl.rs`. NO launcher change, NO `profile()`/ceiling change, NO `unsafe`
+//! lives here.
 //!
 //! ## systemd user-delegation expectation (the realistic deployment)
 //! An unprivileged process cannot write the system-root cgroup. Under systemd a
