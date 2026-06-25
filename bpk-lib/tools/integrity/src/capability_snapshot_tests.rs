@@ -37,7 +37,7 @@ fn derived_floor_is_non_empty_and_covers_every_backend() {
     let snapshot = derived();
     assert!(
         snapshot.ceilings.len() >= 40,
-        "four backends each advertise ~13 cells; got {}",
+        "four backends each advertise 17 RequirementKind cells; got {}",
         snapshot.ceilings.len()
     );
     for backend in BACKENDS {
