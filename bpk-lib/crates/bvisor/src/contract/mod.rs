@@ -22,4 +22,5 @@ pub(crate) mod qualification;
 pub(crate) mod recovery;
 pub(crate) mod registry;
 pub(crate) mod report;
+pub(crate) mod secret;
 pub(crate) mod support;

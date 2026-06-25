@@ -75,6 +75,11 @@ impl<'r> BoundaryPlanner<'r> {
                 backend: backend.clone(),
             })?;
 
+        // CONTRACT GATE (proof-spine §5 D2): every capability policy must be
+        // structurally valid BEFORE classification/execution — a malformed policy fails
+        // closed HERE, so the workload never runs.
+        validate_capability_policies(&spec.capabilities)?;
+
         // ONE probe per planning attempt; one typed profile derived from it.
         let snapshot = backend.probe();
         let profile = backend.profile(&snapshot);
@@ -120,51 +125,7 @@ impl<'r> BoundaryPlanner<'r> {
         // Map the AUTHORITATIVE reference outcome back to the existing surface.
         match outcome {
             AdmissionOutcome::Admitted { .. } => {
-                // Support + evidence membranes passed; the seven-dimensional budget
-                // membrane is now LOAD-BEARING and fail-closed. The request is
-                // adjudicated against this backend's declared budget profile + the
-                // spec's derived structural minimums. Inert (all-Unsupported) refuses
-                // every budgeted spec here; capable backends (Sim, native) admit.
-                let derived = derive_minimums(spec);
-                let profile_digest =
-                    budget_profile_digest(&snapshot).map_err(|error| {
-                        PlanError::ProfileInsufficient {
-                            backend: backend.id(),
-                            detail: format!("budget profile canonicalization failed: {error}"),
-                        }
-                    })?;
-                let admitted_budgets =
-                    budget_admit(&spec.budgets, &snapshot.budget, &derived, profile_digest)
-                        .map_err(|refusal| PlanError::BudgetRefused {
-                            backend: backend.id(),
-                            dimension: refusal.dimension,
-                            failure: refusal.failure,
-                        })?;
-
-                let admitted: Vec<AdmittedRequirement> = classified
-                    .iter()
-                    .map(|(requirement, verdict)| AdmittedRequirement {
-                        mechanism: backend.mechanism(requirement, verdict.enforcement),
-                        requirement: requirement.clone(),
-                        enforcement: verdict.enforcement,
-                    })
-                    .collect();
-                let plan_id =
-                    compute_plan_id(backend.id(), &snapshot, &admitted, spec, &admitted_budgets)
-                        .map_err(|error| PlanError::ProfileInsufficient {
-                            backend: backend.id(),
-                            detail: format!("plan canonicalization failed: {error}"),
-                        })?;
-                Ok(BoundaryPlan {
-                    schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
-                    plan_id,
-                    backend: backend.id(),
-                    profile: snapshot,
-                    admitted,
-                    workload: spec.workload.clone(),
-                    budgets: admitted_budgets,
-                    evidence: spec.evidence,
-                })
+                build_admitted_plan(backend.as_ref(), snapshot, &classified, spec)
             }
             // Membrane 1 = support, membrane 2 = evidence (the current contract).
             AdmissionOutcome::Refused { membrane: 1, .. } => {
@@ -192,6 +153,72 @@ impl<'r> BoundaryPlanner<'r> {
             }),
         }
     }
+}
+
+/// Build the admitted [`BoundaryPlan`] once the support + evidence membranes passed:
+/// adjudicate the seven-dimensional budget membrane (LOAD-BEARING, fail-closed) against
+/// this backend's declared budget profile + the spec's derived structural minimums,
+/// then assemble the admitted requirements + plan identity. Split out of
+/// [`BoundaryPlanner::plan`] to hold that function under the complexity budget.
+fn build_admitted_plan(
+    backend: &dyn Backend,
+    snapshot: BackendProfileSnapshot,
+    classified: &[(BoundaryRequirement, SupportVerdict)],
+    spec: &BoundarySpec,
+) -> Result<BoundaryPlan, PlanError> {
+    let derived = derive_minimums(spec);
+    let profile_digest =
+        budget_profile_digest(&snapshot).map_err(|error| PlanError::ProfileInsufficient {
+            backend: backend.id(),
+            detail: format!("budget profile canonicalization failed: {error}"),
+        })?;
+    let admitted_budgets = budget_admit(&spec.budgets, &snapshot.budget, &derived, profile_digest)
+        .map_err(|refusal| PlanError::BudgetRefused {
+            backend: backend.id(),
+            dimension: refusal.dimension,
+            failure: refusal.failure,
+        })?;
+    let admitted: Vec<AdmittedRequirement> = classified
+        .iter()
+        .map(|(requirement, verdict)| AdmittedRequirement {
+            mechanism: backend.mechanism(requirement, verdict.enforcement),
+            requirement: requirement.clone(),
+            enforcement: verdict.enforcement,
+        })
+        .collect();
+    let plan_id = compute_plan_id(backend.id(), &snapshot, &admitted, spec, &admitted_budgets)
+        .map_err(|error| PlanError::ProfileInsufficient {
+            backend: backend.id(),
+            detail: format!("plan canonicalization failed: {error}"),
+        })?;
+    Ok(BoundaryPlan {
+        schema_version: BOUNDARY_PLAN_SCHEMA_VERSION,
+        plan_id,
+        backend: backend.id(),
+        profile: snapshot,
+        admitted,
+        workload: spec.workload.clone(),
+        budgets: admitted_budgets,
+        evidence: spec.evidence,
+    })
+}
+
+/// The capability-policy CONTRACT GATE (proof-spine §5 D2): fail closed if any
+/// capability carries a structurally-invalid policy, BEFORE any classification or
+/// execution. Today only `Environment::Exact` has a contract validator (its `validate`
+/// rejects duplicate/reserved-byte names, NUL values, over-cap tables); other policies
+/// add a single match arm here when they gain one.
+fn validate_capability_policies(capabilities: &[Capability]) -> Result<(), PlanError> {
+    for capability in capabilities {
+        if let Capability::Environment { policy } = capability {
+            policy
+                .validate()
+                .map_err(|error| PlanError::InvalidPolicy {
+                    detail: error.to_string(),
+                })?;
+        }
+    }
+    Ok(())
 }
 
 /// The 2-bit enforcement code the admission inputs use

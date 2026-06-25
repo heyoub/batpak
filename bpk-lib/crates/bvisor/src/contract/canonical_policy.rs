@@ -23,11 +23,13 @@
 //! explicit length prefix, so no two distinct policies can alias by field-run
 //! ambiguity (`["a","bc"]` ≠ `["ab","c"]`).
 
-use crate::contract::capability::{EnvPolicy, FdPolicy, NetDest, NetPolicy, SpawnPolicy};
+use crate::contract::capability::{
+    EnvEntry, EnvPolicy, EnvSource, FdPolicy, NetDest, NetPolicy, SpawnPolicy,
+};
 
 /// The CAPABILITY FAMILY tag — the first byte of every canonical encoding. Two
 /// policies from different families can NEVER share canonical bytes (the family
-/// byte differs), so e.g. an empty fd `Only([])` and an empty env `EmptyExcept([])`
+/// byte differs), so e.g. an empty fd `Only([])` and an empty env `Exact([])`
 /// stay distinct even though their payloads are both "an empty list".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -91,21 +93,28 @@ impl CanonicalPolicy {
         enc.finish()
     }
 
-    /// Normalize an environment policy ([`EnvPolicy`]) to its canonical form. The
-    /// `EmptyExcept(..)` key list is sorted + deduplicated by its raw UTF-8 bytes
-    /// (deterministic, locale-independent), and each key is LENGTH-PREFIXED so two
-    /// key sets with the same concatenation but different boundaries
-    /// (`["AB","C"]` vs `["A","BC"]`) encode DISTINCTLY.
+    /// Normalize an environment policy ([`EnvPolicy::Exact`]) to its canonical form.
+    /// The entry list is sorted by NAME (the only ordering that is a syntactic alias —
+    /// names are unique by the contract gate, so reordering carries no meaning), and
+    /// each entry encodes `name · source-tag · payload`, every field LENGTH-PREFIXED.
+    ///
+    /// DISTINCT-SEMANTICS ⇒ DISTINCT-BYTES, load-bearing here: a `Literal("x")` and a
+    /// `SecretLease(SecretRef("x"))` for the SAME name carry the SAME string payload
+    /// but DIFFERENT meaning (an inline value vs a lease ref), so they get DISTINCT
+    /// SOURCE TAGS (`0` literal, `1` lease) and therefore distinct canonical bytes.
+    /// Length prefixes keep `name`/`value` boundaries unambiguous (`["AB","C"]` vs
+    /// `["A","BC"]` cannot alias). NO de-duplication: a valid table has unique names,
+    /// and the canonical form is over the table AS-IS (an invalid duplicate is refused
+    /// at admission, never keyed).
     #[must_use]
     pub fn of_env(policy: &EnvPolicy) -> Self {
         let mut enc = Encoder::new(Family::Env);
         match policy {
-            EnvPolicy::EmptyExcept(keys) => {
+            EnvPolicy::Exact(entries) => {
                 enc.variant(0);
-                let mut sorted: Vec<&str> = keys.iter().map(String::as_str).collect();
-                sorted.sort_unstable();
-                sorted.dedup();
-                enc.len_prefixed_str_list(&sorted);
+                let mut sorted: Vec<&EnvEntry> = entries.iter().collect();
+                sorted.sort_by(|a, b| a.name.cmp(&b.name));
+                enc.len_prefixed_env_list(&sorted);
             }
         }
         enc.finish()
@@ -170,14 +179,26 @@ impl Encoder {
         }
     }
 
-    /// Encode a sorted+deduplicated string list as `count · [len · utf8-bytes]*`.
-    /// Each element is length-prefixed so element boundaries are unambiguous.
-    fn len_prefixed_str_list(&mut self, items: &[&str]) {
+    /// Encode a name-sorted env-entry list as
+    /// `count · [name-len · name-utf8 · source-tag · value-len · value-utf8]*`.
+    /// The SOURCE TAG (`0` literal, `1` lease) is what makes a `Literal("x")` and a
+    /// `SecretLease(SecretRef("x"))` of the same name DISTINCT canonical bytes despite
+    /// the identical payload string; every field is length-prefixed so name/value
+    /// boundaries are unambiguous.
+    fn len_prefixed_env_list(&mut self, items: &[&EnvEntry]) {
         self.count(items.len());
-        for item in items {
-            let raw = item.as_bytes();
-            self.count(raw.len());
-            self.bytes.extend_from_slice(raw);
+        for entry in items {
+            let name = entry.name.as_bytes();
+            self.count(name.len());
+            self.bytes.extend_from_slice(name);
+            let (tag, payload): (u8, &str) = match &entry.source {
+                EnvSource::Literal(value) => (0, value.as_str()),
+                EnvSource::SecretLease(reference) => (1, reference.id()),
+            };
+            self.bytes.push(tag);
+            let payload = payload.as_bytes();
+            self.count(payload.len());
+            self.bytes.extend_from_slice(payload);
         }
     }
 

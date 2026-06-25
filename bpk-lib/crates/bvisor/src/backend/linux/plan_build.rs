@@ -94,6 +94,7 @@ pub(super) fn prepare_launch(
     plan: &BoundaryPlan,
     fs: Option<&(FsAccess, PathSet)>,
     cgroup_dir_fd: Option<OwnedFd>,
+    envp: Vec<(String, String)>,
 ) -> Result<Prepared, String> {
     let mut table: Vec<DescriptorSlotV1> = Vec::new();
     let mut authority: Vec<AuthorityFd> = Vec::new();
@@ -175,7 +176,7 @@ pub(super) fn prepare_launch(
     entries.push(entry(ID_EXEC, PHASE_CODE_EXEC));
     let lowering = LoweringWireV1 { entries };
 
-    let body = build_body(plan, lowering, table, exe, args)?;
+    let body = build_body(plan, lowering, table, exe, args, envp)?;
     Ok(Prepared {
         launch_plan: LinuxLaunchPlanV1 { body },
         authority,
@@ -266,6 +267,7 @@ fn build_body(
     table: Vec<DescriptorSlotV1>,
     exe: &str,
     args: &[String],
+    envp: Vec<(String, String)>,
 ) -> Result<LinuxLaunchBodyV1, String> {
     let lowering_bytes = batpak::canonical::to_bytes(&lowering)
         .map_err(|e| format!("cannot canonically encode the lowering schedule: {e}"))?;
@@ -290,7 +292,11 @@ fn build_body(
         descriptor_table: table,
         target: TargetSpecV1 {
             argv,
-            envp: explicit_envp(),
+            // The target environment is EXACTLY the lowered Environment::Exact table
+            // (literals + parent-resolved leases) — nothing inherited. No implicit
+            // PATH: the spec DECLARES every variable it needs (proof-spine §5 D2 —
+            // platform-generated entries must be explicit, never invisible).
+            envp,
             exe_slot: slot_u32(SLOT_EXE),
         },
     })
@@ -307,13 +313,6 @@ fn derive_id(plan_id: BoundaryPlanHash, domain: &[u8]) -> Digest32 {
     framed.push(0u8); // length-unambiguous separator (domain is NUL-free)
     framed.extend_from_slice(&plan_id.0);
     batpak::event::hash::compute_hash(&framed)
-}
-
-/// The EXPLICIT environment the launcher hands the workload — nothing is inherited
-/// (the launcher serves an explicit envp). A minimal `PATH` so a dynamically-linked
-/// workload can resolve its loader/tools; no host env leaks to the guest.
-fn explicit_envp() -> Vec<(String, String)> {
-    vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]
 }
 
 /// A slot fd number as the `u32` the descriptor table declares. The slot constants

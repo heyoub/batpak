@@ -4,8 +4,8 @@
 //! GRANULARITY (load-bearing): a [`RequirementKind`] is the VARIANT-LEVEL projection
 //! of a [`CanonicalPolicy`] — the family tag + variant discriminant (the canonical
 //! bytes' two-byte prefix), NOT the full payload. `InheritedFdsOnly` is one key for
-//! every `Only(..)` fd list; `Environment` is one key for every `EmptyExcept(..)`
-//! key set. The FULL payload-level injectivity (distinct fd lists ⇒ distinct
+//! every `Only(..)` fd list; `Environment` is one key for every `Exact(..)`
+//! entry table. The FULL payload-level injectivity (distinct fd lists ⇒ distinct
 //! canonical bytes) is [`CanonicalPolicy`]'s OWN §2 law, proven exhaustively in
 //! `canonical_policy_tests.rs`. This gate proves the COMPLEMENTARY half — that the
 //! policy→key map respects the canonical VARIANT, with no policy-blind collapse
@@ -24,7 +24,7 @@
 use super::RequirementKind;
 use crate::contract::canonical_policy::CanonicalPolicy;
 use crate::contract::capability::{
-    Capability, EnvPolicy, FdPolicy, NetDest, NetPolicy, SpawnPolicy,
+    Capability, EnvEntry, EnvPolicy, FdPolicy, NetDest, NetPolicy, SpawnPolicy,
 };
 
 /// One sample: a capability, its policy-aware key, and the canonical bytes of its
@@ -86,16 +86,18 @@ fn samples() -> Vec<(&'static str, RequirementKind, CanonicalPolicy)> {
         (
             "env-empty",
             RequirementKind::of_capability_for_test(&Capability::Environment {
-                policy: EnvPolicy::EmptyExcept(vec![]),
+                policy: EnvPolicy::Exact(vec![]),
             }),
-            CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![])),
+            CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![])),
         ),
         (
-            "env-keys",
+            "env-entries",
             RequirementKind::of_capability_for_test(&Capability::Environment {
-                policy: EnvPolicy::EmptyExcept(vec!["PATH".to_string()]),
+                policy: EnvPolicy::Exact(vec![EnvEntry::literal("PATH", "/usr/bin")]),
             }),
-            CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec!["PATH".to_string()])),
+            CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![EnvEntry::literal(
+                "PATH", "/usr/bin",
+            )])),
         ),
         // ── Network: DenyAll vs AllowList (distinct keys) ──
         (

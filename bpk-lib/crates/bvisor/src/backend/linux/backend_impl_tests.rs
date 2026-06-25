@@ -74,11 +74,8 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
         RequirementKind::ChildSpawnDeny,
         RequirementKind::ChildSpawnAllow,
         RequirementKind::TempRoot,
-        // Environment + InheritedFds were backed out of the ceiling after a codex
-        // review: even with policy-AWARE keys (proof-spine §2 splits InheritedFds into
-        // None/Only), the launcher only realises one policy shape and never lowers the
-        // admitted policy, so Enforced would over-admit unimplemented policy variants.
-        RequirementKind::Environment,
+        // InheritedFds is still backed out of the ceiling: the launcher scrub realises
+        // `FdPolicy::None` as a mechanism but the contract path is not yet proven (S5).
         RequirementKind::InheritedFdsNone,
         RequirementKind::InheritedFdsOnly,
     ] {
@@ -90,10 +87,25 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
     }
 }
 
-// (Environment + InheritedFds positive ceiling tests were removed when those cells
-// were backed out of the ceiling after a codex review — see
-// unimplemented_kinds_fail_closed_this_chunk. The launcher MECHANISM proofs live in
-// tests/launcher_env_linux.rs + tests/launcher_inherited_fds_linux.rs.)
+#[test]
+fn environment_is_enforced_in_the_ceiling() {
+    // proof-spine S4 completion: Environment::Exact is Enforced — the admitted policy
+    // is lowered to the launcher's explicit envp (literals + parent-resolved leases),
+    // proven end-to-end by tests/env_exact_linux.rs + coupled to the Proven ledger row.
+    let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
+    let profile = backend.profile(&backend.probe());
+    assert_eq!(
+        profile
+            .ceiling_for(RequirementKind::Environment)
+            .enforcement,
+        Enforcement::Enforced,
+        "Environment::Exact must be Enforced in the production ceiling"
+    );
+}
+
+// (The InheritedFds positive ceiling test stays removed — InheritedFds is still backed
+// out of the ceiling. Its launcher MECHANISM proof lives in
+// tests/launcher_inherited_fds_linux.rs.)
 
 #[test]
 fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {

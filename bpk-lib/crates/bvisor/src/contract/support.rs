@@ -100,8 +100,9 @@ impl SupportMatrix {
 /// (`Network { DenyAll }` vs `Network { AllowList }`, `InheritedFds { None }` vs
 /// `{ Only }`, `ChildSpawn { Deny }` vs `{ Allow }`). A future backend could
 /// differentiate cells we currently lower identically, so we never pre-collapse
-/// them. `Environment` carries a single policy variant today (`EmptyExcept`), so it
-/// is one key until the S4 `Environment::Exact` split.
+/// them. `Environment` carries a single policy variant (`Exact`), so it is one key
+/// (the per-entry name/value/source detail rides the canonical-policy PAYLOAD, not
+/// the variant-level key).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RequirementKind {
@@ -177,7 +178,7 @@ impl RequirementKind {
     /// policy-blind collapse — so two semantically-distinct policies under the same
     /// capability variant (`InheritedFds::None` vs `::Only`, `ChildSpawn::Deny` vs
     /// `::Allow`, `Network::DenyAll` vs `::AllowList`) never share a key.
-    /// `Environment` has a single policy variant today (`EmptyExcept`), so one key.
+    /// `Environment` has a single policy variant (`Exact`), so one key.
     fn of_capability(cap: &Capability) -> Self {
         use crate::contract::capability::{FdPolicy, NetPolicy, SpawnPolicy};
         match cap {

@@ -275,11 +275,233 @@ pub enum SpawnPolicy {
     Allow,
 }
 
-/// Environment-variable policy: empty by default, explicit keys only.
+/// Environment-variable policy (proof-spine §5 D2 — `Environment::Exact`).
+///
+/// NO ambient passthrough. The child's environment is built EXACTLY from the
+/// admitted table: every variable is an explicit [`EnvSource::Literal`] value or a
+/// [`EnvSource::SecretLease`] reference resolved JIT in the parent. There is no
+/// "inherit these named host keys" variant — that was the old `EmptyExcept` fossil,
+/// removed outright (no compat). A platform-generated entry (e.g. a `PATH` default)
+/// must be DECLARED as an explicit `Literal` here, never invisible inheritance.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum EnvPolicy {
-    /// The environment is empty except for the explicitly granted keys.
-    EmptyExcept(Vec<String>),
+    /// The child environment is EXACTLY these entries — nothing inherited. Each
+    /// entry is a `name → source` binding; [`Self::validate`] is the fail-closed
+    /// contract gate over the whole table (encoding, duplicates, bounds).
+    Exact(Vec<EnvEntry>),
+}
+
+/// One admitted environment binding: a variable `name` and where its value comes
+/// from ([`EnvSource`]). The value is NEVER ambient — it is a literal or a lease ref.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct EnvEntry {
+    /// The variable name (the part before `=` in the child env). Validated by
+    /// [`EnvPolicy::validate`]: non-empty UTF-8, no `=`/NUL, case-sensitive-unique.
+    pub name: String,
+    /// Where the variable's value comes from.
+    pub source: EnvSource,
+}
+
+impl EnvEntry {
+    /// A literal-valued entry (`name=value`).
+    #[must_use]
+    pub fn literal(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            source: EnvSource::Literal(value.into()),
+        }
+    }
+
+    /// A secret-lease entry: the value is resolved JIT in the parent from `lease`,
+    /// never carried in the durable plan.
+    #[must_use]
+    pub fn lease(name: impl Into<String>, lease: SecretRef) -> Self {
+        Self {
+            name: name.into(),
+            source: EnvSource::SecretLease(lease),
+        }
+    }
+}
+
+/// Where an [`EnvEntry`]'s value comes from. A `Literal` carries the value inline
+/// (durable); a `SecretLease` carries only an opaque REF — the value is resolved in
+/// the parent immediately before launch and NEVER persisted (proof-spine §5 D2 +
+/// §8 Vault-style JIT secrets).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum EnvSource {
+    /// An explicit literal value, carried inline in the durable plan/report.
+    Literal(String),
+    /// A reference to a leased secret. Resolved JIT in the parent
+    /// ([`crate::SecretResolver`]); the durable plan/report carries ONLY the ref.
+    SecretLease(SecretRef),
+}
+
+/// An OPAQUE, typed reference to a leased secret. NEVER carries a value — only an
+/// identifier a [`crate::SecretResolver`] dereferences in the parent at launch time.
+/// Serializing this (in a plan or report) leaks only the ref string, never a secret.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SecretRef(pub String);
+
+impl SecretRef {
+    /// Construct a secret reference from its opaque identifier.
+    #[must_use]
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    /// The opaque identifier (the lease key a resolver dereferences).
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The maximum number of entries an [`EnvPolicy::Exact`] table may declare. A
+/// defensible cap (kernel `ARG_MAX` admits far more, but a confined workload that
+/// genuinely needs hundreds of explicit env vars is pathological — the cap bounds
+/// the admitted table and the canonical-key payload). 256 covers every realistic
+/// declared environment with headroom.
+pub const MAX_ENV_ENTRIES: usize = 256;
+
+/// The maximum total byte budget of an [`EnvPolicy::Exact`] table, summed over every
+/// `name` and every inline `Literal` value (a `SecretLease` ref counts its ref bytes,
+/// not a resolved value — the value is unknown at admission). 128 KiB is a defensible
+/// fraction of a typical 2 MiB `ARG_MAX`/env budget, leaving ample room for argv.
+pub const MAX_ENV_TOTAL_BYTES: usize = 128 * 1024;
+
+/// Why an [`EnvPolicy::Exact`] table is contract-invalid. The contract fails CLOSED
+/// on the FIRST violation (admission refuses before any execution). Every variant
+/// names a malformed class the §4 oracle's fail-closed branch plants.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EnvPolicyError {
+    /// A variable name is empty (the part before `=` cannot be empty).
+    EmptyName,
+    /// A variable name contains `=` or a NUL byte (it could not become a `name=value`
+    /// C string unambiguously). Names the offending name + the bad byte.
+    NameHasReservedByte {
+        /// The offending name.
+        name: String,
+        /// The reserved byte found (`b'='` or `0`).
+        byte: u8,
+    },
+    /// A literal value contains a NUL byte (rejected — the §5 portable UTF-8 subset
+    /// forbids NUL so the canonical bytes are unambiguous across platforms).
+    ValueHasNul {
+        /// The name whose literal value contained a NUL.
+        name: String,
+    },
+    /// Two entries declare the SAME name (case-sensitive). The admitted environment
+    /// must be a function name → value; a duplicate is ambiguous, so it is refused.
+    DuplicateName {
+        /// The duplicated name.
+        name: String,
+    },
+    /// The table declares more than [`MAX_ENV_ENTRIES`] entries.
+    TooManyEntries {
+        /// The entry count found.
+        found: usize,
+    },
+    /// The table's total `name`+inline-value byte budget exceeds
+    /// [`MAX_ENV_TOTAL_BYTES`].
+    TooManyBytes {
+        /// The total byte count found.
+        found: usize,
+    },
+}
+
+impl std::fmt::Display for EnvPolicyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => f.write_str("an environment variable name is empty"),
+            Self::NameHasReservedByte { name, byte } => write!(
+                f,
+                "environment name {name:?} contains the reserved byte {byte:#04x} (= or NUL)"
+            ),
+            Self::ValueHasNul { name } => {
+                write!(f, "environment value for {name:?} contains a NUL byte")
+            }
+            Self::DuplicateName { name } => {
+                write!(f, "environment name {name:?} is declared more than once")
+            }
+            Self::TooManyEntries { found } => write!(
+                f,
+                "environment declares {found} entries, exceeding the cap {MAX_ENV_ENTRIES}"
+            ),
+            Self::TooManyBytes { found } => write!(
+                f,
+                "environment totals {found} bytes, exceeding the cap {MAX_ENV_TOTAL_BYTES}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for EnvPolicyError {}
+
+impl EnvPolicy {
+    /// THE CONTRACT GATE (fail-closed): validate the table's encoding, uniqueness,
+    /// and bounds. Returns `Ok(())` only for a well-formed admitted environment; the
+    /// FIRST violation is returned. Called at admission BEFORE any execution, so a
+    /// contract-invalid policy (a duplicate name, a NUL-bearing value) NEVER reaches
+    /// lowering — the workload never runs.
+    ///
+    /// Rules (proof-spine §5 D2 + the §5 portable UTF-8 subset):
+    /// - names: non-empty, UTF-8 (the `String` type guarantees it), no `=`/NUL,
+    ///   case-sensitive, NO duplicates;
+    /// - literal values: UTF-8, no NUL (a `SecretLease` ref is opaque, not validated
+    ///   as a value — its resolved value is checked at lowering);
+    /// - at most [`MAX_ENV_ENTRIES`] entries and [`MAX_ENV_TOTAL_BYTES`] total bytes.
+    ///
+    /// # Errors
+    /// The first [`EnvPolicyError`] found.
+    pub fn validate(&self) -> Result<(), EnvPolicyError> {
+        let Self::Exact(entries) = self;
+        if entries.len() > MAX_ENV_ENTRIES {
+            return Err(EnvPolicyError::TooManyEntries {
+                found: entries.len(),
+            });
+        }
+        let mut total: usize = 0;
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        for entry in entries {
+            if entry.name.is_empty() {
+                return Err(EnvPolicyError::EmptyName);
+            }
+            for byte in entry.name.bytes() {
+                if byte == b'=' || byte == 0 {
+                    return Err(EnvPolicyError::NameHasReservedByte {
+                        name: entry.name.clone(),
+                        byte,
+                    });
+                }
+            }
+            if !seen.insert(entry.name.as_str()) {
+                return Err(EnvPolicyError::DuplicateName {
+                    name: entry.name.clone(),
+                });
+            }
+            total = total.saturating_add(entry.name.len());
+            match &entry.source {
+                EnvSource::Literal(value) => {
+                    if value.bytes().any(|b| b == 0) {
+                        return Err(EnvPolicyError::ValueHasNul {
+                            name: entry.name.clone(),
+                        });
+                    }
+                    total = total.saturating_add(value.len());
+                }
+                EnvSource::SecretLease(lease) => {
+                    total = total.saturating_add(lease.id().len());
+                }
+            }
+        }
+        if total > MAX_ENV_TOTAL_BYTES {
+            return Err(EnvPolicyError::TooManyBytes { found: total });
+        }
+        Ok(())
+    }
 }
 
 /// Host-fd inheritance policy: none by default, explicit fds only.
@@ -516,3 +738,7 @@ mod lattice_laws {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "capability_env_tests.rs"]
+mod capability_env_tests;

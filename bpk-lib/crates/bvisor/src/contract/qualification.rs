@@ -252,12 +252,18 @@ pub fn linux_mechanism(primitive: &str, enforcement: Enforcement) -> String {
 ///   (process_count is a budget dimension, not a `RequirementKind`; it rides the
 ///   `Kill` cell's cgroup floor, so it is documented here, not a separate row.)
 ///
+/// `Environment` (explicit envp) — the admitted `Environment::Exact` policy is lowered
+/// to the launcher's explicit env (literals plus parent-resolved secret leases); the
+/// child env EQUALS the admitted table EXACTLY, witnessed by the host reading the
+/// child's `proc` environ AND the workload's own self-report (dual channel, no ambient
+/// leak), with the fail-closed branches (an unresolvable lease means the target never
+/// runs; an invalid policy means admission refuses) proven by the same oracle.
+///
 /// NON-PROVEN cells are stated explicitly (the coupling test asserts they are NOT
-/// advertised `Enforced` in production): `Environment` / `InheritedFdsNone` /
-/// `InheritedFdsOnly` are `Incomplete` (launcher mechanism exists, but no
-/// contract-level admission + spec→envp/allowlist lowering + oracle); every other
-/// capability — including both `ChildSpawn` policy keys (proof-spine §2 split) — is
-/// `FailClosed`.
+/// advertised `Enforced` in production): `InheritedFdsNone` / `InheritedFdsOnly` are
+/// `Incomplete` (launcher scrub mechanism exists, but no contract-level admission +
+/// spec→allowlist lowering + oracle); every other capability — including both
+/// `ChildSpawn` policy keys (proof-spine §2 split) — is `FailClosed`.
 pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
@@ -327,10 +333,28 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
         key: RequirementKind::Environment,
+        // Explicit-envp lowering is structural (no kernel-version floor): the launcher
+        // serves the admitted env to fexecve on any Linux. The proof transfers to every
+        // machine of the platform.
         profile_floor: ProfileFloor::structural(),
-        mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
-        status: QualificationStatus::Incomplete,
-        proof_receipts: &[],
+        mechanism: "linux:explicit_env:Enforced",
+        status: QualificationStatus::Proven,
+        // §4 BOTH branches, dual-channel:
+        //  - guarantee-holds: the child's env EQUALS the admitted table EXACTLY,
+        //    witnessed by the HOST reading /proc/<child_pid>/environ (kernel state,
+        //    independent) AND the workload's own reported env; a parent sentinel var is
+        //    ABSENT in the child (no ambient leak); a SecretLease resolves IN THE CHILD
+        //    while the serialized plan+report carry only the REF, never the value;
+        //  - fail-closed: an unresolvable lease ⇒ the target NEVER runs (no child
+        //    output), and a contract-invalid policy ⇒ admission refuses before execution.
+        proof_receipts: &[
+            "crates/bvisor/tests/env_exact_linux.rs::child_env_equals_the_admitted_table_with_no_ambient_leak",
+            "crates/bvisor/tests/env_exact_linux.rs::an_unresolvable_lease_fails_closed_and_the_target_never_runs",
+            "crates/bvisor/tests/env_exact_linux.rs::a_contract_invalid_policy_is_refused_before_execution",
+            // The full execute()/BoundaryRunner contract-path witness (vs the launcher-
+            // direct /proc oracle above): the durable plan+report carry only the lease ref.
+            "crates/bvisor/tests/env_exact_linux.rs::a_secret_lease_resolves_but_the_durable_plan_and_report_carry_only_the_ref",
+        ],
     },
     QualificationRow {
         backend: "linux",

@@ -181,6 +181,14 @@ pub enum PlanError {
         /// The unknown backend id.
         backend: BackendId,
     },
+    /// A capability policy is CONTRACT-INVALID (e.g. an `Environment::Exact` table
+    /// with a duplicate name, a reserved-byte name, or a NUL-bearing value). The
+    /// planner fails closed BEFORE any classification/execution — a malformed policy
+    /// never reaches lowering, so the workload never runs.
+    InvalidPolicy {
+        /// Human-readable detail (the policy validation error).
+        detail: String,
+    },
     /// The shadow admission circuit disagreed with the authoritative imperative
     /// reference — a fail-closed gauntlet finding. No plan is produced and no
     /// backend effect occurs. Should never arise from correct code; if it does,
@@ -224,6 +232,7 @@ impl std::fmt::Display for PlanError {
                 "backend {backend} budget membrane refused dimension {dimension:?}: {failure:?}"
             ),
             Self::UnknownBackend { backend } => write!(f, "unknown backend {backend}"),
+            Self::InvalidPolicy { detail } => write!(f, "invalid capability policy: {detail}"),
             Self::ShadowDivergence { detail } => {
                 write!(f, "admission shadow divergence (fail-closed): {detail}")
             }

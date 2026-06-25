@@ -74,8 +74,9 @@ pub use contract::budget_witness::{
 };
 pub use contract::canonical_policy::CanonicalPolicy;
 pub use contract::capability::{
-    Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
-    FsConfinement, NetDest, NetPolicy, PathSet, SpawnPolicy, SupportVerdict,
+    Capability, Enforcement, EnvEntry, EnvPolicy, EnvPolicyError, EnvSource, EvidenceClaim,
+    EvidenceSet, FdPolicy, FsAccess, FsConfinement, NetDest, NetPolicy, PathSet, SecretRef,
+    SpawnPolicy, SupportVerdict, MAX_ENV_ENTRIES, MAX_ENV_TOTAL_BYTES,
 };
 pub use contract::events::{
     BoundaryDispositionEvent, BoundaryRecoveryEvent, BoundaryReportEvent, BoundaryStartedEvent,
@@ -113,6 +114,9 @@ pub use contract::registry::{
 pub use contract::report::{
     BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
     ObservedFact, Outcome, StagedArtifact, BOUNDARY_REPORT_SCHEMA_VERSION,
+};
+pub use contract::secret::{
+    lower_env, EnvLowerError, MapSecretResolver, SecretResolveError, SecretResolver,
 };
 pub use contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,

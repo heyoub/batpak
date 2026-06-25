@@ -24,7 +24,11 @@
 //!     ONLY when a cgroup base was probed; every OTHER budget dimension stays `Mediated`
 //!     (observed-not-capped — no cap installed, so claiming Enforced would over-claim).
 //!
-//! EVERYTHING ELSE (`Environment`, `InheritedFds`, `ChildSpawn`, `NetworkDenyAll`, `TempRoot`, …) is ABSENT from the
+//!   - `Environment` (explicit envp) — Enforced: the admitted `Environment::Exact`
+//!     policy is lowered to the launcher's explicit env (literals + parent-resolved
+//!     secret leases), served verbatim to `fexecve` with no ambient inheritance.
+//!
+//! EVERYTHING ELSE (`InheritedFds`, `ChildSpawn`, `NetworkDenyAll`, `TempRoot`, …) is ABSENT from the
 //! ceiling ⇒ `Unsupported` ⇒ `plan()` fails closed. The family `support_matrix()` keeps
 //! the §4 aspiration; the machine ceiling reflects reality. Claiming more than
 //! `execute()` delivers is the exact lie the gauntlet must catch — so we do not.
@@ -56,6 +60,7 @@ use crate::contract::report::{
     BoundaryReportBody, CaptureRefs, ExitStatus, ObservedFact, Outcome,
     BOUNDARY_REPORT_SCHEMA_VERSION,
 };
+use crate::contract::secret::{MapSecretResolver, SecretResolver};
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
 };
@@ -101,6 +106,21 @@ pub struct LinuxBackend {
     /// true, so a plan requiring that evidence never admits on a kernel that cannot
     /// witness it. Always `false` when `cgroup_base` is `None`.
     cgroup_pids_peak: bool,
+    /// The host's secret-lease resolver (proof-spine §5 D2). `execute()` resolves
+    /// every [`crate::EnvSource::SecretLease`] in the admitted `Environment::Exact`
+    /// table through this, in the PARENT, immediately before launch — the resolved
+    /// VALUE goes only into the child's envp, never the durable plan/report. Defaults
+    /// to an EMPTY [`MapSecretResolver`] (every lease fails closed); production injects
+    /// a real store-backed resolver via [`Self::with_secret_resolver`]. `Arc<dyn ..>`
+    /// so the backend stays shareable behind `Arc<dyn Backend>`.
+    pub(super) secret_resolver: std::sync::Arc<dyn SecretResolver + Send + Sync>,
+}
+
+/// The default secret resolver: an EMPTY map, so any `SecretLease` in an admitted
+/// environment fails closed (the launch is refused, the target never runs) unless the
+/// host injects a real resolver. Fail-closed by construction.
+pub(super) fn default_secret_resolver() -> std::sync::Arc<dyn SecretResolver + Send + Sync> {
+    std::sync::Arc::new(MapSecretResolver::new())
 }
 
 /// Probe the cgroup v2 confinement capabilities ONCE at construction. Returns the base —
@@ -137,7 +157,20 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base,
             cgroup_pids_peak,
+            secret_resolver: default_secret_resolver(),
         }
+    }
+
+    /// Replace the host secret-lease resolver (proof-spine §5 D2). Production injects a
+    /// real store-backed resolver here so `execute()` can resolve `SecretLease` env
+    /// entries JIT in the parent; the default is the empty fail-closed resolver.
+    #[must_use]
+    pub fn with_secret_resolver(
+        mut self,
+        resolver: std::sync::Arc<dyn SecretResolver + Send + Sync>,
+    ) -> Self {
+        self.secret_resolver = resolver;
+        self
     }
 
     /// Construct the Linux backend with an EXPLICIT launcher-binary path (constructor
@@ -154,6 +187,7 @@ impl LinuxBackend {
             launcher_path: Some(launcher_path),
             cgroup_base,
             cgroup_pids_peak,
+            secret_resolver: default_secret_resolver(),
         }
     }
 
@@ -169,6 +203,7 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: None,
             cgroup_pids_peak: false,
+            secret_resolver: default_secret_resolver(),
         }
     }
 
@@ -187,6 +222,7 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: Some(std::path::PathBuf::from("/sys/fs/cgroup/test-placeholder")),
             cgroup_pids_peak: pids_peak,
+            secret_resolver: default_secret_resolver(),
         }
     }
 
@@ -234,21 +270,23 @@ impl LinuxBackend {
                 [EvidenceClaim::CapturedStreams].into_iter().collect(),
             ),
         );
-        // Environment + InheritedFds are NOT in the ceiling (⇒ Unsupported ⇒ plan()
-        // fails closed). BACKED OUT after a codex adversarial review (2026-06-25): the
-        // confinement contract admits on a RequirementKind (support.rs::of_capability is
-        // policy-BLIND for these two — unlike Network, which splits DenyAll/AllowList into
-        // distinct kinds), but the launcher only implements ONE policy shape and never
-        // lowers the admitted policy. plan_build emits a HARDCODED envp regardless of the
-        // spec's `EnvPolicy::EmptyExcept(..)`, and the scrub only realises
-        // `FdPolicy::None`, never `Only(..)`. So advertising Enforced here would ADMIT
-        // `Environment{EmptyExcept(["FOO"])}` / `InheritedFds{Only(fd)}` and silently NOT
-        // deliver them — an over-claim. The launcher MECHANISM proofs survive as building
-        // blocks (`tests/launcher_env_linux.rs`, `tests/launcher_inherited_fds_linux.rs`):
-        // they prove the launcher CAN serve an explicit envp / scrub undeclared fds, NOT
-        // that the BoundaryPlanner→execute() path admits + honors the contract policy.
-        // Genuine completion (policy-aware admission + spec→envp/allowlist lowering + a
-        // CONTRACT-level oracle) is real work, tracked with NetworkDenyAll/ChildSpawn.
+        // Environment::Exact is ENFORCED (proof-spine S4 completion): the admitted
+        // policy is LOWERED to the launcher's explicit envp (literals + parent-resolved
+        // secret leases) and the launcher serves EXACTLY that env to fexecve with NO
+        // ambient inheritance — proven end-to-end by the dual-channel + fail-closed
+        // oracle (`tests/env_exact_linux.rs`) and coupled to the Proven ledger row. The
+        // mechanism is `linux:explicit_env:Enforced`; the evidence is a mechanism
+        // attestation (the host independently confirms the child's /proc/<pid>/environ
+        // equals the admitted table). InheritedFds is STILL absent from the ceiling
+        // (Unsupported ⇒ fails closed): the scrub realises `FdPolicy::None` as a
+        // launcher mechanism but the contract path is not yet proven (S5 completes it).
+        ceiling.insert(
+            RequirementKind::Environment,
+            SupportVerdict::new(
+                Enforcement::Enforced,
+                [EvidenceClaim::MechanismAttestation].into_iter().collect(),
+            ),
+        );
         // Kill{RunTree,Atomic} is Enforced ONLY when a cgroup confinement base with
         // atomic `cgroup.kill` was probed: the workload runs in a cgroup leaf (placed
         // at birth by the launcher's CLONE_INTO_CGROUP), so the host can SIGKILL the
@@ -270,6 +308,13 @@ impl LinuxBackend {
 #[cfg(feature = "dangerous-test-hooks")]
 #[path = "backend_impl_proof.rs"]
 mod proof_hooks;
+
+// The Environment::Exact lowering helpers (admitted-policy extraction + spec→envp
+// lowering with parent-side secret-lease resolution), split out to hold this file under
+// the non-overridable size cap. SAFE std; the OS work lives in the launcher.
+#[path = "backend_impl_env.rs"]
+mod env_lowering;
+use env_lowering::lower_environment;
 
 impl Default for LinuxBackend {
     fn default() -> Self {
@@ -379,11 +424,13 @@ impl Backend for LinuxBackend {
             // ONLY when a cgroup base was probed (the ceiling gates the actual claim;
             // this names the mechanism this backend uses for Kill).
             RequirementKind::Kill => "cgroup_kill",
+            // Environment::Exact rides the launcher's explicit envp (the admitted table
+            // is lowered to the env served to fexecve; nothing inherited).
+            RequirementKind::Environment => "explicit_env",
             RequirementKind::NetworkDenyAll
             | RequirementKind::NetworkAllowList
             | RequirementKind::ChildSpawnDeny
             | RequirementKind::ChildSpawnAllow
-            | RequirementKind::Environment
             | RequirementKind::InheritedFdsNone
             | RequirementKind::InheritedFdsOnly
             | RequirementKind::TempRoot
@@ -439,6 +486,35 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
         return fail_closed(backend, plan, Outcome::Unsupported, observed);
     }
 
+    // LOWER the admitted Environment::Exact policy to the concrete envp the launcher
+    // serves (proof-spine §5 D2). FAIL CLOSED on any lowering fault (invalid policy or
+    // an unresolvable lease): the workload never runs.
+    let envp = match lower_environment(backend, plan, observed) {
+        Ok((envp, facts)) => {
+            observed = facts;
+            envp
+        }
+        Err(facts) => return fail_closed(backend, plan, Outcome::Unsupported, facts),
+    };
+
+    run_prepared(backend, plan, &exe, &args, fs.as_ref(), envp, observed)
+}
+
+/// The per-run cgroup leaf + launcher build + launcher run, factored out of
+/// [`execute_confined`] to hold it under the complexity budget. Creates the cgroup leaf
+/// (fail-closed if the plan admitted cgroup-backed guarantees but it cannot be created),
+/// builds the launcher plan over the lowered `envp` + authority handles, resolves +
+/// attests the launcher binary, runs it, and ALWAYS tears the leaf down via `finish`.
+/// Every fault path resolves to an honest fail-closed [`BoundaryReportBody`].
+fn run_prepared(
+    backend: &LinuxBackend,
+    plan: &BoundaryPlan,
+    exe: &str,
+    args: &[String],
+    fs: Option<&(FsAccess, PathSet)>,
+    envp: Vec<(String, String)>,
+    observed: Vec<ObservedFact>,
+) -> BoundaryReportBody {
     // Prepare the per-run cgroup leaf; FAIL CLOSED if the plan admitted cgroup-backed
     // guarantees but the leaf cannot be created (see `cgroup_for_run`). The launcher births
     // the child INTO the leaf via CLONE_INTO_CGROUP; `finish` tears it down after the run.
@@ -451,7 +527,7 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
     // including the optional CgroupDir slot). A host wiring fault (a root/exe that
     // cannot be opened, a slot that does not fit) fails closed — the workload never
     // runs, and the leaf is torn down via `finish`.
-    let prepared = match plan_build::prepare_launch(&exe, &args, plan, fs.as_ref(), cgroup_dir_fd) {
+    let prepared = match plan_build::prepare_launch(exe, args, plan, fs, cgroup_dir_fd, envp) {
         Ok(prepared) => prepared,
         Err(detail) => {
             observed.push(ObservedFact {
@@ -517,7 +593,7 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
             let process_peak = cgroup_leaf
                 .as_ref()
                 .and_then(|l| l.peak_pids().ok().flatten());
-            map_observation(backend, plan, &exe, confined, &obs, observed, process_peak)
+            map_observation(backend, plan, exe, confined, &obs, observed, process_peak)
         }
         Err(error) => {
             // A harness fault BEFORE the launcher produced a verdict (encode/slot/OS):

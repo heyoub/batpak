@@ -36,8 +36,8 @@
 
 use bvisor::{linux, macos, wasm, windows};
 use bvisor::{
-    BoundaryRequirement, CanonicalPolicy, Capability, Enforcement, EnvPolicy, FdPolicy, NetDest,
-    NetPolicy, RequirementKind, SpawnPolicy, SupportMatrix,
+    BoundaryRequirement, CanonicalPolicy, Capability, Enforcement, EnvEntry, EnvPolicy, FdPolicy,
+    NetDest, NetPolicy, RequirementKind, SpawnPolicy, SupportMatrix,
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -119,20 +119,22 @@ fn samples() -> Vec<Sample> {
             }),
             canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::Allow),
         },
-        // ── Environment: one variant today, one key ──
+        // ── Environment: one variant (Exact), one key ──
         Sample {
             name: "env-empty",
             key: key_of(Capability::Environment {
-                policy: EnvPolicy::EmptyExcept(vec![]),
+                policy: EnvPolicy::Exact(vec![]),
             }),
-            canonical: CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![])),
+            canonical: CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![])),
         },
         Sample {
-            name: "env-keys",
+            name: "env-entries",
             key: key_of(Capability::Environment {
-                policy: EnvPolicy::EmptyExcept(vec!["PATH".to_string()]),
+                policy: EnvPolicy::Exact(vec![EnvEntry::literal("PATH", "/usr/bin")]),
             }),
-            canonical: CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec!["PATH".to_string()])),
+            canonical: CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![EnvEntry::literal(
+                "PATH", "/usr/bin",
+            )])),
         },
         // ── Network: DenyAll vs AllowList (distinct variants ⇒ distinct keys) ──
         Sample {

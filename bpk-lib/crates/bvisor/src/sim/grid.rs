@@ -209,7 +209,7 @@ fn dangerous_spec() -> BoundarySpec {
                 policy: SpawnPolicy::Deny,
             },
             Capability::Environment {
-                policy: EnvPolicy::EmptyExcept(Vec::new()),
+                policy: EnvPolicy::Exact(Vec::new()),
             },
             Capability::InheritedFds {
                 policy: FdPolicy::None,

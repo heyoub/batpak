@@ -6,7 +6,7 @@
 //! default public surface is unaffected.
 
 use super::super::support_matrix;
-use super::{LinuxBackend, LANDLOCK_ABI_FLOOR};
+use super::{default_secret_resolver, LinuxBackend, LANDLOCK_ABI_FLOOR};
 use crate::contract::backend::Backend;
 use crate::contract::capability::Enforcement;
 use crate::contract::ids::BackendId;
@@ -29,6 +29,7 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: Some(std::path::PathBuf::from("/sys/fs/cgroup/proof-placeholder")),
             cgroup_pids_peak: pids_peak,
+            secret_resolver: default_secret_resolver(),
         }
     }
 
@@ -43,6 +44,7 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: None,
             cgroup_pids_peak: false,
+            secret_resolver: default_secret_resolver(),
         }
     }
 
@@ -114,7 +116,7 @@ fn representative_requirement(kind: RequirementKind) -> BoundaryRequirement {
             })
         }
         RequirementKind::Environment => BoundaryRequirement::Capability(Capability::Environment {
-            policy: EnvPolicy::EmptyExcept(Vec::new()),
+            policy: EnvPolicy::Exact(Vec::new()),
         }),
         RequirementKind::InheritedFdsNone => {
             BoundaryRequirement::Capability(Capability::InheritedFds {

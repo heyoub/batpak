@@ -17,7 +17,19 @@
 //! empty (the project bans `panic!` even in tests).
 
 use super::CanonicalPolicy;
-use crate::contract::capability::{EnvPolicy, FdPolicy, NetDest, NetPolicy, SpawnPolicy};
+use crate::contract::capability::{
+    EnvEntry, EnvPolicy, FdPolicy, NetDest, NetPolicy, SecretRef, SpawnPolicy,
+};
+
+/// A literal env entry.
+fn elit(name: &str, value: &str) -> EnvEntry {
+    EnvEntry::literal(name, value)
+}
+
+/// A secret-lease env entry.
+fn elease(name: &str, reference: &str) -> EnvEntry {
+    EnvEntry::lease(name, SecretRef::new(reference))
+}
 
 /// A representative spread of SEMANTICALLY-DISTINCT policies — one entry per
 /// distinct meaning across all four families. Every pair of DIFFERENT entries here
@@ -35,23 +47,25 @@ fn distinct_policies() -> Vec<CanonicalPolicy> {
         // ── Spawn family ──
         CanonicalPolicy::of_spawn(&SpawnPolicy::Deny),
         CanonicalPolicy::of_spawn(&SpawnPolicy::Allow),
-        // ── Env family ──
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![])),
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec!["PATH".to_string()])),
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec!["HOME".to_string()])),
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-            "HOME".to_string(),
-            "PATH".to_string(),
+        // ── Env family (Exact: name → Literal | SecretLease) ──
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![])),
+        // same name, distinct values ⇒ distinct
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("PATH", "/usr/bin")])),
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("PATH", "/bin")])),
+        // distinct name, same value ⇒ distinct
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("HOME", "/usr/bin")])),
+        // LOAD-BEARING: a Literal("x") and a SecretLease(ref "x") of the SAME name
+        // are DISTINCT semantics (inline value vs lease ref) ⇒ distinct bytes.
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("TOKEN", "x")])),
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elease("TOKEN", "x")])),
+        // two-entry table
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![
+            elit("HOME", "/srv/u"),
+            elit("PATH", "/usr/bin"),
         ])),
-        // boundary-ambiguity guard: ["AB","C"] vs ["A","BC"] must differ
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-            "AB".to_string(),
-            "C".to_string(),
-        ])),
-        CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-            "A".to_string(),
-            "BC".to_string(),
-        ])),
+        // boundary-ambiguity guard: name "AB"+value "C" vs name "A"+value "BC"
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("AB", "C")])),
+        CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![elit("A", "BC")])),
         // ── Net family ──
         CanonicalPolicy::of_net(&NetPolicy::DenyAll),
         CanonicalPolicy::of_net(&NetPolicy::AllowList(vec![])), // allow-nothing ≠ DenyAll
@@ -117,8 +131,8 @@ fn normalization_is_deterministic() {
     }
     // Env
     for p in [
-        EnvPolicy::EmptyExcept(vec![]),
-        EnvPolicy::EmptyExcept(vec!["PATH".to_string(), "HOME".to_string()]),
+        EnvPolicy::Exact(vec![]),
+        EnvPolicy::Exact(vec![elit("PATH", "/usr/bin"), elease("TOKEN", "lease://t")]),
     ] {
         if CanonicalPolicy::of_env(&p).as_bytes() != CanonicalPolicy::of_env(&p).as_bytes() {
             failures.push(format!("env {p:?}"));
@@ -158,19 +172,16 @@ fn syntactic_aliases_collapse_to_the_same_bytes() {
         }
     }
 
-    // Env: reordered + duplicated keys alias the sorted-deduped set.
-    let env_canon = CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-        "HOME".to_string(),
-        "PATH".to_string(),
+    // Env: a name-reordered entry table aliases the name-sorted representative (names
+    // are unique by the contract gate, so order carries no meaning).
+    let env_canon = CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![
+        elit("HOME", "/srv/u"),
+        elit("PATH", "/usr/bin"),
     ]));
-    for alias in [
-        EnvPolicy::EmptyExcept(vec!["PATH".to_string(), "HOME".to_string()]),
-        EnvPolicy::EmptyExcept(vec![
-            "PATH".to_string(),
-            "HOME".to_string(),
-            "PATH".to_string(),
-        ]),
-    ] {
+    for alias in [EnvPolicy::Exact(vec![
+        elit("PATH", "/usr/bin"),
+        elit("HOME", "/srv/u"),
+    ])] {
         if CanonicalPolicy::of_env(&alias).as_bytes() != env_canon.as_bytes() {
             mismatches.push(format!("env alias {alias:?}"));
         }
@@ -215,15 +226,14 @@ fn normalization_is_idempotent_on_canonical_payloads() {
         failures.push("fd not idempotent".to_string());
     }
 
-    // Env: raw reordered+dup normalizes to the same bytes as the canonical sorted set.
-    let raw_env = CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-        "PATH".to_string(),
-        "HOME".to_string(),
-        "PATH".to_string(),
+    // Env: a name-reordered table normalizes to the same bytes as the name-sorted form.
+    let raw_env = CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![
+        elit("PATH", "/usr/bin"),
+        elit("HOME", "/srv/u"),
     ]));
-    let already_env = CanonicalPolicy::of_env(&EnvPolicy::EmptyExcept(vec![
-        "HOME".to_string(),
-        "PATH".to_string(),
+    let already_env = CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![
+        elit("HOME", "/srv/u"),
+        elit("PATH", "/usr/bin"),
     ]));
     if raw_env.as_bytes() != already_env.as_bytes() {
         failures.push("env not idempotent".to_string());
