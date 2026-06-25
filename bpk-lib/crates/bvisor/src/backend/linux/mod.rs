@@ -217,6 +217,14 @@ pub mod cgroup;
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub mod launch;
 
+// The D6 seccomp POLICY MODEL → BPF (proof-spine S7). PURE Rust: builds a default-
+// deny launcher allowlist and assembles it to a `BpfProgram` via seccompiler's safe
+// `compile()`, binding the D6 `SeccompEvidence`. NO install / NO enforcement / NO
+// unsafe — S10 installs the filter from the unsafe `sys.rs` basement. Gated like the
+// rest of the backend (seccompiler lives in the Linux target dep table).
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub mod seccomp;
+
 #[cfg(test)]
 mod tests {
     use super::support_matrix;

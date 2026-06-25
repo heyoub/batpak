@@ -59,7 +59,7 @@ host = ["dep:syncbat", "dep:hostbat"]
 #       `backend_impl`/`sys` modules are cfg-gated off) — no unused-dep warning.
 #     - Linux WITH `backend-linux`: both deps activate and the real LinuxBackend
 #       (probe ABI / landlock confinement / pre_exec basement) compiles.
-backend-linux = ["dep:libc", "dep:landlock"]
+backend-linux = ["dep:libc", "dep:landlock", "dep:seccompiler"]
 backend-wasm = []
 backend-windows = []
 backend-macos = []
@@ -105,6 +105,12 @@ tempfile = ">=3.24, <3.25"
 #               restrict FS access to exactly the declared roots.
 libc = { version = "0.2", optional = true }
 landlock = { version = "0.4.5", optional = true }
+#   seccompiler — the D6 seccomp POLICY MODEL → BPF assembler (proof-spine S7). A
+#               PURE Rust BPF compiler (no async runtime, no executor): the Rust
+#               `SeccompFilter`/`BpfProgram` API compiles a policy to BPF bytes that
+#               S10 (not S7) installs via the unsafe `sys.rs` basement. PINNED exact
+#               so the compiled-BPF digest in the D6 evidence stays reproducible.
+seccompiler = { version = "=0.5.0", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 

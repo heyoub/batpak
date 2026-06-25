@@ -37,6 +37,13 @@ pub use backend::{linux, macos, wasm, windows};
 
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub use backend::linux::LinuxBackend;
+// The D6 seccomp policy model + compiled-filter surface (proof-spine S7). The pure
+// evidence types ([`SeccompEvidence`] etc.) are always exported above; these are the
+// Linux-only model + assembler that mint them.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub use backend::linux::seccomp::{
+    CompiledFilter, DefaultAction, SeccompCompileError, SeccompPolicy, Syscall, SECCOMPILER_VERSION,
+};
 #[cfg(all(feature = "backend-macos", target_os = "macos"))]
 pub use backend::macos::MacosBackend;
 #[cfg(feature = "backend-wasm")]
@@ -114,6 +121,9 @@ pub use contract::registry::{
 pub use contract::report::{
     BoundaryFinding, BoundaryReport, BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus,
     ObservedFact, Outcome, StagedArtifact, BOUNDARY_REPORT_SCHEMA_VERSION,
+};
+pub use contract::seccomp_evidence::{
+    SeccompActionKind, SeccompArch, SeccompEvidence, SeccompObservedMode,
 };
 pub use contract::secret::{
     lower_env, EnvLowerError, MapSecretResolver, SecretResolveError, SecretResolver,
