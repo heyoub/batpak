@@ -486,3 +486,140 @@ fn empty_l4_manifest_treats_threshold_drop_as_standard() {
     evaluate(LOWER_L4_THRESHOLD_DIFF, &[], &approved_same_author())
         .expect("with no L4 manifest, same-author approval suffices for a standard weakening");
 }
+
+// ---------------------------------------------------------------------------
+// GAUNT-CAPSNAP: capability-floor downgrades
+// ---------------------------------------------------------------------------
+
+const SNAP: &str = "traceability/capability_snapshot.yaml";
+
+fn cap_diff(removed: &str, added: &str) -> String {
+    let mut diff =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,1 @@\n");
+    if !removed.is_empty() {
+        diff.push_str(&format!("-{removed}\n"));
+    }
+    if !added.is_empty() {
+        diff.push_str(&format!("+{added}\n"));
+    }
+    diff
+}
+
+#[test]
+fn enforcement_weakened_errs() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }",
+        "  - { backend: linux, kind: Kill, enforcement: Mediated, evidence: [ProcessTree, TerminalOutcome] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("Enforced -> Mediated")),
+        "Enforced->Mediated must be a capability downgrade; got {findings:?}"
+    );
+    evaluate(&diff, &l4_manifest(), &no_approval())
+        .expect_err("an unapproved capability downgrade must Err");
+}
+
+#[test]
+fn downgrade_to_unsupported_is_l4_two_person() {
+    // A drop to Unsupported (capability fully lost) is L4: a same-author trailer
+    // is insufficient (two-person rule).
+    let diff = cap_diff(
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }",
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Unsupported, evidence: [] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.blast_radius == BlastRadius::L4),
+        "a downgrade to Unsupported must be L4; got {findings:?}"
+    );
+    let err = evaluate(&diff, &l4_manifest(), &approved_same_author())
+        .expect_err("an L4 capability downgrade with a same-author trailer must Err");
+    assert!(err.to_string().contains("two-person"), "got: {err}");
+}
+
+#[test]
+fn removed_capability_row_is_l4() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: ExposePath, enforcement: Enforced, evidence: [MechanismAttestation] }",
+        "",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.blast_radius == BlastRadius::L4
+                && w.detail.contains("row removed")),
+        "a removed (backend,kind) row must be an L4 downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn removed_evidence_claim_errs() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }",
+        "  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("dropped MechanismAttestation")),
+        "a dropped evidence claim must be a downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn witness_unproved_errs() {
+    let diff = cap_diff(
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: true }",
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: false }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("witness un-proved")),
+        "un-proving a witnessed invariant must be a downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn strengthening_a_capability_is_not_a_weakening() {
+    // Mediated -> Enforced (an upgrade) and a brand-new added cell are NOT flagged.
+    let upgrade = cap_diff(
+        "  - { backend: macos, kind: Kill, enforcement: Mediated, evidence: [TerminalOutcome] }",
+        "  - { backend: macos, kind: Kill, enforcement: Enforced, evidence: [TerminalOutcome] }",
+    );
+    assert!(
+        classify_weakening(&upgrade, &l4_manifest()).is_empty(),
+        "Mediated->Enforced is a strengthening, not a weakening"
+    );
+    let added_only = cap_diff(
+        "",
+        "  - { backend: linux, kind: NetworkAllowList, enforcement: Enforced, evidence: [NetworkActivity] }",
+    );
+    assert!(
+        classify_weakening(&added_only, &l4_manifest()).is_empty(),
+        "a newly-advertised capability cell is a strengthening, not a weakening"
+    );
+}
+
+#[test]
+fn capability_downgrade_with_full_two_person_approval_passes() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }",
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Unsupported, evidence: [] }",
+    );
+    evaluate(&diff, &l4_manifest(), &fully_approved_l4())
+        .expect("a fully two-person-approved capability downgrade must pass");
+}
