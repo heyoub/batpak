@@ -99,6 +99,7 @@ fn cgroup_plan() -> LinuxLaunchPlanV1 {
                 argv: vec!["cat".to_owned(), "/proc/self/cgroup".to_owned()],
                 envp: vec![("PATH".to_owned(), "/usr/bin".to_owned())],
                 exe_slot: EXE_SLOT,
+                user_namespace: None,
             },
         },
     }

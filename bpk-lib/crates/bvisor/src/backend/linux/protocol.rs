@@ -293,9 +293,38 @@ pub fn validate_table(table: &[DescriptorSlotV1]) -> Result<(), TableReject> {
 // 3. Target spec
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// An OPT-IN request that the launcher birth the workload child in a NEW, unprivileged
+/// user namespace and map it to uid/gid 0 inside that namespace (the prerequisite for
+/// unprivileged netns creation, S9). The recipe is fixed: the child enters the new
+/// userns and BLOCKS on a sync pipe; the parent writes `uid_map` (`0 <euid> 1`),
+/// `setgroups=deny`, then `gid_map` (`0 <egid> 1`), then releases the child — which is
+/// then uid 0 inside the namespace. This is INFRASTRUCTURE: it mints no confinement
+/// claim on its own.
+///
+/// It is a struct (not a bare bool) so the `0.9.0` namespace work can add fields
+/// (e.g. a non-default uid/gid target, extra map ranges) without a wire break. With NO
+/// fields today it canonical-encodes to an empty map (`0x80`) when present.
+///
+/// CRITICAL OFF-PATH INVARIANT: [`TargetSpecV1::user_namespace`] is
+/// `#[serde(default, skip_serializing_if = "Option::is_none")]`, so a plan that does
+/// NOT request a userns omits the field ENTIRELY from the canonical bytes — the wire
+/// form (and every PROVEN oracle that runs through the no-userns path) is byte-for-byte
+/// unchanged. `CLONE_NEWUSER` is added to the `clone3` flags ONLY when this is `Some`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct UserNsRequest {}
+
+impl UserNsRequest {
+    /// The default request: map child uid/gid 0 → the parent's effective uid/gid.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 /// The exact process image to launch. Environment is EXPLICIT — nothing is
 /// inherited — and the executable rides a descriptor (`exe_slot`), never a path.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetSpecV1 {
     /// The argument vector (`argv[0]` is the conventional program name).
     pub argv: Vec<String>,
@@ -303,6 +332,13 @@ pub struct TargetSpecV1 {
     pub envp: Vec<(String, String)>,
     /// Index into the descriptor table of the [`DescriptorRole::TargetExe`] handle.
     pub exe_slot: u32,
+    /// OPT-IN unprivileged user-namespace rendezvous (S8). `None` (the default) ⇒ the
+    /// child shares the launcher's userns and `CLONE_NEWUSER` is NOT set — the EXISTING
+    /// no-userns path is byte-for-byte unchanged (the field is omitted from the
+    /// canonical encoding, see [`UserNsRequest`]). `Some` ⇒ the child is born in a new
+    /// userns and uid/gid-mapped to 0 via the parent rendezvous before it execs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_namespace: Option<UserNsRequest>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

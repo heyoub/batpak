@@ -298,6 +298,10 @@ fn build_body(
             // platform-generated entries must be explicit, never invisible).
             envp,
             exe_slot: slot_u32(SLOT_EXE),
+            // The production plan-build path does NOT request a user namespace (S8 is
+            // opt-in infrastructure; the netns wiring that uses it is S9). `None` keeps
+            // the canonical bytes byte-for-byte identical to the pre-S8 wire form.
+            user_namespace: None,
         },
     })
 }

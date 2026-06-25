@@ -2,7 +2,7 @@
 //! the control-fd transcript live here; every `unsafe` syscall is delegated to the
 //! [`crate::sys`] basement. See `main.rs` for the topology + honesty contract.
 
-use crate::sys::{self, ChildExecPlan, LandlockRoot, ObservedShape};
+use crate::sys::{self, ChildExecPlan, LandlockRoot, ObservedShape, UsernsSyncPipe};
 use bvisor::linux::protocol::{
     confinement_installed, phase_resolution_consistent, ready_to_exec, validate_table,
     DescriptorKind, DescriptorRole, DescriptorSlotV1, LauncherState, LinuxLaunchBodyV1,
@@ -261,12 +261,34 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         Some(built) => &built.ruleset_fds,
         None => &[],
     };
-    let allow = allowlist(&known, exe_fd, ruleset_fds);
+    // OPT-IN user-namespace rendezvous (S8): when the plan requests a userns, create the
+    // parent→child sync pipe NOW (single-threaded, pre-clone3). The READ end is packed
+    // into the child plan + allowlisted (so the child blocks on it post-clone3, inside
+    // its new userns, BEFORE the scrub); the WRITE end stays with the parent to release
+    // the child after the uid/gid maps are written. With NO userns request this is `None`
+    // and the no-userns path is byte-for-byte unchanged. A pipe-create failure fails
+    // CLOSED to a fault (no child is created).
+    let userns_requested = body.target.user_namespace.is_some();
+    let sync_pipe = if userns_requested {
+        match sys::make_sync_pipe() {
+            Ok(pipe) => Some(pipe),
+            Err(_) => return Ok(Verdict::Faulted),
+        }
+    } else {
+        None
+    };
+    let child_sync = sync_pipe.map(|(read, write)| UsernsSyncPipe { read, write });
+    // The sync READ end is allowlisted (the child reads it before the scrub); the sync
+    // WRITE end is NOT (the parent owns it). The child closes its inherited write-end copy
+    // explicitly in its window BEFORE the read (so the fail-closed EOF is honest); the
+    // write end therefore also lands in the scrub close-list as a redundant safety.
+    let allow = allowlist(&known, exe_fd, ruleset_fds, child_sync.map(|p| p.read));
     let close_fds = scrub_close_list(&allow)?;
     let child_plan = match ChildExecPlan::build(
         exe_fd,
         None,
         error_fd,
+        child_sync,
         &body.target.argv,
         &body.target.envp,
         close_fds,
@@ -286,13 +308,41 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     // the instant it exists — no post-fork migration race. The fd was fstat-validated as
     // a directory in step 5; the kernel consumes it during the syscall.
     let cgroup_fd = cgroup_slot_fd(body);
-    let child_pid = sys::clone3_child(&child_plan, confinement.map(|c| c.ruleset), cgroup_fd)?;
+    let child_pid = sys::clone3_child(
+        &child_plan,
+        confinement.map(|c| c.ruleset),
+        cgroup_fd,
+        userns_requested,
+    )?;
     control.emit(LauncherState::ChildCreated);
     let _ = control.note(&format!("mechanism=clone3 child_pid={child_pid}"));
     if cgroup_fd.is_some() {
         // The kernel placed the child into the leaf at birth (CLONE_INTO_CGROUP); the
         // HOST independently confirms membership by reading the leaf's cgroup.procs.
         let _ = control.note("cgroup_placement=clone_into_cgroup");
+    }
+
+    // USER-NAMESPACE RENDEZVOUS (S8): when a userns was requested, the child is now born
+    // in a NEW userns and BLOCKED on the sync pipe (unmapped/overflow uid). The PARENT
+    // (heap fine — NOT the child window) writes the uid/gid maps in the LOAD-BEARING
+    // order (uid_map, setgroups=deny, gid_map), then RELEASES the child. If ANY map-write
+    // fails we FAIL CLOSED: the child is NOT released (its sync read gets EOF when the
+    // write end drops → it `_exit`s), it is reaped, and the target never runs.
+    if let Some((_read, write)) = sync_pipe {
+        match user_namespace_rendezvous(child_pid, write) {
+            Ok(()) => {
+                let _ = control.note("user_namespace=mapped child_uid0_egid0");
+            }
+            Err(()) => {
+                // The write end was already closed by the rendezvous on failure, so the
+                // child's blocking read saw EOF and `_exit`s; reap it and fault. The
+                // target NEVER ran.
+                sys::reap_child(child_pid);
+                let _ = control.note("user_namespace=map_write_failed fail_closed");
+                control.emit(LauncherState::SetupFaulted);
+                return Ok(Verdict::Faulted);
+            }
+        }
     }
 
     // Close the COORDINATOR's own copy of the error-pipe WRITE end so only the child
@@ -652,10 +702,18 @@ fn raw(slot_index: u32) -> RawFd {
 }
 
 /// The allowlist of fds the child KEEPS across the scrub: the target exe, stdio
-/// (0/1/2), the error-pipe write end, and the landlock ruleset fd(s) (so the child can
+/// (0/1/2), the error-pipe write end, the landlock ruleset fd(s) (so the child can
 /// `restrict_self` AFTER the scrub; they are CLOEXEC so a successful `fexecve` closes
-/// them — no ruleset fd leaks into the workload). Everything else the child closes.
-fn allowlist(known: &KnownFds, exe_fd: RawFd, ruleset_fds: &[RawFd]) -> BTreeSet<RawFd> {
+/// them — no ruleset fd leaks into the workload), and — when the userns rendezvous is
+/// engaged — the sync-pipe READ end (the child must read its release byte BEFORE the
+/// scrub closes the rest; it is CLOEXEC so a successful `fexecve` closes it too).
+/// Everything else the child closes.
+fn allowlist(
+    known: &KnownFds,
+    exe_fd: RawFd,
+    ruleset_fds: &[RawFd],
+    sync_read_fd: Option<RawFd>,
+) -> BTreeSet<RawFd> {
     let mut allow: BTreeSet<RawFd> = BTreeSet::new();
     allow.insert(0);
     allow.insert(1);
@@ -665,7 +723,81 @@ fn allowlist(known: &KnownFds, exe_fd: RawFd, ruleset_fds: &[RawFd]) -> BTreeSet
     for &fd in ruleset_fds {
         allow.insert(fd);
     }
+    if let Some(fd) = sync_read_fd {
+        allow.insert(fd);
+    }
     allow
+}
+
+/// Run the unprivileged user-namespace RENDEZVOUS in the PARENT (heap is fine here — this
+/// is NOT the async-signal-safe child window). The child (`child_pid`) was born in a new
+/// userns and is BLOCKED on the sync pipe; `sync_write_fd` is the parent's write end.
+///
+/// Writes, in the LOAD-BEARING order the unprivileged-userns recipe requires:
+///   1. `/proc/<pid>/uid_map`   = `0 <euid> 1`  (child uid 0 → the launcher's euid),
+///   2. `/proc/<pid>/setgroups` = `deny`        (MANDATORY and MUST precede gid_map for
+///      an unprivileged writer — the kernel rejects gid_map otherwise),
+///   3. `/proc/<pid>/gid_map`   = `0 <egid> 1`  (child gid 0 → the launcher's egid),
+///
+/// then RELEASES the child by writing 1 byte to the sync pipe. The `/proc` writes are
+/// ordinary `std::fs::write` (SAFE — NOT unsafe).
+///
+/// FAIL-CLOSED: on ANY map-write failure the child is NOT released — the write end is
+/// closed (dropping it gives the child's blocking read EOF, so it `_exit`s) and `Err(())`
+/// is returned so the caller reaps the child and faults. The target never runs unmapped.
+fn user_namespace_rendezvous(child_pid: libc::pid_t, sync_write_fd: RawFd) -> Result<(), ()> {
+    let (euid, egid) = sys::effective_ids();
+    let uid_map = format!("0 {euid} 1\n");
+    let gid_map = format!("0 {egid} 1\n");
+    let base = format!("/proc/{child_pid}");
+    // The leaf each map write targets. A `dangerous-test-hooks` build may redirect the
+    // FIRST write (uid_map) to a non-existent `/proc/<pid>/` attribute so the write FAILS
+    // deterministically on ANY host — exercising the fail-closed reap-and-fault branch
+    // even where unprivileged userns IS supported (so the teeth do not merely SKIP). The
+    // hook is compiled out of every non-test build, so production NEVER reads the env.
+    let uid_map_leaf = forced_map_fail_leaf().unwrap_or("uid_map");
+    let write_step = |leaf: &str, contents: &str| -> Result<(), ()> {
+        std::fs::write(format!("{base}/{leaf}"), contents).map_err(|_| ())
+    };
+    // Order is load-bearing: uid_map, THEN setgroups=deny, THEN gid_map.
+    let mapped = write_step(uid_map_leaf, &uid_map)
+        .and_then(|()| write_step("setgroups", "deny"))
+        .and_then(|()| write_step("gid_map", &gid_map));
+    if mapped.is_err() {
+        // FAIL CLOSED: do NOT release. Close the write end so the child's blocking read
+        // sees EOF and exits; the caller reaps it.
+        sys::close_fd(sync_write_fd);
+        return Err(());
+    }
+    // RELEASE: one byte unblocks the child's `read()`. A failed write is treated as a
+    // fail-closed rendezvous failure (the child would block forever otherwise).
+    let mut writer = sys::adopt_fd(sync_write_fd);
+    if writer.write_all(&[1u8]).is_err() {
+        return Err(());
+    }
+    // `writer` drops here, closing the parent's write end (the child has already been
+    // released by the byte above; the EOF that the drop produces is harmless).
+    Ok(())
+}
+
+/// `dangerous-test-hooks` fault injection: when `BVISOR_TEST_FORCE_USERNS_MAP_FAIL=1`,
+/// return a `/proc/<pid>/` leaf that does NOT exist, so the FIRST userns map write fails
+/// deterministically and the coordinator's fail-closed reap-and-fault branch runs. In
+/// every non-test build this fn is compiled to a constant `None` — production never reads
+/// the environment, so the injection cannot affect a real launch.
+#[cfg(feature = "dangerous-test-hooks")]
+fn forced_map_fail_leaf() -> Option<&'static str> {
+    match std::env::var("BVISOR_TEST_FORCE_USERNS_MAP_FAIL") {
+        Ok(v) if v.trim() == "1" => Some("bvisor_nonexistent_map_attr"),
+        _ => None,
+    }
+}
+
+/// Production stub: the userns map-fail injection hook is ABSENT without the
+/// `dangerous-test-hooks` feature, so the launcher always writes the real `uid_map` leaf.
+#[cfg(not(feature = "dangerous-test-hooks"))]
+fn forced_map_fail_leaf() -> Option<&'static str> {
+    None
 }
 
 /// The scrub close-list: every currently-open fd NOT in the allowlist. Computed in

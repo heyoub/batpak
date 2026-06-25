@@ -59,6 +59,13 @@ const ENV_CONTROL_FD: &str = "BVISOR_CONTROL_FD";
 const ENV_ERROR_FD: &str = "BVISOR_ERROR_FD";
 const ENV_ERROR_READ_FD: &str = "BVISOR_ERROR_READ_FD";
 
+/// `dangerous-test-hooks` ONLY: the env flag the harness forwards to the launcher to
+/// force its userns map-write to fail (exercising the fail-closed reap-and-fault branch
+/// on a host that DOES support unprivileged userns). The launcher reads it only under the
+/// same feature. Public so the S8 teeth test names exactly this key.
+#[cfg(feature = "dangerous-test-hooks")]
+pub const ENV_FORCE_USERNS_MAP_FAIL: &str = "BVISOR_TEST_FORCE_USERNS_MAP_FAIL";
+
 /// One pre-opened authority handle the launcher inherits at a fixed fd number. The
 /// `slot_index` MUST equal the matching [`crate::backend::linux::protocol::DescriptorSlotV1`]
 /// slot index in the plan (the launcher reads the fd at exactly the slot number), and the
@@ -174,6 +181,35 @@ pub fn resolve_launcher_path(default_path: &str) -> PathBuf {
     }
 }
 
+/// Whether this host permits an UNPRIVILEGED process to create a new user namespace —
+/// the S8 userns-rendezvous prerequisite. SAFE host-side probe (reads `/proc/sys` only).
+///
+/// Returns `false` (⇒ the userns test must SKIP, never silently pass) when EITHER:
+///   - `/proc/sys/user/max_user_namespaces` reads `0` (user namespaces are globally
+///     disabled, or this namespace's quota is exhausted), OR
+///   - the Debian/Ubuntu `kernel.unprivileged_userns_clone` sysctl EXISTS and reads `0`
+///     (unprivileged userns creation is explicitly disabled by that knob).
+///
+/// A MISSING `unprivileged_userns_clone` (most distros) is NOT a denial — the mainline
+/// default permits it, so absence ⇒ allowed. This mirrors the landlock ABI-floor SKIP:
+/// the test refuses to claim a pass it could not actually exercise.
+#[must_use]
+pub fn unprivileged_userns_available() -> bool {
+    // Global quota: a literal "0" means no userns may be created here.
+    if let Ok(text) = std::fs::read_to_string("/proc/sys/user/max_user_namespaces") {
+        if text.trim() == "0" {
+            return false;
+        }
+    }
+    // Debian/Ubuntu knob: present-and-"0" ⇒ explicitly disabled. Absent ⇒ allowed.
+    if let Ok(text) = std::fs::read_to_string("/proc/sys/kernel/unprivileged_userns_clone") {
+        if text.trim() == "0" {
+            return false;
+        }
+    }
+    true
+}
+
 /// Run the launcher over `plan` with the pre-opened `authority` handles, collecting the
 /// transcript + terminal into a [`LaunchObservation`]. SAFE end-to-end except the two
 /// ledgered basement calls (memfd seal + spawn pre_exec).
@@ -194,6 +230,33 @@ pub fn run_launcher(
     launcher_path: &std::path::Path,
     plan: &LinuxLaunchPlanV1,
     authority: Vec<AuthorityFd>,
+) -> Result<LaunchObservation, HarnessError> {
+    run_launcher_inner(launcher_path, plan, authority, &[])
+}
+
+/// `dangerous-test-hooks` ONLY: run the launcher with EXTRA env entries forwarded into
+/// its otherwise `env_clear()`ed environment. The S8 fail-closed teeth uses this to set
+/// [`ENV_FORCE_USERNS_MAP_FAIL`] for a SINGLE launch WITHOUT mutating the test process's
+/// own (process-global, clippy-disallowed) environment — so concurrent tests are
+/// unaffected. Production never compiles this.
+///
+/// # Errors
+/// As [`run_launcher`].
+#[cfg(feature = "dangerous-test-hooks")]
+pub fn run_launcher_with_env(
+    launcher_path: &std::path::Path,
+    plan: &LinuxLaunchPlanV1,
+    authority: Vec<AuthorityFd>,
+    extra_env: &[(&str, String)],
+) -> Result<LaunchObservation, HarnessError> {
+    run_launcher_inner(launcher_path, plan, authority, extra_env)
+}
+
+fn run_launcher_inner(
+    launcher_path: &std::path::Path,
+    plan: &LinuxLaunchPlanV1,
+    authority: Vec<AuthorityFd>,
+    extra_env: &[(&str, String)],
 ) -> Result<LaunchObservation, HarnessError> {
     use std::os::unix::net::UnixStream;
 
@@ -261,12 +324,17 @@ pub fn run_launcher(
         keep_cloexec: false,
     });
 
-    let env: Vec<(&str, String)> = vec![
+    let mut env: Vec<(&str, String)> = vec![
         (ENV_PLAN_FD, plan_target.to_string()),
         (ENV_CONTROL_FD, control_target.to_string()),
         (ENV_ERROR_FD, error_write_target.to_string()),
         (ENV_ERROR_READ_FD, error_read_target.to_string()),
     ];
+    // The launcher spawns with `env_clear()`, so any extra (test-only) env entry must be
+    // forwarded EXPLICITLY here. In production `extra_env` is always empty.
+    for (name, value) in extra_env {
+        env.push((name, value.clone()));
+    }
 
     // 5. Spawn the launcher (basement, ledgered pre_exec). The relocated source fds come
     //    back so the parent can drop them AFTER spawn (the child holds its own copies).

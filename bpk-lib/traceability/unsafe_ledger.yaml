@@ -206,53 +206,68 @@ entries:
     requirement: ControlChannel
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-clone3-child
-    syscall: clone3 (raw syscall) + the async-signal-safe child branch (sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
+    syscall: clone3 (raw syscall) + the async-signal-safe child branch (optional userns-rendezvous SYS_read/sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
       clone3 is invoked with a correctly sized clone_args (exit_signal=SIGCHLD, and
-      flags either 0 or exactly CLONE_INTO_CGROUP) BUILT IN THE SINGLE-THREADED PARENT.
-      When the coordinator resolved a DescriptorRole::CgroupDir slot it sets
-      flags|=CLONE_INTO_CGROUP and clone_args.cgroup = that inherited, fstat-validated
-      DIRECTORY fd, so the kernel places the child into the prepared cgroup leaf AT BIRTH
-      (no post-fork migration race); both flags and cgroup are c_ulonglong and the fd is
-      widened with try_from (a non-representable fd leaves the flag unset rather than
-      passing a truncated value). The cgroup fd is consumed by the kernel during the
-      clone3 syscall in the PARENT — the child never needs it — so an invalid fd only
-      makes clone3 fail with errno (returned as an Err; no child exists, nothing ran);
-      no pointer is dereferenced for it. The PARENT branch (rc>0) only
+      flags drawn from {0, CLONE_INTO_CGROUP, CLONE_NEWUSER}) BUILT IN THE
+      SINGLE-THREADED PARENT. When the coordinator resolved a DescriptorRole::CgroupDir
+      slot it sets flags|=CLONE_INTO_CGROUP and clone_args.cgroup = that inherited,
+      fstat-validated DIRECTORY fd, so the kernel places the child into the prepared cgroup
+      leaf AT BIRTH (no post-fork migration race); both flags and cgroup are c_ulonglong
+      and the fd is widened with try_from (a non-representable fd leaves the flag unset
+      rather than passing a truncated value). The cgroup fd is consumed by the kernel
+      during the clone3 syscall in the PARENT — the child never needs it — so an invalid fd
+      only makes clone3 fail with errno (returned as an Err; no child exists, nothing ran);
+      no pointer is dereferenced for it. When the plan OPTED INTO the user-namespace
+      rendezvous (S8) the coordinator additionally sets flags|=CLONE_NEWUSER, so the child
+      is born in a NEW user namespace initially UNMAPPED (overflow uid) and then BLOCKS on
+      the sync-pipe read fd (see linux-launcher-userns-sync-pipe) until the PARENT writes
+      its uid/gid maps and releases it; the flag itself needs no extra memory or unsafe,
+      and with no userns request the OR is never reached so the flags are EXACTLY the
+      pre-S8 set (the no-userns PROVEN oracles run through an unchanged environment).
+      The PARENT branch (rc>0) only
       returns the child pid (and drops its copy of the optional ruleset fd — the child
       holds its own inherited copy, so the parent drop does not affect confinement).
       The CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
       pre-built ChildExecPlan (argv/envp NUL-terminated pointer arrays into parent-owned
-      CStrings, the scrub close-list, and the exec/cwd/error fds — ALL allocated by
-      ChildExecPlan::build BEFORE this call) plus the OPTIONAL parent-built landlock
-      ruleset (whose every allocation + add_rule syscall ran in the parent), by INDEXING
-      already-mapped copy-on-write memory, and issues ONLY async-signal-safe syscalls:
-      sigprocmask (empty mask), close (each scrub fd), optional fchdir, restrict_self
+      CStrings, the scrub close-list, the optional sync-pipe read fd, and the exec/cwd/
+      error fds — ALL allocated by ChildExecPlan::build BEFORE this call) plus the OPTIONAL
+      parent-built landlock ruleset (whose every allocation + add_rule syscall ran in the
+      parent), by INDEXING already-mapped copy-on-write memory, and issues ONLY
+      async-signal-safe syscalls: the optional userns-rendezvous blocking read (raw
+      SYS_read of 1 byte into a fixed stack byte — a read != 1 means the parent closed the
+      pipe WITHOUT releasing, i.e. a fail-closed map-write failure, so the child reports +
+      _exits unmapped-NEVER-running), sigprocmask (empty mask), close (each scrub fd),
+      optional fchdir, restrict_self
       (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset fd —
       allocation-free, applied AFTER the scrub and BEFORE fexecve), fexecve (exec rides
       the fd, no path reopen), write (errno on failure), _exit. It performs NO heap
       allocation, takes NO lock, and calls NO allocating Rust std; no destructor runs and
       no unwinding crosses the fork (the child paths either fexecve-replace the image or
       _exit without returning into Rust). On success fexecve replaces the image and the
-      O_CLOEXEC error fd (and the CLOEXEC ruleset fd) auto-close, which the parent reads
-      as EOF; on ANY child failure (including a restrict_self error) the child writes the
-      errno to the error fd and _exit(127)s, so the target NEVER runs unconfined and the
-      parent observes the fault (fail closed).
+      O_CLOEXEC error fd (and the CLOEXEC ruleset/sync fds) auto-close, which the parent
+      reads as EOF; on ANY child failure (including a restrict_self error or an incomplete
+      userns rendezvous) the child writes the errno to the error fd and _exit(127)s, so the
+      target NEVER runs unconfined/unmapped and the parent observes the fault (fail closed).
     requirement: ChildSpawn
   - file: crates/bvisor/launcher/linux/sys.rs
     anchor: linux-launcher-child-window
-    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
+    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe optional-userns-read/sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
       The call site of the unsafe `run_child` fn, reached ONLY in the `rc == 0`
       clone3 CHILD branch — the async-signal-safe window. run_child performs ONLY
       async-signal-safe syscalls on the PRE-BUILT ChildExecPlan (argv/envp pointer
-      arrays into parent-owned CStrings, the scrub close-list, the exec/cwd/error
-      fds — ALL allocated by ChildExecPlan::build BEFORE clone3) and the OPTIONAL
-      parent-built landlock ruleset (every allocation + add_rule syscall ran in the
-      parent), indexing already-mapped copy-on-write memory. It performs NO heap
+      arrays into parent-owned CStrings, the scrub close-list, the optional sync-pipe read
+      fd, the exec/cwd/error fds — ALL allocated by ChildExecPlan::build BEFORE clone3) and
+      the OPTIONAL parent-built landlock ruleset (every allocation + add_rule syscall ran
+      in the parent), indexing already-mapped copy-on-write memory. It performs NO heap
       allocation, takes NO lock, and DIVERGES: it either fexecve-replaces the image or
       _exit(127)s after writing the errno, so no destructor runs and no unwinding
-      crosses the fork. The CONFINEMENT step is RulesetCreated::restrict_self() — a SAFE
+      crosses the fork. When a userns was requested the FIRST step is the rendezvous: a
+      raw SYS_read of 1 byte into a fixed stack byte from the sync-pipe read fd, blocking
+      until the parent (which has written uid_map/setgroups=deny/gid_map) releases the
+      child; a read != 1 (parent closed without releasing) child_fails so the target never
+      runs unmapped. The CONFINEMENT step is RulesetCreated::restrict_self() — a SAFE
       call (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset
       fd, allocation-free) run AFTER the scrub and BEFORE fexecve; on its error the child
       child_fails (errno → pipe → _exit) so the target NEVER runs unconfined. The scrub
@@ -292,3 +307,36 @@ entries:
       beyond the out-siginfo. Best-effort — a failure is ignored because the error
       pipe, not the exit code, already decided the launch outcome.
     requirement: ChildSpawn
+
+  # ── S8: the OPT-IN unprivileged user-namespace RENDEZVOUS basement. Two new
+  # coordinator-side (parent, pre-clone3) blocks back it; the CLONE_NEWUSER flag and
+  # the child's blocking sync-pipe read are folded into the clone3-child / child-window
+  # entries above. The PARENT's /proc/<pid>/{uid_map,setgroups,gid_map} writes are
+  # plain std::fs::write (SAFE — no unsafe, no ledger entry). This is INFRASTRUCTURE
+  # for unprivileged NetworkDenyAll (S9): the child becomes uid 0 in the new userns,
+  # the prerequisite for unprivileged netns creation. It mints no PROVEN claim itself.
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-userns-sync-pipe
+    syscall: pipe2(&mut [c_int;2], O_CLOEXEC) — create the parent→child userns rendezvous sync pipe
+    safety_invariant: >-
+      Coordinator-side (parent, single-threaded, pre-clone3). pipe2 writes EXACTLY two
+      fresh fd numbers into a fixed stack [c_int; 2] out-array and reads no other user
+      memory; O_CLOEXEC makes both ends close-on-exec. On failure it returns -1/errno
+      (surfaced as io::Error — no fd is created, the userns launch refuses fail-closed).
+      The two returned fds are brand-new and exclusively owned by the launcher; each is
+      closed AT MOST ONCE — the READ end is packed into the ChildExecPlan and closed by
+      the child's scrub or its CLOEXEC at exec, the WRITE end by the coordinator's
+      explicit close/File-drop after the child is released or fail-closed. They are passed
+      as plain RawFds with no Rust value wrapping them, so there is no aliasing and no
+      double-close. No pointer beyond the out-array is dereferenced.
+    requirement: NetworkDenyAll
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-effective-ids
+    syscall: geteuid() + getegid() — observe the launcher's effective uid/gid for the userns maps
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3) pure observation. geteuid/getegid take NO
+      arguments, read NO user memory, dereference NO pointer, create/close NO fd, and
+      CANNOT fail (POSIX guarantees they always succeed). They only return the calling
+      process's effective uid/gid, used to build the userns uid/gid maps (0 <euid> 1 /
+      0 <egid> 1). Sound for any caller state.
+    requirement: NetworkDenyAll

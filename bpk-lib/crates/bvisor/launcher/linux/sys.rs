@@ -56,6 +56,14 @@ pub(crate) const LANDLOCK_ABI_FLOOR_RAW: i64 = ABI::V3 as i64;
 /// gnu-linux constant as `c_int`; `clone_args.flags`/`.cgroup` are both `c_ulonglong`.
 const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
 
+/// `CLONE_NEWUSER` (uapi `linux/sched.h`): a `clone3`/`clone` flag asking the kernel to
+/// create the child in a NEW user namespace. Named here as an explicit `u64` (its value
+/// `0x1000_0000` fits `i32`, but `clone_args.flags` is `c_ulonglong`, so we keep it wide
+/// to OR it into `flags` without a lossy cast). Set ONLY when the plan opts into the
+/// userns rendezvous (S8) — the child is born unmapped (overflow uid) and BLOCKS until
+/// the parent writes its uid/gid maps and releases it (then it is uid 0 in the userns).
+const CLONE_NEWUSER: u64 = 0x1000_0000;
+
 /// One declared confinement root the launcher restricts FS access TO: a pre-opened,
 /// fstat-validated descriptor (NEVER a path — exec/landlock rides the inherited fd,
 /// avoiding the CVE-2019-5736 reopen race) and whether the workload may write beneath
@@ -97,6 +105,19 @@ pub(crate) struct ChildExecPlan {
     exe_fd: RawFd,
     cwd_fd: Option<RawFd>,
     error_fd: RawFd,
+    /// OPT-IN user-namespace rendezvous (S8): the READ end of the parent→child sync
+    /// pipe. When `Some`, the child (born in a new userns via `CLONE_NEWUSER`, initially
+    /// unmapped/overflow-uid) BLOCKS on a 1-byte `read()` of this fd as the FIRST step of
+    /// the child window — waiting for the parent to write the uid/gid maps and release
+    /// it. `None` ⇒ no rendezvous (the existing no-userns path, byte-for-byte unchanged).
+    sync_read_fd: Option<RawFd>,
+    /// OPT-IN user-namespace rendezvous (S8): the child's INHERITED copy of the sync
+    /// pipe's WRITE end. The child MUST close this copy (raw `SYS_close`) as the very
+    /// FIRST thing in its window — BEFORE blocking on the read — so that when the PARENT
+    /// later closes ITS write copy (the fail-closed branch) the child's blocking `read()`
+    /// sees EOF instead of DEADLOCKING on a write end it itself holds open. `None` when no
+    /// rendezvous.
+    sync_write_fd: Option<RawFd>,
     argv: Vec<*const libc::c_char>,
     envp: Vec<*const libc::c_char>,
     close_fds: Vec<libc::c_int>,
@@ -125,6 +146,19 @@ impl std::fmt::Display for PlanBuildError {
 
 impl std::error::Error for PlanBuildError {}
 
+/// The OPT-IN user-namespace rendezvous fds the child window needs (S8). Bundled so the
+/// plan builder carries one optional value instead of two correlated fds: `read` is the
+/// sync-pipe READ end the child blocks on; `write` is the child's inherited copy of the
+/// WRITE end, which the child closes FIRST (so the parent's fail-closed close yields a
+/// clean EOF rather than a deadlock). `None` ⇒ no rendezvous (no-userns path unchanged).
+#[derive(Clone, Copy)]
+pub(crate) struct UsernsSyncPipe {
+    /// The sync-pipe READ end the child blocks on for the parent's release byte.
+    pub(crate) read: RawFd,
+    /// The child's inherited copy of the sync-pipe WRITE end (closed first in the child).
+    pub(crate) write: RawFd,
+}
+
 impl ChildExecPlan {
     /// Build the plan IN THE PARENT (single-threaded, pre-fork). All allocation —
     /// the `CString` conversions, the pointer arrays, the close-list `Vec` — happens
@@ -138,10 +172,13 @@ impl ChildExecPlan {
         exe_fd: RawFd,
         cwd_fd: Option<RawFd>,
         error_fd: RawFd,
+        sync_pipe: Option<UsernsSyncPipe>,
         argv: &[String],
         envp: &[(String, String)],
         close_fds: Vec<libc::c_int>,
     ) -> Result<Self, PlanBuildError> {
+        let sync_read_fd = sync_pipe.map(|p| p.read);
+        let sync_write_fd = sync_pipe.map(|p| p.write);
         let mut argv_storage: Vec<CString> = Vec::with_capacity(argv.len());
         for arg in argv {
             argv_storage
@@ -169,6 +206,8 @@ impl ChildExecPlan {
             exe_fd,
             cwd_fd,
             error_fd,
+            sync_read_fd,
+            sync_write_fd,
             argv: argv_ptrs,
             envp: envp_ptrs,
             close_fds,
@@ -364,6 +403,7 @@ pub(crate) fn clone3_child(
     plan: &ChildExecPlan,
     confinement: Option<RulesetCreated>,
     cgroup_fd: Option<RawFd>,
+    userns: bool,
 ) -> io::Result<libc::pid_t> {
     // Build the clone3 argument IN THE PARENT. exit_signal = SIGCHLD so the parent can
     // `waitid` the child normally; the MECHANISM is clone3 (NEVER Command::spawn).
@@ -371,6 +411,13 @@ pub(crate) fn clone3_child(
     // exit_signal = SIGCHLD (a small positive constant) so the parent reaps via the
     // normal child-signal path; widen without a lossy `as` cast.
     args.exit_signal = u64::try_from(libc::SIGCHLD).unwrap_or(0);
+    // OPT-IN user-namespace rendezvous (S8): add CLONE_NEWUSER ONLY when the plan
+    // requested it. When off this OR is never reached, so the flags are EXACTLY what
+    // the pre-S8 no-userns path produced (0, or CLONE_INTO_CGROUP) — the existing
+    // PROVEN oracles run through an unchanged environment.
+    if userns {
+        args.flags |= CLONE_NEWUSER;
+    }
     // Optional cgroup placement: if the coordinator resolved a CgroupDir slot, ask the
     // kernel to birth the child INSIDE that leaf (no migration race). A fd that does not
     // fit a u64 leaves the flag UNSET (never a truncated cgroup field) — the child then
@@ -384,12 +431,16 @@ pub(crate) fn clone3_child(
     let size = u64::try_from(std::mem::size_of::<libc::clone_args>()).unwrap_or(0);
 
     // SAFETY (LEDGER:linux-launcher-clone3-child): `clone3` is invoked with a
-    // properly sized `clone_args` (exit_signal=SIGCHLD, and flags either 0 or exactly
-    // CLONE_INTO_CGROUP with `cgroup` set to the inherited, fstat-validated CgroupDir
-    // directory fd) built in the single-threaded parent. The kernel consumes the cgroup
-    // fd DURING this syscall in the parent (placing the child into the leaf at birth);
-    // an invalid fd only makes clone3 fail with errno (handled below — no child runs).
-    // The PARENT branch (rc>0) only returns the pid. The
+    // properly sized `clone_args` (exit_signal=SIGCHLD, and flags drawn from {0,
+    // CLONE_INTO_CGROUP, CLONE_NEWUSER} — CLONE_INTO_CGROUP with `cgroup` set to the
+    // inherited, fstat-validated CgroupDir directory fd, and CLONE_NEWUSER ONLY when the
+    // plan opted into the userns rendezvous) built in the single-threaded parent. The
+    // kernel consumes the cgroup fd DURING this syscall in the parent (placing the child
+    // into the leaf at birth); an invalid fd only makes clone3 fail with errno (handled
+    // below — no child runs). CLONE_NEWUSER births the child in a NEW user namespace
+    // initially UNMAPPED (overflow uid); the child then BLOCKS in its window on the sync
+    // pipe until the parent writes the uid/gid maps and releases it — no extra memory or
+    // unsafe is needed for the flag itself. The PARENT branch (rc>0) only returns the pid. The
     // CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
     // PRE-BUILT `plan` (argv/envp pointer arrays, close-list, fds — all allocated
     // by `ChildExecPlan::build` BEFORE this call) by INDEXING already-mapped
@@ -410,8 +461,9 @@ pub(crate) fn clone3_child(
     if rc == 0 {
         // SAFETY (LEDGER:linux-launcher-child-window): the `rc == 0` clone3 CHILD
         // branch — the async-signal-safe window. `run_child` is an `unsafe fn` that
-        // performs ONLY async-signal-safe syscalls (sigprocmask/close/fchdir/fexecve/
-        // write/_exit) on the PRE-BUILT `plan` (argv/envp pointer arrays into parent-
+        // performs ONLY async-signal-safe syscalls (the optional userns-rendezvous
+        // blocking read/sigprocmask/close/fchdir/fexecve/write/_exit) on the PRE-BUILT
+        // `plan` (argv/envp pointer arrays into parent-
         // owned CStrings, the scrub close-list, and the fds — all allocated by
         // ChildExecPlan::build BEFORE clone3). It indexes already-mapped copy-on-write
         // memory, performs NO heap allocation, takes NO lock, and DIVERGES (it either
@@ -436,11 +488,43 @@ pub(crate) fn clone3_child(
 /// dereferences the pre-built raw pointer arrays and issues raw syscalls.
 ///
 /// SAFETY: callable ONLY from the `rc == 0` child branch of [`clone3_child`], with a
-/// `plan` whose `argv`/`envp`/`close_fds` were fully built in the parent and an
-/// OPTIONAL `confinement` ruleset whose every allocation + `add_rule` syscall ran in
-/// the parent. It indexes only that already-allocated memory and calls only
-/// async-signal-safe syscalls (`restrict_self` = `prctl` + `landlock_restrict_self`).
+/// `plan` whose `argv`/`envp`/`close_fds`/`sync_read_fd` were fully built in the parent
+/// and an OPTIONAL `confinement` ruleset whose every allocation + `add_rule` syscall ran
+/// in the parent. It indexes only that already-allocated memory and calls only
+/// async-signal-safe syscalls — the optional userns-rendezvous blocking `read` (raw
+/// `SYS_read` into a stack byte), then `restrict_self` (`prctl` + `landlock_restrict_self`).
 unsafe fn run_child(plan: &ChildExecPlan, confinement: Option<RulesetCreated>) -> ! {
+    // 0. USER-NAMESPACE RENDEZVOUS (S8, async-signal-safe): if a sync-pipe read end was
+    //    packed in, the child was born in a NEW userns (CLONE_NEWUSER) and is currently
+    //    UNMAPPED (overflow uid). BLOCK on a 1-byte `read()` of the sync pipe until the
+    //    parent has written uid_map / setgroups=deny / gid_map and writes the release
+    //    byte — after which the child is uid 0 inside the userns. The raw `SYS_read`
+    //    syscall is async-signal-safe and allocates nothing; the read target is a fixed
+    //    stack byte. A read that returns <=0 (parent closed the pipe WITHOUT releasing
+    //    ⇒ a fail-closed map-write failure, or EOF) means the rendezvous did not complete
+    //    ⇒ the child reports + `_exit`s, so the target NEVER runs unmapped.
+    if let Some(sync_fd) = plan.sync_read_fd {
+        // First close the child's INHERITED copy of the sync WRITE end (raw SYS_close —
+        // async-signal-safe). The child must NOT keep a write end open across the blocking
+        // read: if it did, the parent's fail-closed close of ITS write copy would never
+        // bring the pipe to EOF (the child's own copy keeps it open) and the read would
+        // DEADLOCK. After this, the parent is the sole writer, so its release-byte arrives
+        // and its fail-closed close produces a clean EOF.
+        if let Some(write_fd) = plan.sync_write_fd {
+            libc::syscall(libc::SYS_close, write_fd);
+        }
+        let mut byte: u8 = 0;
+        let n = libc::syscall(
+            libc::SYS_read,
+            sync_fd,
+            std::ptr::addr_of_mut!(byte).cast::<libc::c_void>(),
+            1usize,
+        );
+        if n != 1 {
+            child_fail(plan.error_fd);
+        }
+    }
+
     // 1. Normalise the signal mask to empty (async-signal-safe). The set is a
     //    stack `sigset_t`; `sigemptyset`/`sigprocmask` allocate nothing.
     let mut empty: libc::sigset_t = std::mem::zeroed();
@@ -539,6 +623,53 @@ pub(crate) fn set_cloexec(fd: RawFd) {
             let _ = libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
         }
     }
+}
+
+/// Create the parent→child user-namespace RENDEZVOUS sync pipe in the COORDINATOR
+/// (single-threaded, pre-clone3) and return `(read_end, write_end)` as raw fds, both
+/// `O_CLOEXEC`. The READ end is packed into the [`ChildExecPlan`] (the child blocks on
+/// it post-clone3, inside its new userns); the WRITE end stays with the parent, which
+/// writes one byte to RELEASE the child AFTER it has written the uid/gid maps. Both are
+/// CLOEXEC so a successful workload `fexecve` cannot leak the pipe — the child reads
+/// from the read end BEFORE exec (CLOEXEC acts only at exec), and the parent closes its
+/// write end explicitly once the child is released or fail-closed.
+///
+/// Returned as plain `RawFd`s (NOT owned handles) so the coordinator can place the read
+/// end into the inherited-fd-numbered plan and best-effort-close each end with the same
+/// raw discipline as the rest of the launcher's inherited fds.
+///
+/// # Errors
+/// An `io::Error` carrying the `pipe2` errno on failure (the userns launch then refuses
+/// fail-closed — no child is created).
+pub(crate) fn make_sync_pipe() -> io::Result<(RawFd, RawFd)> {
+    let mut fds: [libc::c_int; 2] = [-1, -1];
+    // SAFETY (LEDGER:linux-launcher-userns-sync-pipe): coordinator-side (parent,
+    // single-threaded, pre-clone3). `pipe2` writes EXACTLY two fresh fd numbers into the
+    // `fds` out-array (a fixed stack `[c_int; 2]`) and reads no other user memory; we
+    // pass `O_CLOEXEC` so both ends are close-on-exec. On failure it returns -1 and sets
+    // errno, which we surface as an io::Error (no fd is created). The two returned fds
+    // are brand-new, exclusively owned by the launcher, and each is closed at most once
+    // (the read end by the child scrub / CLOEXEC, the write end by the coordinator's
+    // explicit close); they are passed as plain RawFds with no Rust value wrapping them,
+    // so there is no aliasing and no double-close. No pointer beyond the out-array is
+    // dereferenced.
+    let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+/// The launcher's effective uid/gid, observed in the COORDINATOR (parent, pre-clone3),
+/// for building the userns uid/gid maps (`0 <euid> 1` / `0 <egid> 1`): the child uid 0
+/// maps to exactly the unprivileged identity the launcher already runs as.
+#[must_use]
+pub(crate) fn effective_ids() -> (libc::uid_t, libc::gid_t) {
+    // SAFETY (LEDGER:linux-launcher-effective-ids): coordinator-side pure observation.
+    // `geteuid`/`getegid` take NO arguments, read NO user memory, dereference NO pointer,
+    // create/close NO fd, and CANNOT fail (POSIX guarantees they always succeed). They
+    // only return the calling process's effective uid/gid. Sound for any caller state.
+    unsafe { (libc::geteuid(), libc::getegid()) }
 }
 
 /// Reap a child pid via `waitid(P_PID, …, WEXITED)` in the COORDINATOR (the parent,
