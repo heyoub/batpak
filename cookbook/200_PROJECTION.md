@@ -9,7 +9,7 @@ Correct API: `Projection`, projection cache traits, projection watch/wait
 helpers, and `ProjectionRunEvidenceReport`.
 
 Minimal code is mirrored by `bpk-lib/templates/projection-cache` and
-`bpk-lib/crates/core/examples/raw_projection_counter.rs`.
+`bpk-lib/crates/examples/examples/raw_projection_counter.rs`.
 
 Wrong tempting move: call a cache hit fresh without binding it to replay
 watermarks and cache capability evidence.

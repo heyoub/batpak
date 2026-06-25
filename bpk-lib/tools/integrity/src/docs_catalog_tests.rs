@@ -174,3 +174,52 @@ fn readme_count_mismatch_is_rejected() {
         "error must name the invariant-count mismatch, got: {err}"
     );
 }
+
+#[test]
+fn extract_crate_rs_paths_finds_files_and_truncates_fn_suffix() {
+    let md = "see `crates/examples/examples/quickstart.rs` and \
+              crates/core/tests/foo.rs::some_test plus crates/core/src/lib.rs.";
+    let paths = extract_crate_rs_paths(md);
+    assert!(paths.contains("crates/examples/examples/quickstart.rs"));
+    assert!(
+        paths.contains("crates/core/tests/foo.rs"),
+        "path::fn truncates to the file"
+    );
+    assert!(paths.contains("crates/core/src/lib.rs"));
+}
+
+#[test]
+fn live_cookbook_citations_all_resolve() {
+    // GREEN: every crates/.../*.rs the committed cookbook cites resolves.
+    let repo_root = crate::repo_surface::repo_root().expect("repo root");
+    check_cookbook_citations(&repo_root).expect("cookbook citations must all resolve");
+}
+
+#[test]
+fn cookbook_citation_to_a_missing_file_is_rejected() {
+    // RED: a cookbook md citing a non-existent crates/.../*.rs path fails the gate.
+    let root = std::env::temp_dir().join(format!("batpak-cookbook-redfix-{}", std::process::id()));
+    let cookbook = root.join("cookbook");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&cookbook).expect("create temp cookbook");
+    // A real file the cookbook also cites (proves the gate is not vacuously failing).
+    std::fs::create_dir_all(root.join("crates/examples/examples")).expect("tree");
+    std::fs::write(
+        root.join("crates/examples/examples/real.rs"),
+        "fn main() {}\n",
+    )
+    .expect("real");
+    std::fs::write(
+        cookbook.join("100_X.md"),
+        "uses `crates/examples/examples/real.rs` and `crates/examples/examples/ghost.rs`.",
+    )
+    .expect("write md");
+
+    let err = cookbook_citations_resolve(&root, &cookbook)
+        .expect_err("a missing cookbook citation must be rejected");
+    assert!(
+        err.to_string().contains("ghost.rs"),
+        "error must name the bad path, got: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
