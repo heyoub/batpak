@@ -69,7 +69,13 @@ pub fn support_matrix() -> SupportMatrix {
 
     insert(
         &mut best,
-        RequirementKind::ChildSpawn,
+        RequirementKind::ChildSpawnDeny,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ProcessTree],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllow,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
@@ -81,7 +87,13 @@ pub fn support_matrix() -> SupportMatrix {
     );
     insert(
         &mut best,
-        RequirementKind::InheritedFds,
+        RequirementKind::InheritedFdsNone,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::InheritedFdsOnly,
         Enforcement::Enforced,
         &[EvidenceClaim::MechanismAttestation],
     );

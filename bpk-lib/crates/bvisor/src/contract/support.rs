@@ -71,11 +71,18 @@ impl SupportMatrix {
     }
 }
 
-/// The classification key: a requirement's shape, independent of its payload.
+/// The classification key: a requirement's CANONICAL POLICY identity (proof-spine
+/// §2), one key per semantically-distinct policy.
 ///
 /// Guarantee-shaped, not mechanism-shaped — the matrix grades the KIND of thing
-/// asked, and the planner inspects the concrete grade where it must distinguish
-/// (e.g. `Network { DenyAll }` vs `Network { AllowList }`).
+/// asked. The key is INJECTIVE over canonical-policy meaning (the §2 law: distinct
+/// [`crate::contract::canonical_policy::CanonicalPolicy`] ⇒ distinct key), so each
+/// capability variant that carries a distinct policy gets its OWN key
+/// (`Network { DenyAll }` vs `Network { AllowList }`, `InheritedFds { None }` vs
+/// `{ Only }`, `ChildSpawn { Deny }` vs `{ Allow }`). A future backend could
+/// differentiate cells we currently lower identically, so we never pre-collapse
+/// them. `Environment` carries a single policy variant today (`EmptyExcept`), so it
+/// is one key until the S4 `Environment::Exact` split.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RequirementKind {
@@ -85,12 +92,16 @@ pub enum RequirementKind {
     NetworkDenyAll,
     /// [`Capability::Network`] with `AllowList`.
     NetworkAllowList,
-    /// [`Capability::ChildSpawn`].
-    ChildSpawn,
+    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::Deny`].
+    ChildSpawnDeny,
+    /// [`Capability::ChildSpawn`] with [`crate::SpawnPolicy::Allow`].
+    ChildSpawnAllow,
     /// [`Capability::Environment`].
     Environment,
-    /// [`Capability::InheritedFds`].
-    InheritedFds,
+    /// [`Capability::InheritedFds`] with [`crate::FdPolicy::None`].
+    InheritedFdsNone,
+    /// [`Capability::InheritedFds`] with [`crate::FdPolicy::Only`].
+    InheritedFdsOnly,
     /// [`HostControl::LaunchWorkload`].
     LaunchWorkload,
     /// [`HostControl::CaptureStreams`].
@@ -114,13 +125,15 @@ impl RequirementKind {
     /// new variant that is not added here fails the `all_is_exhaustive` test), so a
     /// gate that must scan EVERY kind (e.g. the qualification coupling gate) can
     /// enumerate them without a runtime registry.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 16] = [
         Self::Filesystem,
         Self::NetworkDenyAll,
         Self::NetworkAllowList,
-        Self::ChildSpawn,
+        Self::ChildSpawnDeny,
+        Self::ChildSpawnAllow,
         Self::Environment,
-        Self::InheritedFds,
+        Self::InheritedFdsNone,
+        Self::InheritedFdsOnly,
         Self::LaunchWorkload,
         Self::CaptureStreams,
         Self::TempRoot,
@@ -140,19 +153,44 @@ impl RequirementKind {
         }
     }
 
+    /// Derive the policy-aware key (proof-spine §2): each capability's distinct
+    /// CANONICAL POLICY maps to a distinct key. POLICY-AWARE for ALL kinds — no
+    /// policy-blind collapse — so two semantically-distinct policies under the same
+    /// capability variant (`InheritedFds::None` vs `::Only`, `ChildSpawn::Deny` vs
+    /// `::Allow`, `Network::DenyAll` vs `::AllowList`) never share a key.
+    /// `Environment` has a single policy variant today (`EmptyExcept`), so one key.
     fn of_capability(cap: &Capability) -> Self {
+        use crate::contract::capability::{FdPolicy, NetPolicy, SpawnPolicy};
         match cap {
             Capability::Filesystem { .. } => Self::Filesystem,
             Capability::Network {
-                policy: crate::contract::capability::NetPolicy::DenyAll,
+                policy: NetPolicy::DenyAll,
             } => Self::NetworkDenyAll,
             Capability::Network {
-                policy: crate::contract::capability::NetPolicy::AllowList(_),
+                policy: NetPolicy::AllowList(_),
             } => Self::NetworkAllowList,
-            Capability::ChildSpawn { .. } => Self::ChildSpawn,
+            Capability::ChildSpawn {
+                policy: SpawnPolicy::Deny,
+            } => Self::ChildSpawnDeny,
+            Capability::ChildSpawn {
+                policy: SpawnPolicy::Allow,
+            } => Self::ChildSpawnAllow,
             Capability::Environment { .. } => Self::Environment,
-            Capability::InheritedFds { .. } => Self::InheritedFds,
+            Capability::InheritedFds {
+                policy: FdPolicy::None,
+            } => Self::InheritedFdsNone,
+            Capability::InheritedFds {
+                policy: FdPolicy::Only(_),
+            } => Self::InheritedFdsOnly,
         }
+    }
+
+    /// Test-only accessor for the policy→key map (the injective gate exercises it
+    /// directly with constructed capabilities). Production code reaches it through
+    /// [`Self::of`].
+    #[cfg(test)]
+    pub(crate) fn of_capability_for_test(cap: &Capability) -> Self {
+        Self::of_capability(cap)
     }
 
     fn of_control(ctrl: &HostControl) -> Self {
@@ -242,9 +280,11 @@ mod requirement_kind_tests {
                 RequirementKind::Filesystem
                 | RequirementKind::NetworkDenyAll
                 | RequirementKind::NetworkAllowList
-                | RequirementKind::ChildSpawn
+                | RequirementKind::ChildSpawnDeny
+                | RequirementKind::ChildSpawnAllow
                 | RequirementKind::Environment
-                | RequirementKind::InheritedFds
+                | RequirementKind::InheritedFdsNone
+                | RequirementKind::InheritedFdsOnly
                 | RequirementKind::LaunchWorkload
                 | RequirementKind::CaptureStreams
                 | RequirementKind::TempRoot
@@ -263,3 +303,7 @@ mod requirement_kind_tests {
         assert_eq!(seen.len(), RequirementKind::ALL.len());
     }
 }
+
+#[cfg(test)]
+#[path = "support_injective_tests.rs"]
+mod support_injective_tests;

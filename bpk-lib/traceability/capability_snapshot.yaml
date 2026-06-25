@@ -7,13 +7,15 @@
 # or a typed CapabilityDowngrade waiver.
 ceilings:
   - { backend: linux, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: linux, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: ChildSpawnAllow, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: ChildSpawnDeny, enforcement: Enforced, evidence: [ProcessTree] }
   - { backend: linux, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: linux, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: linux, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: linux, kind: ExposePath, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }
-  - { backend: linux, kind: InheritedFds, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
   - { backend: linux, kind: LaunchWorkload, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
   - { backend: linux, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
@@ -26,7 +28,8 @@ ceilings:
   - { backend: macos, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: macos, kind: ExposePath, enforcement: Unsupported, evidence: [] }
   - { backend: macos, kind: Filesystem, enforcement: Mediated, evidence: [DeniedAttempts, FilesystemDelta] }
-  - { backend: macos, kind: InheritedFds, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: macos, kind: Kill, enforcement: Mediated, evidence: [TerminalOutcome] }
   - { backend: macos, kind: LaunchWorkload, enforcement: Enforced, evidence: [TerminalOutcome] }
   - { backend: macos, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
@@ -34,7 +37,8 @@ ceilings:
   - { backend: macos, kind: NetworkDenyAll, enforcement: Mediated, evidence: [DeniedAttempts] }
   - { backend: macos, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: wasm, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: wasm, kind: ChildSpawn, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnAllow, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnDeny, enforcement: Unsupported, evidence: [] }
   - { backend: wasm, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: wasm, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: wasm, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
@@ -47,13 +51,15 @@ ceilings:
   - { backend: wasm, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
   - { backend: wasm, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: windows, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: windows, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: ChildSpawnAllow, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: ChildSpawnDeny, enforcement: Enforced, evidence: [ProcessTree] }
   - { backend: windows, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: windows, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: windows, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: windows, kind: ExposePath, enforcement: Mediated, evidence: [MechanismAttestation] }
   - { backend: windows, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }
-  - { backend: windows, kind: InheritedFds, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: windows, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
   - { backend: windows, kind: LaunchWorkload, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
   - { backend: windows, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }

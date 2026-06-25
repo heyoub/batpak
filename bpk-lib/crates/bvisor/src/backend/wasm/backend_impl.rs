@@ -86,11 +86,13 @@ impl Backend for WasmBackend {
             RequirementKind::CommitArtifact | RequirementKind::DiscardArtifact => "preopen_commit",
             RequirementKind::ListOutputs => "preopen_readdir",
             // Structurally unsupported on wasm — named honestly.
-            RequirementKind::ChildSpawn
+            RequirementKind::ChildSpawnDeny
+            | RequirementKind::ChildSpawnAllow
             | RequirementKind::Kill
             | RequirementKind::ExposePath
             | RequirementKind::NetworkAllowList
-            | RequirementKind::InheritedFds => "none/structurally-unsupported",
+            | RequirementKind::InheritedFdsNone
+            | RequirementKind::InheritedFdsOnly => "none/structurally-unsupported",
         };
         format!("{}:{primitive}:{enforcement:?}", self.id)
     }

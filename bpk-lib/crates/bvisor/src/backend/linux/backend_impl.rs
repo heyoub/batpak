@@ -381,9 +381,11 @@ impl Backend for LinuxBackend {
             RequirementKind::Kill => "cgroup_kill",
             RequirementKind::NetworkDenyAll
             | RequirementKind::NetworkAllowList
-            | RequirementKind::ChildSpawn
+            | RequirementKind::ChildSpawnDeny
+            | RequirementKind::ChildSpawnAllow
             | RequirementKind::Environment
-            | RequirementKind::InheritedFds
+            | RequirementKind::InheritedFdsNone
+            | RequirementKind::InheritedFdsOnly
             | RequirementKind::TempRoot
             | RequirementKind::ExposePath
             | RequirementKind::CommitArtifact

@@ -50,7 +50,11 @@ fn linux_cells() -> Vec<HonestyCell> {
 fn wasm_cells() -> Vec<HonestyCell> {
     vec![
         HonestyCell {
-            kind: RequirementKind::ChildSpawn,
+            kind: RequirementKind::ChildSpawnDeny,
+            expected: Enforcement::Unsupported, // structural: no fork.
+        },
+        HonestyCell {
+            kind: RequirementKind::ChildSpawnAllow,
             expected: Enforcement::Unsupported, // structural: no fork.
         },
         HonestyCell {
