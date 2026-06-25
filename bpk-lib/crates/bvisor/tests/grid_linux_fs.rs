@@ -440,6 +440,42 @@ fn cgroup_leaf_is_created_and_reported_through_execute() {
     );
 }
 
+/// step 12: execute() attests the launcher binary's CONTENT identity (BLAKE3), and the
+/// attested digest MATCHES an INDEPENDENT hash of the real launcher binary on disk —
+/// provenance binding, not a trusted path. Gated on landlock (the FS spec must admit).
+#[test]
+fn launcher_identity_is_attested_by_its_content_digest() {
+    if !landlock_available() {
+        skip("launcher_identity");
+        return;
+    }
+    let scratch = Scratch::new("ident");
+    let root = scratch.path("quarantine");
+    std::fs::create_dir_all(&root).expect("quarantine dir");
+    let body = run(&fs_spec(
+        vec!["-c".into(), "true".into()],
+        FsAccess::Write,
+        &root,
+    ));
+
+    // INDEPENDENT oracle: hash the actual launcher binary ourselves and require a match.
+    let bytes = std::fs::read(test_launcher_path()).expect("read launcher bin");
+    let expected: String = batpak::event::hash::compute_hash(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let attested = body
+        .observed
+        .iter()
+        .find(|f| f.kind == "launcher_identity")
+        .expect("execute() must attest a launcher_identity fact");
+    assert!(
+        attested.detail.contains(&format!("blake3={expected}")),
+        "the attested launcher digest must equal an INDEPENDENT blake3 of the binary: \
+         {attested:?}"
+    );
+}
+
 /// RED FIXTURE: simulate a LYING backend that runs the SAME G3 workload UNCONFINED
 /// (claiming confinement it did not apply). GroundTruth then sees the escape land,
 /// so the "clean" assertion is FALSE and the red half FAILS — proving the oracle

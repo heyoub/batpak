@@ -432,9 +432,8 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
     }
 
     // Resolve the launcher binary; fail closed if unresolvable (NEVER run the
-    // workload unconfined). Content-addressed launcher identity is step 12. An
-    // injected backend launcher path (constructor injection) takes precedence over
-    // the env / co-located fallback.
+    // workload unconfined). An injected backend launcher path (constructor injection)
+    // takes precedence over the env / co-located fallback.
     let launcher_path = match resolve_launcher(backend) {
         Ok(path) => path,
         Err(detail) => {
@@ -448,6 +447,8 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
             );
         }
     };
+    // Attest the launcher's BLAKE3 content identity (step 12 — see `attest_launcher`).
+    attest_launcher(&launcher_path, &mut observed);
 
     // Run the launcher; map its honest observation onto the report contract, then ALWAYS
     // tear down the leaf (kill → drain → remove) via `finish`.
@@ -559,13 +560,32 @@ fn create_run_leaf(base: &std::path::Path, pids_cap: Option<u64>) -> Option<cgro
     cgroup::CgroupLeaf::create(base, &name, limits).ok()
 }
 
+/// Attest the launcher binary's CONTENT identity: record its BLAKE3 digest as an honest
+/// evidence fact, so the report provenance-binds the EXACT launcher that confined the
+/// workload — not merely the resolved path. A read failure is silently skipped (the
+/// launch still proceeds — this is provenance EVIDENCE, not a gate). Digest PINNING
+/// (refusing a launcher whose digest does not match an expected value) is the follow-on;
+/// recording the digest already closes the [`resolve_launcher`] "trusted as supplied" gap.
+fn attest_launcher(path: &std::path::Path, observed: &mut Vec<ObservedFact>) {
+    let Ok(bytes) = std::fs::read(path) else {
+        return;
+    };
+    let digest = batpak::event::hash::compute_hash(&bytes);
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    observed.push(ObservedFact {
+        kind: "launcher_identity".to_string(),
+        detail: format!("blake3={hex} path={}", path.display()),
+    });
+}
+
 /// Resolve the launcher binary path, failing closed if unresolvable. Resolution
 /// order: the backend's INJECTED `launcher_path` (constructor injection) FIRST, then
 /// the `BVISOR_LAUNCHER_BIN` env override, else the `bvisor-linux-launcher` binary
 /// CO-LOCATED with the current executable (the documented default install layout). If
 /// none resolves to an existing file ⇒ `Err` (the caller reports `Outcome::Unsupported`
-/// — the workload NEVER runs unconfined). Content-addressed launcher identity
-/// (digest-pinning the exact bin) is step 12.
+/// — the workload NEVER runs unconfined). The resolved binary's CONTENT digest is then
+/// attested by [`attest_launcher`]; digest-PINNING the exact bin (refuse on mismatch) is
+/// the follow-on.
 fn resolve_launcher(backend: &LinuxBackend) -> Result<std::path::PathBuf, String> {
     // Injected launcher path (thread-safe constructor injection) takes precedence — it
     // is how the integration tests point at the compile-time launcher without the banned
