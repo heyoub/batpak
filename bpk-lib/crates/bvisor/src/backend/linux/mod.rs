@@ -168,6 +168,15 @@ mod plan_build;
 #[cfg(all(feature = "backend-linux", target_os = "linux"))]
 pub(crate) mod sys;
 
+// SAFE host-side cgroup v2 manager (kernel plan §10.8, step 8a): create/configure a
+// leaf cgroup, set pids.max/memory.max for delegated controllers only, read
+// cgroup.procs, and atomic cgroup.kill teardown, plus a delegation probe. cgroup v2
+// is a FILESYSTEM interface, so this is ALL safe `std::fs` — NO `unsafe`, fully
+// runtime-shape-checked, unit-testable against a fake tree. 8b adds the launcher's
+// CLONE_INTO_CGROUP placement + the Budget/Kill profile() honesty cells.
+#[cfg(all(feature = "backend-linux", target_os = "linux"))]
+pub mod cgroup;
+
 // The HOST-SIDE launcher harness (kernel plan §10.8, step 7a): a REUSABLE, SAFE
 // orchestration that seals a launcher plan into a memfd, spawns the confinement
 // launcher with controlled inherited fds, and collects its transcript/outcome. Step
