@@ -442,9 +442,14 @@ impl CursorWorkerLoop {
         };
 
         while !self.stop.load(Ordering::Acquire) {
+            // Snapshot the visibility epoch before polling (lost-wakeup guard), then
+            // park on the publish edge when idle instead of a fixed `idle_sleep` poll.
+            // The `idle_sleep` becomes the park's deadline cap so the `stop` flag is
+            // still re-checked at least that often.
+            let epoch = state.cursor.visibility_epoch();
             let batch = state.cursor.poll_batch(self.batch_size);
             if batch.is_empty() {
-                std::thread::sleep(self.idle_sleep);
+                state.cursor.park_for_data(epoch, self.idle_sleep);
                 continue;
             }
 

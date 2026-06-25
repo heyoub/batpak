@@ -1,9 +1,10 @@
 use super::IndexEntry;
 use crate::store::hidden_ranges::CancelledVisibilityRanges;
-use parking_lot::RwLock;
+use parking_lot::{Condvar, Mutex, RwLock};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub(super) type CancelledRange = (u64, u64);
 pub(super) type CancelledRanges = Vec<CancelledRange>;
@@ -47,6 +48,17 @@ pub(crate) struct SequenceGate {
     cancelled_ranges: RwLock<Arc<CancelledRanges>>,
     /// Per-lane permanently hidden fence ranges over the global sequence axis.
     lane_cancelled_ranges: RwLock<Arc<LaneCancelledRanges>>,
+    /// Monotonic counter bumped on every successful visibility advance. A reader
+    /// snapshots it BEFORE querying, then parks only if it is unchanged — closing
+    /// the lost-wakeup window between "query found nothing" and "park" without
+    /// nesting the index lock under the wakeup mutex.
+    visibility_epoch: AtomicU64,
+    /// Edge-trigger for readers blocked waiting for new visible entries. The mutex
+    /// guards nothing but the condvar handshake: a publisher bumps `visibility_epoch`
+    /// then `notify_all` under this mutex, so it cannot notify until a check-then-park
+    /// reader has actually parked (the standard condvar discipline). Replaces a
+    /// 1 ms poll-sleep spin in the cursor pull path.
+    visibility_wakeup: (Mutex<()>, Condvar),
 }
 
 #[derive(Clone, Debug)]
@@ -137,6 +149,37 @@ impl SequenceGate {
             next_fence_token: AtomicU64::new(1),
             cancelled_ranges: RwLock::new(Arc::new(Vec::new())),
             lane_cancelled_ranges: RwLock::new(Arc::new(BTreeMap::new())),
+            visibility_epoch: AtomicU64::new(0),
+            visibility_wakeup: (Mutex::new(()), Condvar::new()),
+        }
+    }
+
+    /// The current visibility epoch. A reader snapshots this BEFORE a query and
+    /// passes it to [`Self::park_for_visibility_change`] so a publish racing the
+    /// query is never missed.
+    pub(crate) fn visibility_epoch(&self) -> u64 {
+        self.visibility_epoch.load(Ordering::Acquire)
+    }
+
+    /// Signal every parked reader that visibility advanced. Bumps the epoch FIRST
+    /// (so a reader re-checking the epoch under the wakeup mutex sees the change),
+    /// then notifies under the mutex (so the notify cannot precede a concurrent
+    /// check-then-park). Called only AFTER the `published` write guard is released,
+    /// so the wakeup mutex never nests under the visibility lock.
+    fn signal_visibility_change(&self) {
+        self.visibility_epoch.fetch_add(1, Ordering::Release);
+        let _guard = self.visibility_wakeup.0.lock();
+        self.visibility_wakeup.1.notify_all();
+    }
+
+    /// Park until visibility advances past the caller's snapshot epoch, or `timeout`
+    /// elapses (the deadline safety net — a missed wakeup degrades to the caller's
+    /// timeout, never a hang). If a publish already advanced the epoch since the
+    /// snapshot, returns immediately without parking (lost-wakeup guard).
+    pub(crate) fn park_for_visibility_change(&self, since_epoch: u64, timeout: Duration) {
+        let mut guard = self.visibility_wakeup.0.lock();
+        if self.visibility_epoch.load(Ordering::Acquire) == since_epoch {
+            let _ = self.visibility_wakeup.1.wait_for(&mut guard, timeout);
         }
     }
 
@@ -151,22 +194,26 @@ impl SequenceGate {
         up_to: u64,
         operation: &'static str,
     ) -> Result<(), crate::store::StoreError> {
-        let allocated = self.allocated.load(Ordering::Acquire);
-        let mut published = self.published.write();
-        let current = published.as_ref();
-        let visible = current.visible;
-        if up_to > allocated || up_to < visible {
-            return Err(crate::store::StoreError::SequenceGateViolation {
-                operation,
-                requested: up_to,
-                allocated,
-                visible,
+        {
+            let allocated = self.allocated.load(Ordering::Acquire);
+            let mut published = self.published.write();
+            let current = published.as_ref();
+            let visible = current.visible;
+            if up_to > allocated || up_to < visible {
+                return Err(crate::store::StoreError::SequenceGateViolation {
+                    operation,
+                    requested: up_to,
+                    allocated,
+                    visible,
+                });
+            }
+            *published = Arc::new(PublishedVisibility {
+                visible: up_to,
+                lane_visible: current.lane_visible.clone(),
             });
         }
-        *published = Arc::new(PublishedVisibility {
-            visible: up_to,
-            lane_visible: current.lane_visible.clone(),
-        });
+        // Wake any cursor parked on the visibility edge (after the write guard drops).
+        self.signal_visibility_change();
         Ok(())
     }
 
@@ -178,43 +225,47 @@ impl SequenceGate {
     ) -> Result<(), crate::store::StoreError> {
         let allocated = self.allocated.load(Ordering::Acquire);
         let lanes: Vec<(u32, u64)> = lanes.into_iter().collect();
-        let mut published = self.published.write();
-        let current = published.as_ref();
-        if global_up_to > allocated || global_up_to < current.visible {
-            return Err(crate::store::StoreError::SequenceGateViolation {
-                operation,
-                requested: global_up_to,
-                allocated,
-                visible: current.visible,
+        {
+            let mut published = self.published.write();
+            let current = published.as_ref();
+            if global_up_to > allocated || global_up_to < current.visible {
+                return Err(crate::store::StoreError::SequenceGateViolation {
+                    operation,
+                    requested: global_up_to,
+                    allocated,
+                    visible: current.visible,
+                });
+            }
+            for (lane, up_to) in lanes.iter().copied() {
+                if up_to > allocated {
+                    return Err(crate::store::StoreError::SequenceGateViolation {
+                        operation,
+                        requested: up_to,
+                        allocated,
+                        visible: current.lane_visible.get(&lane).copied().unwrap_or(0),
+                    });
+                }
+                let current_lane = current.lane_visible.get(&lane).copied().unwrap_or(0);
+                if up_to < current_lane {
+                    return Err(crate::store::StoreError::SequenceGateViolation {
+                        operation,
+                        requested: up_to,
+                        allocated,
+                        visible: current_lane,
+                    });
+                }
+            }
+            let mut lane_visible = current.lane_visible.clone();
+            for (lane, up_to) in lanes {
+                lane_visible.insert(lane, up_to);
+            }
+            *published = Arc::new(PublishedVisibility {
+                visible: global_up_to,
+                lane_visible,
             });
         }
-        for (lane, up_to) in lanes.iter().copied() {
-            if up_to > allocated {
-                return Err(crate::store::StoreError::SequenceGateViolation {
-                    operation,
-                    requested: up_to,
-                    allocated,
-                    visible: current.lane_visible.get(&lane).copied().unwrap_or(0),
-                });
-            }
-            let current_lane = current.lane_visible.get(&lane).copied().unwrap_or(0);
-            if up_to < current_lane {
-                return Err(crate::store::StoreError::SequenceGateViolation {
-                    operation,
-                    requested: up_to,
-                    allocated,
-                    visible: current_lane,
-                });
-            }
-        }
-        let mut lane_visible = current.lane_visible.clone();
-        for (lane, up_to) in lanes {
-            lane_visible.insert(lane, up_to);
-        }
-        *published = Arc::new(PublishedVisibility {
-            visible: global_up_to,
-            lane_visible,
-        });
+        // Wake any cursor parked on the visibility edge (after the write guard drops).
+        self.signal_visibility_change();
         Ok(())
     }
 
@@ -447,5 +498,49 @@ mod tests {
             Some(5),
             "PROPERTY: restoring lane visibility must install the restored lane bound"
         );
+    }
+
+    // The wakeup proof for the cursor's poll-spin replacement: a reader parked on
+    // `park_for_visibility_change` is woken by a `publish` BEFORE its (generous)
+    // timeout — proving the edge-trigger fires, not the deadline fallback. Mirrors
+    // the sanctioned watermark condvar proof (writer.rs::dangerous_notify_all_*).
+    #[test]
+    fn park_wakes_on_publish_before_timeout() {
+        use std::sync::mpsc;
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        let gate = Arc::new(SequenceGate::new());
+        gate.reserve(8);
+
+        let waiter_gate = Arc::clone(&gate);
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let (woke_tx, woke_rx) = mpsc::channel();
+        let waiter = std::thread::Builder::new()
+            .name("visibility-park-proof".to_string())
+            .spawn(move || {
+                // Snapshot the epoch, signal readiness, THEN park. A publish that
+                // races between the snapshot and the park is caught by the epoch
+                // guard (park returns immediately) — either way the wake is prompt.
+                let epoch = waiter_gate.visibility_epoch();
+                ready_tx.send(()).expect("signal waiter readiness");
+                waiter_gate.park_for_visibility_change(epoch, Duration::from_secs(5));
+                woke_tx.send(()).expect("signal waiter woke");
+            })
+            .expect("spawn park waiter");
+
+        ready_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("waiter snapshotted its epoch and is about to park");
+        gate.publish(1, "park-proof")
+            .expect("publish advances visibility");
+
+        // If the edge-trigger works, the waiter wakes in ~ms. If it were broken, the
+        // waiter would stay parked until its 5s timeout, so a 2s wait distinguishes a
+        // real wakeup from the deadline fallback.
+        woke_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("PROPERTY: publish must wake a parked reader before its timeout");
+        waiter.join().expect("park waiter joins");
     }
 }
