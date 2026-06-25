@@ -145,3 +145,32 @@ fn live_catalog_block_matches_committed_invariants_md() {
         "INVARIANTS.md catalog block is stale; run `cargo xtask docs`"
     );
 }
+
+#[test]
+fn parse_readme_counts_extracts_both_numbers() {
+    let line = "- 98 named invariants traced to 148 concrete artifacts, enforced by a gate.";
+    assert_eq!(parse_readme_counts(line), Some((98, 148)));
+    assert_eq!(parse_readme_counts("no count line here"), None);
+}
+
+#[test]
+fn live_readme_counts_match_the_catalog() {
+    // GREEN: the committed README headline matches invariants.yaml + artifacts.yaml.
+    let repo_root = crate::repo_surface::repo_root().expect("repo root");
+    let n = load_catalog(&repo_root).expect("load catalog").len();
+    check_readme_counts(&repo_root, n).expect("README counts must match the live catalog");
+}
+
+#[test]
+fn readme_count_mismatch_is_rejected() {
+    // RED: a wrong invariant count fails (the README says 98; assert against 97). Proves
+    // the anti-rot gate bites a drifted headline.
+    let repo_root = crate::repo_surface::repo_root().expect("repo root");
+    let n = load_catalog(&repo_root).expect("load catalog").len();
+    let err =
+        check_readme_counts(&repo_root, n + 1).expect_err("a count mismatch must be rejected");
+    assert!(
+        err.to_string().contains("named invariants"),
+        "error must name the invariant-count mismatch, got: {err}"
+    );
+}

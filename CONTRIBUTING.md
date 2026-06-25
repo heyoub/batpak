@@ -62,7 +62,7 @@ No current environment is both canonical and timing-stable.
 - `just cargo -- xtask mutants policy` prints the repo-owned mutation policy from xtask itself.
 - `just mutants-smoke` is the CI smoke lane: it runs the named critical seams first (`writer commit protocol`, `cursor delivery/checkpoint logic`, `projection replay/freshness logic`, `segment scan / corruption handling`, `hash-chain / replay consistency`, platform backend admission/reverify, and testing-ledger linting) and then repo-wide 0/48 ratchet shards on both feature surfaces.
 - `just mutants-full` with no overrides runs the full policy locally. `just cargo -- xtask mutants full --surface ... --shard ...` stays the targeted repo-wide lane for matrix jobs and focused investigation.
-- Critical seams enforce an `85%` mutation-score threshold immediately. Repo-wide lanes use the staged ratchet phases owned by xtask; the current phase is `Phase0` record-only, which means xtask records the score and reports the next available floor without enforcing it yet.
+- Critical seams enforce an `85%` mutation-score threshold immediately. Repo-wide lanes use the staged ratchet phases owned by xtask — the LIVE phase + floor are whatever `just cargo -- xtask mutants policy` reports (the single source of truth in `tools/xtask/.../mutants/policy.rs`); the repo-wide lane is BLOCKING at that floor, not record-only. Do not hard-code a phase here — it drifts; run the command.
 - Mutation artifacts live under `target/xtask-mutants/` so xtask owns the scratch surface.
 
 ## Public Surface Rules

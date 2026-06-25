@@ -44,6 +44,10 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     let invariants = load_catalog(repo_root)?;
     let mut cache = SourceCache::new(repo_root);
     check_witness_tests(repo_root, &invariants, &mut cache)?;
+    // Anti-rot: the README headline count must match the live catalog sizes (it is an
+    // easy-to-look-legitimate claim that silently rots as the catalog grows). Runs in
+    // both modes — it is independent of INVARIANTS.md drift.
+    check_readme_counts(repo_root, invariants.len())?;
 
     let block = render_catalog_block(&invariants);
     // INVARIANTS.md lives at the true repo root (parent of the cargo workspace
@@ -83,6 +87,51 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
 pub(crate) fn load_catalog(repo_root: &Path) -> Result<Vec<CatalogInvariant>> {
     let path = repo_root.join("traceability").join("invariants.yaml");
     load_yaml(&path).context("invariants")
+}
+
+/// Anti-rot gate: the README's "N named invariants traced to M concrete artifacts" line
+/// must match the live `invariants.yaml` / `artifacts.yaml` sizes. Bind a headline claim
+/// to machine reality so it cannot silently rot as the catalog grows.
+pub(crate) fn check_readme_counts(repo_root: &Path, invariant_count: usize) -> Result<()> {
+    // Count artifact rows without coupling to the full `ArtifactRecord` schema: each list
+    // element deserializes as `IgnoredAny` (content ignored) and is counted.
+    let artifacts: Vec<serde::de::IgnoredAny> =
+        load_yaml(&repo_root.join("traceability").join("artifacts.yaml")).context("artifacts")?;
+    let artifact_count = artifacts.len();
+    let md_path = project_root(repo_root).join("README.md");
+    let readme =
+        std::fs::read_to_string(&md_path).with_context(|| format!("read {}", md_path.display()))?;
+    let (named, traced) = parse_readme_counts(&readme).with_context(|| {
+        "README.md is missing the `N named invariants traced to M concrete artifacts` line"
+            .to_string()
+    })?;
+    ensure(
+        named == invariant_count,
+        format!(
+            "README.md claims {named} named invariants, but traceability/invariants.yaml has \
+             {invariant_count}. Update the README headline (or the catalog) so the claim is true."
+        ),
+    )?;
+    ensure(
+        traced == artifact_count,
+        format!(
+            "README.md claims {traced} concrete artifacts, but traceability/artifacts.yaml has \
+             {artifact_count}. Update the README headline (or the catalog) so the claim is true."
+        ),
+    )?;
+    Ok(())
+}
+
+/// Pull `(N, M)` out of `N named invariants traced to M concrete artifacts`. `N` is the
+/// integer token immediately before the phrase; `M` the integer token immediately after.
+pub(crate) fn parse_readme_counts(readme: &str) -> Option<(usize, usize)> {
+    let marker = "named invariants traced to";
+    let idx = readme.find(marker)?;
+    let before = &readme[..idx];
+    let after = &readme[idx + marker.len()..];
+    let named = before.split_whitespace().last()?.parse().ok()?;
+    let traced = after.split_whitespace().next()?.parse().ok()?;
+    Some((named, traced))
 }
 
 /// Render the deterministic catalog block (sorted by id) that lives between the
