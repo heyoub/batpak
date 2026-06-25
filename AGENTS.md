@@ -58,6 +58,36 @@ an allow to make the compiler happy and trip the wire. Also tell them to run
 `cd bpk-lib && cargo xtask structural` (not just clippy) — the structural detectors catch
 `repo_hygiene`/stale-path/allow violations that plain clippy misses.
 
+**4. Concurrency is SYNC-FIRST + `flume`, never an async runtime — and the launcher child
+window is async-signal-safe ONLY (no channels there).** Two rules that are easy to conflate
+but are about *different* `async`es:
+- **Library concurrency = `flume`, not tokio.** The `Store` API is synchronous and the
+  workspace stays runtime-agnostic — **no `tokio`, no `async fn`/`-> impl Future` in the public
+  surface** (INV-NO-TOKIO-PROD, INV-STORE-SYNC-ONLY; both currently weak-tier in
+  `invariants.yaml`). Cross-thread coordination uses `flume` (v0.12) bounded channels: a
+  **bidirectional highway** of a pull lane + a push lane, with ordering/visibility reconciled by
+  the **HLC** (or another clock where HLC isn't apt — e.g. `WatermarkAdvanceHandle`). Async
+  callers bridge via `recv_async()` / `spawn_blocking()`. Reference shapes: the writer command
+  loop + `bounded(1)` reply tickets (`core/src/store/write_api.rs`, `lifecycle.rs`,
+  `writer/runtime.rs`); rationale in `core/build.rs` + `core/src/lib.rs`. Don't reach for
+  tokio/`async fn`; reach for a flume lane. A 1-bit level-triggered shutdown is correctly an
+  `Arc<AtomicBool>`, not a channel — flume is for *delivering values between threads*.
+- **The launcher's post-fork → pre-`fexecve` child window is the one place `flume` is BANNED.**
+  Between `clone3`/fork and `execve` the child has only the calling thread but inherits every
+  lock another parent thread held, so **`malloc` / any lock → deadlock**. Only async-signal-safe
+  primitives are legal there. `flume` (and every channel, `Mutex`, allocation) is FORBIDDEN in
+  any `pre_exec` closure and in the `crates/bvisor/.../sys.rs` unsafe basements. The discipline:
+  **build everything that allocates in the PARENT before the fork** (landlock ruleset, plan
+  parse, fd relocation) and run only alloc-free ops in the child (fd scrub → `fchdir` →
+  `restrict_self` → `fexecve`). The host/launcher *parent* (before fork) is normal threaded code
+  where flume is fine. A new channel/alloc in a `pre_exec` body is exactly how an
+  async-signal-safety over-claim gets reintroduced. Witnessed (coarsely) by the launcher
+  determinism oracles that drive the full child window repeatedly without deadlock —
+  `crates/bvisor/tests/launcher_inherited_fds_linux.rs::fd_scrub_is_deterministic_across_runs`,
+  `launcher_env_linux.rs::environment_isolation_is_deterministic_across_runs`. FOLLOW-UP (named
+  gap, not fabricated): promote this to a machine invariant + a structural gate that proves every
+  `pre_exec` closure is allocation-free, once bvisor joins the `traceability/` catalog universe.
+
 ## Repo Map
 
 - `bpk-lib/Cargo.toml`: workspace/control-plane manifest; primary package defaults to `bpk-lib/crates/core`
