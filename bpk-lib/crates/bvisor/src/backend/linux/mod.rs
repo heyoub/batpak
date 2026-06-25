@@ -76,10 +76,18 @@ pub fn support_matrix() -> SupportMatrix {
         &[],
     );
 
-    // Child spawn / env / fds: clone3 + namespaces.
+    // Child spawn / env / fds: clone3 + namespaces. ChildSpawn + InheritedFds carry
+    // distinct CANONICAL POLICIES (proof-spine §2), so each policy variant is its own
+    // aspiration cell.
     insert(
         &mut best,
-        RequirementKind::ChildSpawn,
+        RequirementKind::ChildSpawnDeny,
+        Enforcement::Enforced,
+        &[EvidenceClaim::ProcessTree],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllow,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
@@ -91,7 +99,13 @@ pub fn support_matrix() -> SupportMatrix {
     );
     insert(
         &mut best,
-        RequirementKind::InheritedFds,
+        RequirementKind::InheritedFdsNone,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::InheritedFdsOnly,
         Enforcement::Enforced,
         &[EvidenceClaim::MechanismAttestation],
     );

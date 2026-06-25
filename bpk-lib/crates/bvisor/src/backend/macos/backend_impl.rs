@@ -81,7 +81,7 @@ impl Backend for MacosBackend {
             RequirementKind::NetworkDenyAll => "seatbelt_deny_net",
             RequirementKind::NetworkAllowList => "none/unsupported",
             RequirementKind::Environment => "env_clear",
-            RequirementKind::InheritedFds => "fd_cloexec",
+            RequirementKind::InheritedFdsNone | RequirementKind::InheritedFdsOnly => "fd_cloexec",
             RequirementKind::LaunchWorkload => "posix_spawn",
             RequirementKind::CaptureStreams => "pipe",
             RequirementKind::Kill => "killpg",
@@ -89,7 +89,7 @@ impl Backend for MacosBackend {
             RequirementKind::ExposePath => "none/unsupported",
             RequirementKind::CommitArtifact | RequirementKind::DiscardArtifact => "rename_same_fs",
             RequirementKind::ListOutputs => "readdir",
-            RequirementKind::ChildSpawn => "posix_spawn_child",
+            RequirementKind::ChildSpawnDeny | RequirementKind::ChildSpawnAllow => "posix_spawn_child",
         };
         format!("{}:{primitive}:{enforcement:?}", self.id)
     }

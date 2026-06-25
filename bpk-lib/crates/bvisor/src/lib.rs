@@ -72,6 +72,7 @@ pub use contract::budget::{
 pub use contract::budget_witness::{
     BudgetFinding, BudgetWitness, BudgetWitnesses, GuaranteeProfile,
 };
+pub use contract::canonical_policy::CanonicalPolicy;
 pub use contract::capability::{
     Capability, Enforcement, EnvPolicy, EvidenceClaim, EvidenceSet, FdPolicy, FsAccess,
     FsConfinement, NetDest, NetPolicy, PathSet, SpawnPolicy, SupportVerdict,

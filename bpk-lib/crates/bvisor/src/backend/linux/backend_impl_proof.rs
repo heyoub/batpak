@@ -103,15 +103,25 @@ fn representative_requirement(kind: RequirementKind) -> BoundaryRequirement {
                 port: 443,
             }]),
         }),
-        RequirementKind::ChildSpawn => BoundaryRequirement::Capability(Capability::ChildSpawn {
+        RequirementKind::ChildSpawnDeny => BoundaryRequirement::Capability(Capability::ChildSpawn {
             policy: SpawnPolicy::Deny,
         }),
+        RequirementKind::ChildSpawnAllow => {
+            BoundaryRequirement::Capability(Capability::ChildSpawn {
+                policy: SpawnPolicy::Allow,
+            })
+        }
         RequirementKind::Environment => BoundaryRequirement::Capability(Capability::Environment {
             policy: EnvPolicy::EmptyExcept(Vec::new()),
         }),
-        RequirementKind::InheritedFds => {
+        RequirementKind::InheritedFdsNone => {
             BoundaryRequirement::Capability(Capability::InheritedFds {
                 policy: FdPolicy::None,
+            })
+        }
+        RequirementKind::InheritedFdsOnly => {
+            BoundaryRequirement::Capability(Capability::InheritedFds {
+                policy: FdPolicy::Only(vec![3]),
             })
         }
         RequirementKind::LaunchWorkload => {

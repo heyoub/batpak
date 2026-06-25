@@ -89,7 +89,13 @@ pub fn support_matrix() -> SupportMatrix {
     // allow-list broker. Listed explicitly so the honesty is a stated answer.
     insert(
         &mut best,
-        RequirementKind::ChildSpawn,
+        RequirementKind::ChildSpawnDeny,
+        Enforcement::Unsupported,
+        &[],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllow,
         Enforcement::Unsupported,
         &[],
     );
@@ -145,7 +151,8 @@ mod tests {
         // SCOPE §4 load-bearing honest cells: no native fork/kill/mount/broker.
         let m = support_matrix();
         for kind in [
-            RequirementKind::ChildSpawn,
+            RequirementKind::ChildSpawnDeny,
+            RequirementKind::ChildSpawnAllow,
             RequirementKind::Kill,
             RequirementKind::ExposePath,
             RequirementKind::NetworkAllowList,

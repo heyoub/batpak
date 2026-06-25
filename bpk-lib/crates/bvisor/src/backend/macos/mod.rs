@@ -70,7 +70,13 @@ pub fn support_matrix() -> SupportMatrix {
     );
     insert(
         &mut best,
-        RequirementKind::InheritedFds,
+        RequirementKind::InheritedFdsNone,
+        Enforcement::Enforced,
+        &[EvidenceClaim::MechanismAttestation],
+    );
+    insert(
+        &mut best,
+        RequirementKind::InheritedFdsOnly,
         Enforcement::Enforced,
         &[EvidenceClaim::MechanismAttestation],
     );

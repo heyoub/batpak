@@ -71,14 +71,16 @@ fn unimplemented_kinds_fail_closed_this_chunk() {
     let profile = backend.profile(&backend.probe());
     for kind in [
         RequirementKind::NetworkDenyAll,
-        RequirementKind::ChildSpawn,
+        RequirementKind::ChildSpawnDeny,
+        RequirementKind::ChildSpawnAllow,
         RequirementKind::TempRoot,
         // Environment + InheritedFds were backed out of the ceiling after a codex
-        // review: admission is policy-blind (support.rs::of_capability), but the
-        // launcher only realises one policy shape and never lowers the admitted
-        // policy, so Enforced would over-admit unimplemented policy variants.
+        // review: even with policy-AWARE keys (proof-spine §2 splits InheritedFds into
+        // None/Only), the launcher only realises one policy shape and never lowers the
+        // admitted policy, so Enforced would over-admit unimplemented policy variants.
         RequirementKind::Environment,
-        RequirementKind::InheritedFds,
+        RequirementKind::InheritedFdsNone,
+        RequirementKind::InheritedFdsOnly,
     ] {
         assert_eq!(
             profile.ceiling_for(kind).enforcement,
