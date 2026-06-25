@@ -30,15 +30,27 @@ in the type," not "add an allow." Patterns we use, by situation:
 - **Typestate / data-carrying markers** to make an invariant unrepresentable (see the
   `Store<Open>` writer: `Open(WriterHandle)` + `StoreState::shutdown_writer`).
 
-**2. `panic`/`unwrap`/`expect` are denied — in tests too.**
-`panic = "deny"` and `unwrap_used = "deny"` are **global** workspace lints (`expect_used` is
-denied in `not(test)` core production). There is **no** `allow-*-in-tests` clippy config and
-there never will be — we cured instead of configuring an escape hatch. So in **test code**:
-- For "this Result must be `Err`": make the test return `Result` and do
-  `Ok(_) => return Err(std::io::Error::other("PROPERTY: <what was violated>").into())`,
-  extracting the error in the `Err(e)` arm, then `assert!(matches!(e, StoreError::Variant { .. }))`.
-- Never reach for `panic!()`, `.unwrap()`, `.expect()`, or `Result::expect_err` (the last also
-  needs `T: Debug`, which `Store`/`Receipt` lack).
+**2. `panic!`/`.unwrap()` are denied EVERYWHERE (tests included); `.expect("msg")` is the
+sanctioned bail in tests; error-path tests assert the EXACT variant.**
+`panic = "deny"` and `unwrap_used = "deny"` are **global** workspace clippy lints — they fire
+in test code too, which is why there are **zero** `panic!`/`.unwrap()` in `tests/`.
+`.expect()` is denied in production but **allowed in tests BY DESIGN** — the lint is
+`#![cfg_attr(not(test), deny(clippy::expect_used))]`, and `invariants.yaml`
+(INV-TEST-PANIC-AS-ASSERTION) endorses `.expect()`/`.expect_err()` as the test failure
+signal. (Do NOT "cure" this by converting the ~4.4k `.expect()` sites to `?` — that is
+ritual, not rigor: `.expect("what step failed")` gives BETTER diagnostics than a
+`?`-propagated error, changes no assertion's strictness, and the lint deliberately permits
+it.) So in **test code**:
+- SETUP / preconditions ("the store must open"): `.expect("clear message")` — bails with your
+  message + the real error + the line. Never `.unwrap()` (generic, lint-denied).
+- The PROPERTY under test: assert the **EXACT** outcome, never just "it errored". For an error
+  path, extract the error and check its VARIANT:
+  `let e = op().expect_err("PROPERTY: <what>"); assert!(matches!(e, StoreError::Variant { .. }))`
+  — a test that passes on the WRONG error is **vacuous**. Bare `expect_err`/`is_err()` with no
+  variant check is acceptable ONLY when the property has a single failure mode (e.g. "this
+  malformed input is rejected" — any error means rejected).
+- `Result::expect_err` is forbidden on `Store`/`Receipt` (they lack `Debug`, so it will not
+  compile) — there, use the return-`Result` + `Err(e)`-arm + `assert!(matches!(e, …))` pattern.
 
 **3. Subagents inherit this doctrine.** If you dispatch an agent to edit Rust, paste the
 relevant rules above into its prompt verbatim. Agents that don't know the doctrine *will* add
