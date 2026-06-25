@@ -139,6 +139,11 @@ enum XtaskCommand {
     Preflight,
     PreCommit,
     Docs(DocsArgs),
+    /// GAUNT-CAPSNAP: regenerate the committed capability FLOOR
+    /// (`traceability/capability_snapshot.yaml`) from each backend's
+    /// `support_matrix()` best-case table + the witnessed-invariant set. The
+    /// matching `--check` mode runs inside `structural-check` (drift => fail).
+    CapabilitySnapshot,
     Release(ReleaseArgs),
 }
 
@@ -680,6 +685,7 @@ fn main() -> Result<()> {
             commands::integrity("structural-check", [])
         }
         XtaskCommand::Docs(args) => docs::docs(args),
+        XtaskCommand::CapabilitySnapshot => commands::integrity("capability-snapshot", []),
         XtaskCommand::Release(args) => commands::release(args),
     }
 }

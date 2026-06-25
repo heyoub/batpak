@@ -86,6 +86,14 @@ pub(crate) const GATES: &[Gate] = &[
         has_blocking_authority: true,
     },
     Gate {
+        slug: "capability-snapshot",
+        red_fixture_test: Some(
+            "tools/integrity/src/capability_snapshot_tests.rs::downgrade_enforced_to_mediated_fails",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
         slug: "ci-parity",
         red_fixture_test: Some(
             "tools/integrity/src/ci_parity.rs::ci_parity_rejects_unknown_xtask_command",
@@ -463,6 +471,7 @@ pub(crate) const UNQUALIFIED_BLOCKING_GATES: &[&str] = &[];
 pub(crate) const RECEIPT_REQUIRED_GATES: &[&str] = &[
     "assurance-level-check",
     "typed-waivers",
+    "capability-snapshot",
     "ci-parity",
     "invariant-bridge",
     "structural-source-lints",

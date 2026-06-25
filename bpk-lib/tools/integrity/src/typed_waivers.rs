@@ -43,6 +43,16 @@ pub(crate) enum WaiverKind {
     /// Invariant-citation exemption.
     #[serde(rename = "invariant-citation")]
     InvariantCitation,
+    /// A sanctioned, expiring CAPABILITY DOWNGRADE (GAUNT-CAPSNAP): a backend
+    /// `support_matrix()` cell whose enforcement was deliberately lowered, a
+    /// (backend,kind) row removed, an evidence claim dropped, or a witness
+    /// un-proved. The `target` is `backend:kind` (e.g. `linux:ExposePath`). This
+    /// is the DURABLE form a downgrade approval takes; the meta-gate accepts a
+    /// matching, in-date waiver added in the same diff as authorization for the
+    /// downgrade. A downgrade to `Unsupported` (a fully-lost capability) is L4
+    /// blast radius and so requires `independent_signoff: true`.
+    #[serde(rename = "capability-downgrade")]
+    CapabilityDowngrade,
 }
 
 /// One typed waiver as declared in `typed_waivers.yaml`. `serde(deny_unknown_fields)`

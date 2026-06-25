@@ -122,6 +122,21 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(1, 1, inputs))
     })?;
 
+    // capability-snapshot (GAUNT-CAPSNAP): the committed capability FLOOR must be
+    // an exact mirror of every backend's `support_matrix()` best-case table + the
+    // witnessed-invariant set. Drift => fail+regenerate; a downgrade diff is
+    // blocked by the meta-gate. Inputs: the snapshot + the four backend tables.
+    crate::receipts::run_gate("capability-snapshot", || {
+        crate::capability_snapshot::check(&repo_root)?;
+        let mut inputs = BTreeSet::new();
+        inputs.insert(repo_root.join(crate::capability_snapshot::SNAPSHOT_REL));
+        for backend in ["linux", "wasm", "windows", "macos"] {
+            inputs.insert(repo_root.join(format!("crates/bvisor/src/backend/{backend}/mod.rs")));
+        }
+        let files = inputs.len();
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "structural-check: ok");
     Ok(())

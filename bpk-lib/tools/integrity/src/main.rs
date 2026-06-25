@@ -25,6 +25,7 @@ mod anchors;
 mod architecture_ir;
 mod architecture_lints;
 mod assurance;
+mod capability_snapshot;
 mod ci_parity;
 mod complexity;
 mod docs_catalog;
@@ -141,6 +142,14 @@ enum CommandKind {
         #[arg(long)]
         check: bool,
     },
+    /// GAUNT-CAPSNAP: regenerate (or `--check`) the anti-nerf capability FLOOR in
+    /// `traceability/capability_snapshot.yaml` — an exact mirror of each backend's
+    /// `support_matrix()` best-case table plus the witnessed-invariant set.
+    /// `--check` fails on drift instead of rewriting; folded into `structural-check`.
+    CapabilitySnapshot {
+        #[arg(long)]
+        check: bool,
+    },
     /// GAUNTLET-REPO-IR (Phase 3, item 6): emit the minimal queryable repo-IR as
     /// JSON. ONE column-store binding AL assignments + gate ownership + waiver
     /// ownership + public-surface map + mutation-seam map + docs traceability,
@@ -196,6 +205,9 @@ fn main() -> Result<()> {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
         CommandKind::DocsCatalog { check } => docs_catalog::run(&repo_surface::repo_root()?, check),
+        CommandKind::CapabilitySnapshot { check } => {
+            capability_snapshot::run(&repo_surface::repo_root()?, check)
+        }
         CommandKind::RepoIr { out } => repo_ir::run(&repo_surface::repo_root()?, out),
     }
 }
