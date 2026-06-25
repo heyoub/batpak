@@ -47,8 +47,8 @@ use bvisor::{
 /// One sample: a name, the production key `RequirementKind::of` derives for a
 /// capability, and the canonical bytes of that capability's policy. The spread
 /// covers EVERY canonical-policy variant the §2 keys distinguish — both
-/// `InheritedFds` variants, both `ChildSpawn` variants, both `Network` variants,
-/// the single `Environment` variant, plus the `Filesystem` capability — AND
+/// `InheritedFds` variants, all three `ChildSpawn` child-task semantics, both
+/// `Network` variants, the single `Environment` variant, plus `Filesystem` — AND
 /// syntactic aliases (reordered fd/dest lists) that must share BOTH key and bytes.
 struct Sample {
     name: &'static str,
@@ -104,20 +104,27 @@ fn samples() -> Vec<Sample> {
             }),
             canonical: CanonicalPolicy::of_fd(&FdPolicy::Only(vec![3, 1, 3])),
         },
-        // ── ChildSpawn: Deny vs Allow (distinct variants ⇒ distinct keys) ──
+        // ── ChildSpawn: the three FROZEN semantics (distinct variants ⇒ distinct keys) ──
         Sample {
-            name: "spawn-deny",
+            name: "spawn-deny-new-tasks",
             key: key_of(Capability::ChildSpawn {
-                policy: SpawnPolicy::Deny,
+                policy: SpawnPolicy::DenyNewTasks,
             }),
-            canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::Deny),
+            canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::DenyNewTasks),
         },
         Sample {
-            name: "spawn-allow",
+            name: "spawn-allow-threads",
             key: key_of(Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow,
+                policy: SpawnPolicy::AllowThreadsWithinBoundary,
             }),
-            canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::Allow),
+            canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::AllowThreadsWithinBoundary),
+        },
+        Sample {
+            name: "spawn-allow-descendants",
+            key: key_of(Capability::ChildSpawn {
+                policy: SpawnPolicy::AllowDescendantsWithinBoundary,
+            }),
+            canonical: CanonicalPolicy::of_spawn(&SpawnPolicy::AllowDescendantsWithinBoundary),
         },
         // ── Environment: one variant (Exact), one key ──
         Sample {
@@ -275,11 +282,11 @@ fn the_split_keys_are_genuinely_distinct() {
             }),
         ),
         (
-            "ChildSpawn Deny vs Allow",
+            "ChildSpawn DenyNewTasks vs AllowDescendants",
             key_of(Capability::ChildSpawn {
-                policy: SpawnPolicy::Deny,
+                policy: SpawnPolicy::DenyNewTasks,
             }) != key_of(Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow,
+                policy: SpawnPolicy::AllowDescendantsWithinBoundary,
             }),
         ),
         (
@@ -418,19 +425,19 @@ fn completeness_is_over_the_full_key_set_and_counts_unsupported() {
             "{backend} must declare exactly the full ALL key set"
         );
     }
-    // An explicit Unsupported cell is declared (macOS ChildSpawnDeny is the
+    // An explicit Unsupported cell is declared (macOS ChildSpawnDenyNewTasks is a
     // formerly-silent gap we closed with a stated Unsupported answer).
     let macos = macos::support_matrix();
     assert!(
-        macos.declares(RequirementKind::ChildSpawnDeny),
-        "macOS must EXPLICITLY declare ChildSpawnDeny (an Unsupported answer still counts)"
+        macos.declares(RequirementKind::ChildSpawnDenyNewTasks),
+        "macOS must EXPLICITLY declare ChildSpawnDenyNewTasks (an Unsupported answer still counts)"
     );
     assert_eq!(
         macos
-            .best_case_for(RequirementKind::ChildSpawnDeny)
+            .best_case_for(RequirementKind::ChildSpawnDenyNewTasks)
             .enforcement,
         Enforcement::Unsupported,
-        "macOS ChildSpawnDeny is the explicit Unsupported answer"
+        "macOS ChildSpawnDenyNewTasks is the explicit Unsupported answer"
     );
 }
 

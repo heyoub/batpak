@@ -15,8 +15,8 @@
 //!      prefix) map to the SAME key — the projection is a function, AND
 //! (ii) INJECTIVE-ON-VARIANTS: two policies that map to the SAME key have the SAME
 //!      canonical variant — no key fuses two distinct variants (the regression this
-//!      catches is re-merging `InheritedFds::None`/`::Only` or
-//!      `ChildSpawn::Deny`/`::Allow` into one policy-blind key).
+//!      catches is re-merging `InheritedFds::None`/`::Only` or any two of the three
+//!      `ChildSpawn` child-task semantics into one policy-blind key).
 //!
 //! Kept a focused brute-force over a representative spread (the project bans `panic!`
 //! even in tests, so failures collect into a `Vec` asserted empty).
@@ -29,8 +29,8 @@ use crate::contract::capability::{
 
 /// One sample: a capability, its policy-aware key, and the canonical bytes of its
 /// policy. The spread covers EVERY canonical-policy variant the S2 keys distinguish
-/// (both `ChildSpawn` variants, both `InheritedFds` variants, both `Network`
-/// variants, the single `Environment` variant) PLUS syntactic aliases (reordered
+/// (all three `ChildSpawn` child-task semantics, both `InheritedFds` variants, both
+/// `Network` variants, the single `Environment` variant) PLUS syntactic aliases (reordered
 /// fd/env/dest lists) that must share BOTH the key and the canonical bytes.
 fn samples() -> Vec<(&'static str, RequirementKind, CanonicalPolicy)> {
     let dest = |host: &str, port| NetDest {
@@ -67,20 +67,27 @@ fn samples() -> Vec<(&'static str, RequirementKind, CanonicalPolicy)> {
             }),
             CanonicalPolicy::of_fd(&FdPolicy::Only(vec![3, 1, 3])),
         ),
-        // ── ChildSpawn: Deny vs Allow (distinct keys) ──
+        // ── ChildSpawn: the three FROZEN child-task semantics (distinct keys) ──
         (
-            "spawn-deny",
+            "spawn-deny-new-tasks",
             RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
-                policy: SpawnPolicy::Deny,
+                policy: SpawnPolicy::DenyNewTasks,
             }),
-            CanonicalPolicy::of_spawn(&SpawnPolicy::Deny),
+            CanonicalPolicy::of_spawn(&SpawnPolicy::DenyNewTasks),
         ),
         (
-            "spawn-allow",
+            "spawn-allow-threads",
             RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow,
+                policy: SpawnPolicy::AllowThreadsWithinBoundary,
             }),
-            CanonicalPolicy::of_spawn(&SpawnPolicy::Allow),
+            CanonicalPolicy::of_spawn(&SpawnPolicy::AllowThreadsWithinBoundary),
+        ),
+        (
+            "spawn-allow-descendants",
+            RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
+                policy: SpawnPolicy::AllowDescendantsWithinBoundary,
+            }),
+            CanonicalPolicy::of_spawn(&SpawnPolicy::AllowDescendantsWithinBoundary),
         ),
         // ── Environment: one variant, one key ──
         (
@@ -154,7 +161,7 @@ fn equal_canonical_variants_map_to_one_key() {
 /// the SAME canonical VARIANT. The contrapositive is the §2 law's forward direction
 /// at variant granularity — distinct canonical variants never share a key. THIS is
 /// the gate that catches a regressed policy-blind collapse (e.g. re-merging
-/// `InheritedFds::None`/`::Only` or `ChildSpawn::Deny`/`::Allow` into one key).
+/// `InheritedFds::None`/`::Only` or any two `ChildSpawn` child-task semantics).
 #[test]
 fn one_key_implies_one_canonical_variant() {
     let samples = samples();
@@ -191,12 +198,21 @@ fn the_policy_aware_splits_are_real_and_aliases_collapse() {
     );
     assert_ne!(
         RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
-            policy: SpawnPolicy::Deny
+            policy: SpawnPolicy::DenyNewTasks
         }),
         RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
-            policy: SpawnPolicy::Allow
+            policy: SpawnPolicy::AllowThreadsWithinBoundary
         }),
-        "ChildSpawn Deny vs Allow must be distinct keys"
+        "ChildSpawn DenyNewTasks vs AllowThreads must be distinct keys"
+    );
+    assert_ne!(
+        RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
+            policy: SpawnPolicy::AllowThreadsWithinBoundary
+        }),
+        RequirementKind::of_capability_for_test(&Capability::ChildSpawn {
+            policy: SpawnPolicy::AllowDescendantsWithinBoundary
+        }),
+        "ChildSpawn AllowThreads vs AllowDescendants must be distinct keys"
     );
     // A syntactic alias collapses to the same key AND the same canonical bytes.
     let canon = RequirementKind::of_capability_for_test(&Capability::InheritedFds {

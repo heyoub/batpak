@@ -224,7 +224,8 @@ pub enum Capability {
     /// Authority for the workload to spawn its OWN children. The workload's
     /// initial launch is a [`crate::HostControl::LaunchWorkload`], not this.
     ChildSpawn {
-        /// Whether the workload may spawn children.
+        /// The admitted child-task policy: deny all new tasks, allow boundary-confined
+        /// threads, or allow boundary-confined descendant processes ([`SpawnPolicy`]).
         policy: SpawnPolicy,
     },
     /// Environment authority: empty-by-default; explicit grants only.
@@ -266,13 +267,52 @@ pub enum NetPolicy {
     AllowList(Vec<NetDest>),
 }
 
-/// Whether the workload may spawn child processes.
+/// The admitted CHILD-TASK policy — what new tasks (threads / processes) the
+/// confined workload may itself create. The three variants are FROZEN SEMANTICS
+/// (proof-spine §2/§6/S6): they are an object-capability ATTENUATION ladder
+/// (§8 seL4/Capsicum), strictest first. The VARIANT *is* the policy (no payload).
+///
+/// Each variant names a distinct GUARANTEE, not a mechanism. The mechanism that
+/// will REALIZE each (seccomp / cgroup) is decided in S10, NOT here — S6 only
+/// freezes the semantics + records the enforcement constraint below. Until S10
+/// every variant stays FAIL-CLOSED in the production ceiling (no proof oracle).
+///
+/// # The clone3-pointer / classic-BPF problem (the load-bearing enforcement note)
+///
+/// A seccomp classic-BPF filter can only inspect syscall arguments that are SCALAR
+/// REGISTERS. `clone3(2)` passes its flags inside a `struct clone_args` BEHIND A
+/// POINTER (`rdi` → struct), so a seccomp filter CANNOT read the clone3 flags to
+/// distinguish a THREAD (`CLONE_THREAD`) from a new PROCESS. This single fact sets
+/// the per-variant enforcement strategy S10 will realize:
+///
+/// - [`Self::DenyNewTasks`] is ENFORCEABLE by seccomp at the SYSCALL-NUMBER level —
+///   deny `clone`/`clone3`/`fork`/`vfork` outright, no argument dereference needed.
+/// - [`Self::AllowDescendantsWithinBoundary`] is ENFORCEABLE by CGROUP confinement —
+///   descendants inherit the cgroup, so `cgroup.kill` reaps them and `pids.max`
+///   counts them (the S1 Kill / process_count mechanisms already exist).
+/// - [`Self::AllowThreadsWithinBoundary`] is the HARD one: seccomp cannot deref the
+///   clone3 flags to permit-threads-but-deny-processes, and denying `clone3` outright
+///   breaks modern glibc thread creation. This is the OPEN enforcement problem. S6
+///   does NOT pick a winner; S10 resolves it (deny-clone3-allow-legacy-clone-with-
+///   `CLONE_THREAD` / cgroup-mediate / FAIL_CLOSED). The SEMANTICS are frozen here;
+///   only the enforcement is deferred.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SpawnPolicy {
-    /// The workload may not spawn children.
-    Deny,
-    /// The workload may spawn children.
-    Allow,
+    /// The workload may create NO new task at all — no new thread, no new process.
+    /// The STRICTEST variant. Enforceable by a seccomp syscall-number deny of the
+    /// whole `clone`/`clone3`/`fork`/`vfork` family (no clone3-flag dereference).
+    DenyNewTasks,
+    /// The workload may create THREADS (shared address space, `CLONE_THREAD`) that
+    /// stay WITHIN the confinement boundary (same cgroup + namespaces); it may NOT
+    /// create new processes. The hard variant for seccomp — see the type-level note
+    /// on the clone3-pointer / classic-BPF problem; S10 decides the mechanism.
+    AllowThreadsWithinBoundary,
+    /// The workload may create DESCENDANT PROCESSES, but they are CONFINED to the
+    /// boundary: same cgroup ⇒ killable via `cgroup.kill`, counted by `pids.max`,
+    /// unable to escape the namespaces. Enforceable by cgroup confinement (the S1
+    /// Kill / process_count mechanisms), not by per-syscall filtering.
+    AllowDescendantsWithinBoundary,
 }
 
 /// Environment-variable policy (proof-spine §5 D2 — `Environment::Exact`).

@@ -303,10 +303,13 @@ pub fn derive_minimums(spec: &BoundarySpec) -> DerivedMinimums {
         if matches!(
             capability,
             Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow
+                policy: SpawnPolicy::AllowThreadsWithinBoundary
+                    | SpawnPolicy::AllowDescendantsWithinBoundary
             }
         ) {
-            // Child-spawn authority must fit inside the process-tree bound.
+            // Any child-task authority (boundary-confined threads OR descendant
+            // processes) must fit inside the process-tree bound — a thread is itself
+            // a task counted by the tree. `DenyNewTasks` needs no extra headroom.
             minimums.process_count = minimums.process_count.max(2);
         }
         if let Capability::InheritedFds {
@@ -723,7 +726,7 @@ mod planner_shadow_integration_tests {
         ];
         spec.capabilities = vec![
             Capability::ChildSpawn {
-                policy: SpawnPolicy::Allow,
+                policy: SpawnPolicy::AllowDescendantsWithinBoundary,
             },
             Capability::InheritedFds {
                 policy: FdPolicy::Only(vec![5, 6]),

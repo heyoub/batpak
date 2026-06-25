@@ -7,8 +7,9 @@
 # or a typed CapabilityDowngrade waiver.
 ceilings:
   - { backend: linux, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: linux, kind: ChildSpawnAllow, enforcement: Enforced, evidence: [ProcessTree] }
-  - { backend: linux, kind: ChildSpawnDeny, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: linux, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }
   - { backend: linux, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: linux, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: linux, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
@@ -23,8 +24,9 @@ ceilings:
   - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
   - { backend: linux, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: macos, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: macos, kind: ChildSpawnAllow, enforcement: Unsupported, evidence: [] }
-  - { backend: macos, kind: ChildSpawnDeny, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnAllowDescendants, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnDenyNewTasks, enforcement: Unsupported, evidence: [] }
   - { backend: macos, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: macos, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: macos, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
@@ -39,8 +41,9 @@ ceilings:
   - { backend: macos, kind: NetworkDenyAll, enforcement: Mediated, evidence: [DeniedAttempts] }
   - { backend: macos, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: wasm, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: wasm, kind: ChildSpawnAllow, enforcement: Unsupported, evidence: [] }
-  - { backend: wasm, kind: ChildSpawnDeny, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnAllowDescendants, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnDenyNewTasks, enforcement: Unsupported, evidence: [] }
   - { backend: wasm, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: wasm, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: wasm, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
@@ -55,8 +58,9 @@ ceilings:
   - { backend: wasm, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
   - { backend: wasm, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
   - { backend: windows, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
-  - { backend: windows, kind: ChildSpawnAllow, enforcement: Enforced, evidence: [ProcessTree] }
-  - { backend: windows, kind: ChildSpawnDeny, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: windows, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }
   - { backend: windows, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: windows, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
   - { backend: windows, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }

@@ -44,9 +44,10 @@ fn distinct_policies() -> Vec<CanonicalPolicy> {
         CanonicalPolicy::of_fd(&FdPolicy::Only(vec![3])),
         CanonicalPolicy::of_fd(&FdPolicy::Only(vec![1, 3])),
         CanonicalPolicy::of_fd(&FdPolicy::Only(vec![1, 2, 3])),
-        // ── Spawn family ──
-        CanonicalPolicy::of_spawn(&SpawnPolicy::Deny),
-        CanonicalPolicy::of_spawn(&SpawnPolicy::Allow),
+        // ── Spawn family (the three FROZEN child-task semantics, all distinct) ──
+        CanonicalPolicy::of_spawn(&SpawnPolicy::DenyNewTasks),
+        CanonicalPolicy::of_spawn(&SpawnPolicy::AllowThreadsWithinBoundary),
+        CanonicalPolicy::of_spawn(&SpawnPolicy::AllowDescendantsWithinBoundary),
         // ── Env family (Exact: name → Literal | SecretLease) ──
         CanonicalPolicy::of_env(&EnvPolicy::Exact(vec![])),
         // same name, distinct values ⇒ distinct
@@ -124,7 +125,11 @@ fn normalization_is_deterministic() {
         }
     }
     // Spawn
-    for p in [SpawnPolicy::Deny, SpawnPolicy::Allow] {
+    for p in [
+        SpawnPolicy::DenyNewTasks,
+        SpawnPolicy::AllowThreadsWithinBoundary,
+        SpawnPolicy::AllowDescendantsWithinBoundary,
+    ] {
         if CanonicalPolicy::of_spawn(&p).as_bytes() != CanonicalPolicy::of_spawn(&p).as_bytes() {
             failures.push(format!("spawn {p:?}"));
         }

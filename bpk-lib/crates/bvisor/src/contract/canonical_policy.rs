@@ -81,14 +81,18 @@ impl CanonicalPolicy {
     }
 
     /// Normalize a child-spawn policy ([`SpawnPolicy`]) to its canonical form. A pure
-    /// two-variant discriminant (no payload), so `Deny` and `Allow` are the only two
-    /// canonical forms and they never collide.
+    /// THREE-variant discriminant (no payload), so the three FROZEN child-task
+    /// semantics (`DenyNewTasks`, `AllowThreadsWithinBoundary`,
+    /// `AllowDescendantsWithinBoundary`) each get a DISTINCT discriminant byte and
+    /// therefore distinct canonical bytes — they never collide (the §2 distinct-
+    /// semantics ⇒ distinct-bytes law over all three).
     #[must_use]
     pub fn of_spawn(policy: &SpawnPolicy) -> Self {
         let mut enc = Encoder::new(Family::Spawn);
         match policy {
-            SpawnPolicy::Deny => enc.variant(0),
-            SpawnPolicy::Allow => enc.variant(1),
+            SpawnPolicy::DenyNewTasks => enc.variant(0),
+            SpawnPolicy::AllowThreadsWithinBoundary => enc.variant(1),
+            SpawnPolicy::AllowDescendantsWithinBoundary => enc.variant(2),
         }
         enc.finish()
     }

@@ -89,9 +89,9 @@ impl Backend for MacosBackend {
             RequirementKind::ExposePath => "none/unsupported",
             RequirementKind::CommitArtifact | RequirementKind::DiscardArtifact => "rename_same_fs",
             RequirementKind::ListOutputs => "readdir",
-            RequirementKind::ChildSpawnDeny | RequirementKind::ChildSpawnAllow => {
-                "posix_spawn_child"
-            }
+            RequirementKind::ChildSpawnDenyNewTasks
+            | RequirementKind::ChildSpawnAllowThreads
+            | RequirementKind::ChildSpawnAllowDescendants => "posix_spawn_child",
         };
         format!("{}:{primitive}:{enforcement:?}", self.id)
     }

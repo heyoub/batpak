@@ -33,7 +33,6 @@ use std::collections::BTreeMap;
 pub fn support_matrix() -> SupportMatrix {
     let mut best = BTreeMap::new();
 
-    // Launch + stdio: structural, always available.
     insert(
         &mut best,
         RequirementKind::LaunchWorkload,
@@ -60,15 +59,14 @@ pub fn support_matrix() -> SupportMatrix {
         ],
     );
 
-    // Network: deny-all is Enforced (drop CAP_NET / empty net namespace).
+    // Network: deny-all Enforced (drop CAP_NET / empty netns); allow-list UNSUPPORTED
+    // in v1 (no broker — load-bearing honest fail-closed cell, never fake a broker).
     insert(
         &mut best,
         RequirementKind::NetworkDenyAll,
         Enforcement::Enforced,
         &[EvidenceClaim::DeniedAttempts],
     );
-    // NetworkAllowList: UNSUPPORTED in v1 — needs a broker that does not exist yet.
-    // Load-bearing honest fail-closed cell (NEVER fake a broker to fill the table).
     insert(
         &mut best,
         RequirementKind::NetworkAllowList,
@@ -76,18 +74,25 @@ pub fn support_matrix() -> SupportMatrix {
         &[],
     );
 
-    // Child spawn / env / fds: clone3 + namespaces. ChildSpawn + InheritedFds carry
-    // distinct CANONICAL POLICIES (proof-spine §2), so each policy variant is its own
-    // aspiration cell.
+    // The three FROZEN S6 child-task semantics (per-variant honest aspiration
+    // mirroring the clone3/classic-BPF constraint on `SpawnPolicy`):
+    // DenyNewTasks=Enforced (seccomp syscall-number deny), AllowDescendants=Enforced
+    // (cgroup confinement), AllowThreads=Unsupported (clone3 flags undereferenceable).
     insert(
         &mut best,
-        RequirementKind::ChildSpawnDeny,
+        RequirementKind::ChildSpawnDenyNewTasks,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
     insert(
         &mut best,
-        RequirementKind::ChildSpawnAllow,
+        RequirementKind::ChildSpawnAllowThreads,
+        Enforcement::Unsupported,
+        &[],
+    );
+    insert(
+        &mut best,
+        RequirementKind::ChildSpawnAllowDescendants,
         Enforcement::Enforced,
         &[EvidenceClaim::ProcessTree],
     );
@@ -110,7 +115,7 @@ pub fn support_matrix() -> SupportMatrix {
         &[EvidenceClaim::MechanismAttestation],
     );
 
-    // Host controls: temp root + expose-path (bind mount) + artifact commit/discard.
+    // Host controls: temp root + expose-path + artifact commit/discard/list.
     insert(
         &mut best,
         RequirementKind::TempRoot,

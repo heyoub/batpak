@@ -40,7 +40,7 @@ pub enum Lie {
     ClaimEnforcedButAllowNet,
     /// G3 — a write landed OUTSIDE the quarantine root.
     WriteEscapesQuarantine,
-    /// G4 — spawned a child despite a `ChildSpawn::Deny` policy.
+    /// G4 — spawned a child despite a `ChildSpawn::DenyNewTasks` policy.
     SpawnDespiteDeny,
     /// G5 — left an orphan PID live but omitted it from the report.
     DropOrphanFromReport,
