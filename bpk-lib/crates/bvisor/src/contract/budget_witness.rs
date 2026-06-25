@@ -193,6 +193,26 @@ impl BudgetWitnesses {
             network_bytes: BudgetWitness::unwitnessed(&admitted.network_bytes),
         }
     }
+
+    /// Witnesses with PROCESS COUNT measured (`process_peak_observed` = the cgroup v2
+    /// `pids.peak` high-water mark the Linux backend read after the run), the other six
+    /// genuinely unwitnessed. The pid count is the dimension a `pids.max` cgroup cap
+    /// structurally enforces (`GuaranteeProfile::Hard`), so its witness carries a REAL
+    /// measured peak instead of [`BudgetFinding::ObservationUnavailable`]. The
+    /// within/at-limit finding is derived by [`BudgetWitness::classify`]; the kernel
+    /// guarantees the peak never exceeds the cap, so a held cap reads `WithinLimit`.
+    #[must_use]
+    pub fn with_process_count(admitted: &AdmittedBudgets, process_peak_observed: u64) -> Self {
+        Self {
+            wall_micros: BudgetWitness::unwitnessed(&admitted.wall_micros),
+            cpu_micros: BudgetWitness::unwitnessed(&admitted.cpu_micros),
+            resident_bytes: BudgetWitness::unwitnessed(&admitted.resident_bytes),
+            process_count: BudgetWitness::witnessed(&admitted.process_count, process_peak_observed),
+            handle_count: BudgetWitness::unwitnessed(&admitted.handle_count),
+            storage_bytes: BudgetWitness::unwitnessed(&admitted.storage_bytes),
+            network_bytes: BudgetWitness::unwitnessed(&admitted.network_bytes),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +295,24 @@ mod budget_witness_tests {
         );
         assert_eq!(
             witnesses.network_bytes.finding,
+            BudgetFinding::ObservationUnavailable
+        );
+    }
+
+    #[test]
+    fn with_process_count_witnesses_pids_via_a_real_peak_not_unavailable() {
+        // Process count is MEASURED (peak 3 against the admitted 64) — cgroup
+        // pids.peak-sourced, within limit, Hard guarantee. The other six are
+        // EARNED-unavailable (no counter yet).
+        let witnesses = BudgetWitnesses::with_process_count(&admitted(), 3);
+        assert_eq!(witnesses.process_count.observed_usage, 3);
+        assert_eq!(witnesses.process_count.finding, BudgetFinding::WithinLimit);
+        assert_eq!(
+            witnesses.process_count.supplied_guarantee,
+            GuaranteeProfile::Hard
+        );
+        assert_eq!(
+            witnesses.cpu_micros.finding,
             BudgetFinding::ObservationUnavailable
         );
     }

@@ -43,7 +43,7 @@ use crate::contract::capability::{
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
 use crate::contract::report::{
-    BoundaryReportBody, CaptureRefs, DeniedAttempt, ExitStatus, ObservedFact, Outcome,
+    BoundaryReportBody, CaptureRefs, ExitStatus, ObservedFact, Outcome,
     BOUNDARY_REPORT_SCHEMA_VERSION,
 };
 use crate::contract::support::{
@@ -224,14 +224,15 @@ impl Default for LinuxBackend {
     }
 }
 
-/// The honest budget profile for THIS chunk. Budget ENFORCEMENT (cgroup limits) is
-/// part 2 — NOT implemented here — so no dimension is claimed `Enforced`. The OS
-/// DOES account a spawned process's resources, and the runner observes its
-/// terminal, so each dimension is declared `Mediated` (supervised, not
-/// structurally capped) with an honest mechanism string and NO resource-usage
-/// evidence claim. This lets a budgeted FS spec admit (the launch needs nonzero
-/// derived minimums) WITHOUT claiming a cap this chunk does not install.
-fn observed_budget_profile() -> BudgetProfile {
+/// The honest budget profile. PROCESS COUNT is STRUCTURALLY enforced via the cgroup
+/// v2 `pids` controller (`pids.max`) — but ONLY when a cgroup base was probed
+/// (`cgroup_pids_enforced`); then it is `Enforced`/Hard with a `ResourceUsage`
+/// evidence claim (the witness reads `pids.peak`). Every OTHER dimension is `Mediated`
+/// (supervised, not structurally capped) with no resource evidence — the OS accounts a
+/// spawned process's resources and the runner observes its terminal, but no cap is
+/// installed, so claiming `Enforced` there would be the over-claim the gauntlet hunts.
+/// With no cgroup base, process count is `Mediated` too (no unbacked cap).
+fn observed_budget_profile(cgroup_pids_enforced: bool) -> BudgetProfile {
     let observed = |mechanism: &str| BudgetAvailability {
         // Headroom only — we do NOT cap, so we never refuse on capacity here; the
         // honest signal is the `Mediated` (not `Enforced`) guarantee + empty
@@ -241,11 +242,23 @@ fn observed_budget_profile() -> BudgetProfile {
         evidence: EvidenceSet::new(),
         mechanism: mechanism.to_string(),
     };
+    // ProcessCount: a real structural cap (cgroup pids.max) when cgroup is available.
+    let process_count = if cgroup_pids_enforced {
+        BudgetAvailability {
+            // The pids controller caps any count up to the kernel's pid ceiling.
+            available: u64::MAX,
+            enforcement: Enforcement::Enforced,
+            evidence: [EvidenceClaim::ResourceUsage].into_iter().collect(),
+            mechanism: "cgroup_v2_pids:enforced".to_string(),
+        }
+    } else {
+        observed("os_process:observed-not-capped")
+    };
     BudgetProfile {
         wall_micros: observed("os_process_wait:observed-not-capped"),
         cpu_micros: observed("os_rusage:observed-not-capped"),
         resident_bytes: observed("os_rusage:observed-not-capped"),
-        process_count: observed("os_process:observed-not-capped"),
+        process_count,
         handle_count: observed("os_fd:observed-not-capped"),
         storage_bytes: observed("os_fs:observed-not-capped"),
         network_bytes: observed("os_net:observed-not-capped"),
@@ -277,7 +290,7 @@ impl Backend for LinuxBackend {
         BackendProfileSnapshot {
             backend: self.id.clone(),
             probed,
-            budget: observed_budget_profile(),
+            budget: observed_budget_profile(self.cgroup_base.is_some()),
         }
     }
 
@@ -364,12 +377,12 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
         return fail_closed(backend, plan, Outcome::Unsupported, observed);
     }
 
-    // Create the per-run cgroup leaf (placement + atomic kill) when a confinement base
-    // was probed, recording the honest placement evidence. The launcher births the
-    // workload child INTO the leaf via CLONE_INTO_CGROUP; the host tears it down (kill →
-    // drain → remove) AFTER the run via `finish`. A `None` leaf ⇒ no cgroup confinement
-    // this run (the workload runs in the launcher's own cgroup) — never a silent claim.
-    let (cgroup_leaf, cgroup_dir_fd) = setup_cgroup_leaf(backend, &mut observed);
+    // Create the per-run cgroup leaf when a confinement base was probed, recording the
+    // honest placement evidence. The launcher births the workload child INTO the leaf via
+    // CLONE_INTO_CGROUP; the host tears it down (kill → drain → remove) AFTER the run via
+    // `finish`. A `None` leaf ⇒ no cgroup confinement this run — never a silent claim.
+    let (cgroup_leaf, cgroup_dir_fd) =
+        setup_cgroup_leaf(backend, &mut observed, pids_cap_for(plan));
 
     // Build the launcher plan + the pre-opened authority handles host-side (now
     // including the optional CgroupDir slot). A host wiring fault (a root/exe that
@@ -431,7 +444,17 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
     // Run the launcher; map its honest observation onto the report contract, then ALWAYS
     // tear down the leaf (kill → drain → remove) via `finish`.
     let report = match launch::run_launcher(&launcher_path, &launch_plan, authority) {
-        Ok(obs) => map_observation(backend, plan, &exe, confined, &obs, observed),
+        Ok(obs) => {
+            // Read the cgroup pids high-water mark BEFORE teardown — the honest
+            // `observed_usage` for the process_count budget witness. `pids.peak` persists
+            // the max even after the workload exited, so this is valid here. `None` ⇒ no
+            // cap installed or the kernel lacks `pids.peak` (then the witness stays
+            // unwitnessed — Hard guarantee, ObservationUnavailable — never a fake peak).
+            let process_peak = cgroup_leaf
+                .as_ref()
+                .and_then(|l| l.peak_pids().ok().flatten());
+            map_observation(backend, plan, &exe, confined, &obs, observed, process_peak)
+        }
         Err(error) => {
             // A harness fault BEFORE the launcher produced a verdict (encode/slot/OS):
             // the workload never ran ⇒ SupervisorFault (fail-closed).
@@ -445,6 +468,16 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
     finish(cgroup_leaf, report)
 }
 
+/// The cgroup `pids.max` cap to install on the run leaf: the plan's admitted
+/// process_count limit, but ONLY when it admitted as `Enforced` (which happens IFF a
+/// cgroup base was probed — `observed_budget_profile` offers process_count Enforced only
+/// then). A Mediated process_count installs NO cap (Budget stays observed-not-capped); the
+/// leaf is then created bare (placement + atomic kill) without a structural pid limit.
+fn pids_cap_for(plan: &BoundaryPlan) -> Option<u64> {
+    (plan.budgets.process_count.selected_guarantee == Enforcement::Enforced)
+        .then_some(plan.budgets.process_count.effective_limit)
+}
+
 /// Create the per-run cgroup leaf (when a base was probed) and record the honest
 /// placement evidence onto `observed`, returning `(the leaf to tear down, the dir fd for
 /// the launcher's CgroupDir slot)`. A `None` dir fd with a probed base records the honest
@@ -452,11 +485,12 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
 fn setup_cgroup_leaf(
     backend: &LinuxBackend,
     observed: &mut Vec<ObservedFact>,
+    pids_cap: Option<u64>,
 ) -> (Option<cgroup::CgroupLeaf>, Option<std::os::fd::OwnedFd>) {
     let leaf = backend
         .cgroup_base
         .as_ref()
-        .and_then(|base| create_run_leaf(base));
+        .and_then(|base| create_run_leaf(base, pids_cap));
     // A SEPARATE dir fd (`File::open` on the leaf) the launcher inherits for the
     // CgroupDir slot; the `CgroupLeaf` retains its path for teardown.
     let dir_fd = leaf.as_ref().and_then(|l| l.dir_fd().ok());
@@ -499,18 +533,22 @@ fn finish(leaf: Option<cgroup::CgroupLeaf>, report: BoundaryReportBody) -> Bound
     report
 }
 
-/// Create the per-run cgroup leaf under the probed confinement `base` for placement +
-/// atomic kill. A unique name (pid + a process-local counter, no clock/RNG). NO resource
-/// cap is installed in this step (Budget stays Mediated — honest); the leaf exists so the
-/// workload runs in a cgroup whose run tree the host can atomically `cgroup.kill`. `None`
-/// on any create failure (the launch then proceeds WITHOUT cgroup placement, reported
-/// honestly — the workload simply runs in the launcher's cgroup).
-fn create_run_leaf(base: &std::path::Path) -> Option<cgroup::CgroupLeaf> {
+/// Create the per-run cgroup leaf under the probed confinement `base`. A unique name
+/// (pid + a process-local counter, no clock/RNG). `pids_cap` installs a structural
+/// `pids.max` limit (the admitted process_count budget, enforced) when `Some`; `None`
+/// creates a bare leaf (placement + atomic kill only, no pid cap — Budget then stays
+/// Mediated). `None` return on any create failure (the launch then proceeds WITHOUT
+/// cgroup placement, reported honestly — the workload runs in the launcher's cgroup).
+fn create_run_leaf(base: &std::path::Path, pids_cap: Option<u64>) -> Option<cgroup::CgroupLeaf> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static RUN_COUNTER: AtomicU64 = AtomicU64::new(0);
     let suffix = RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
     let name = format!("bvisor-run-{}-{suffix}", std::process::id());
-    cgroup::CgroupLeaf::create(base, &name, cgroup::CgroupLimits::default()).ok()
+    let limits = match pids_cap {
+        Some(max) => cgroup::CgroupLimits::with_pids_max(max),
+        None => cgroup::CgroupLimits::default(),
+    };
+    cgroup::CgroupLeaf::create(base, &name, limits).ok()
 }
 
 /// Resolve the launcher binary path, failing closed if unresolvable. Resolution
@@ -589,6 +627,7 @@ fn map_observation(
     confined: bool,
     obs: &LaunchObservation,
     mut observed: Vec<ObservedFact>,
+    process_peak: Option<u64>,
 ) -> BoundaryReportBody {
     observed.push(ObservedFact {
         kind: "workload_launched".to_string(),
@@ -641,12 +680,31 @@ fn map_observation(
         stderr: Some(format!("inline:{}b", obs.captured_stderr.len())),
     };
 
+    // The process_count budget witness: a REAL `pids.peak` measurement when a cgroup cap
+    // was installed (admitted Enforced) AND the kernel exposed `pids.peak`; otherwise the
+    // unwitnessed echo (Hard guarantee from the admitted Enforced, ObservationUnavailable
+    // — never a fabricated peak). Surface the measured peak as honest evidence too.
+    let process_enforced = plan.budgets.process_count.selected_guarantee == Enforcement::Enforced;
+    let budget = match process_peak {
+        Some(peak) if process_enforced => {
+            observed.push(ObservedFact {
+                kind: "process_count_witnessed".to_string(),
+                detail: format!(
+                    "cgroup pids.peak={peak} against pids.max={} (cgroup_v2_pids: Hard cap)",
+                    plan.budgets.process_count.effective_limit
+                ),
+            });
+            BudgetWitnesses::with_process_count(&plan.budgets, peak)
+        }
+        _ => BudgetWitnesses::unwitnessed(&plan.budgets),
+    };
+
     let outcome = obs.outcome().unwrap_or(Outcome::SupervisorFault);
     // The launcher does not surface the workload's own exit code (it reports its
     // setup terminal); ExecSucceeded means the workload image began executing under
     // confinement. No portable workload ExitStatus is available through this path.
     let exit = exec_exit(outcome);
-    body(backend, plan, outcome, exit, captured, observed, Vec::new())
+    body(backend, plan, outcome, exit, captured, observed, budget)
 }
 
 /// The portable workload exit the launcher path can honestly report. The launcher
@@ -686,6 +744,8 @@ fn fail_closed(
     outcome: Outcome,
     observed: Vec<ObservedFact>,
 ) -> BoundaryReportBody {
+    // A fail-closed path: the workload never ran (or faulted), so no dimension is
+    // witnessed — the unwitnessed echo preserves the admitted contract honestly.
     body(
         backend,
         plan,
@@ -693,11 +753,17 @@ fn fail_closed(
         None,
         CaptureRefs::default(),
         observed,
-        Vec::new(),
+        BudgetWitnesses::unwitnessed(&plan.budgets),
     )
 }
 
-/// Assemble the honest report body.
+/// Assemble the honest report body. `budget` is the per-dimension witness set the
+/// caller computed (the process_count dimension is genuinely witnessed from `pids.peak`
+/// when a cgroup cap was installed; every other path passes the unwitnessed echo).
+///
+/// `denied` is always empty through the launcher path: a confinement DENIAL is proven by
+/// the INDEPENDENT on-disk oracle (the G-grid), NOT self-reported here (the workload
+/// inherits the launcher's stdio, so there is no stderr-derived denial to surface).
 fn body(
     backend: &LinuxBackend,
     plan: &BoundaryPlan,
@@ -705,7 +771,7 @@ fn body(
     exit: Option<ExitStatus>,
     captured: CaptureRefs,
     observed: Vec<ObservedFact>,
-    denied: Vec<DeniedAttempt>,
+    budget: BudgetWitnesses,
 ) -> BoundaryReportBody {
     BoundaryReportBody {
         schema_version: BOUNDARY_REPORT_SCHEMA_VERSION,
@@ -715,112 +781,15 @@ fn body(
         outcome,
         admitted: plan.admitted.clone(),
         observed,
-        denied,
+        denied: Vec::new(),
         exit,
         captured,
-        budget: BudgetWitnesses::unwitnessed(&plan.budgets),
+        budget,
         artifacts: Vec::new(),
         findings: Vec::new(),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{LinuxBackend, LANDLOCK_ABI_FLOOR};
-    use crate::contract::backend::Backend;
-    use crate::contract::capability::{Capability, Enforcement, FsAccess, FsConfinement, PathSet};
-    use crate::contract::plan::BoundaryRequirement;
-    use crate::contract::support::RequirementKind;
-
-    fn fs_requirement() -> BoundaryRequirement {
-        BoundaryRequirement::Capability(Capability::Filesystem {
-            access: FsAccess::Read,
-            // An inert scope path — classify() never touches disk, so the value is
-            // immaterial; a relative placeholder avoids leaking an absolute path.
-            scope: PathSet {
-                roots: vec!["quarantine/root".to_string()],
-            },
-            recursive: true,
-            confinement: FsConfinement::DeclaredRootsOnly,
-        })
-    }
-
-    #[test]
-    fn filesystem_is_enforced_at_or_above_the_abi_floor() {
-        // At the floor the machine ceiling backs Filesystem, so classify is Enforced.
-        let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
-        let profile = backend.profile(&backend.probe());
-        let verdict = backend.classify(&fs_requirement(), &profile);
-        assert_eq!(
-            verdict.enforcement,
-            Enforcement::Enforced,
-            "at/above the ABI floor, Filesystem must be Enforced"
-        );
-        // The ceiling lists Filesystem at the floor.
-        assert_eq!(
-            profile.ceiling_for(RequirementKind::Filesystem).enforcement,
-            Enforcement::Enforced
-        );
-    }
-
-    #[test]
-    fn filesystem_fails_closed_below_the_abi_floor() {
-        // Below the floor (e.g. landlock unavailable ⇒ probed ABI 0) the machine
-        // ceiling does NOT back Filesystem, so the family Enforced best-case is
-        // floored to Unsupported — and plan() will refuse a FS spec fail-closed.
-        let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR - 1);
-        let profile = backend.profile(&backend.probe());
-        let verdict = backend.classify(&fs_requirement(), &profile);
-        assert_eq!(
-            verdict.enforcement,
-            Enforcement::Unsupported,
-            "below the ABI floor, Filesystem MUST fail closed (no unbacked guarantee)"
-        );
-    }
-
-    #[test]
-    fn unimplemented_kinds_fail_closed_this_chunk() {
-        // HONESTY: this chunk backs Filesystem/LaunchWorkload/CaptureStreams (+ Kill
-        // ONLY with a cgroup base — see the dedicated test). NetworkDenyAll / ChildSpawn
-        // / TempRoot are NOT in the ceiling, so they floor to Unsupported and plan()
-        // fails closed for them.
-        let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
-        let profile = backend.profile(&backend.probe());
-        for kind in [
-            RequirementKind::NetworkDenyAll,
-            RequirementKind::ChildSpawn,
-            RequirementKind::TempRoot,
-        ] {
-            assert_eq!(
-                profile.ceiling_for(kind).enforcement,
-                Enforcement::Unsupported,
-                "{kind:?} must stay Unsupported until its chunk lands (no inflation)"
-            );
-        }
-    }
-
-    #[test]
-    fn kill_is_enforced_with_a_cgroup_base_and_unsupported_without() {
-        // WITH a probed cgroup base (atomic cgroup.kill): Kill{RunTree,Atomic} is
-        // Enforced — the workload runs in a cgroup leaf the host can SIGKILL atomically.
-        let with = LinuxBackend::with_cgroup_for_test();
-        assert_eq!(
-            with.profile(&with.probe())
-                .ceiling_for(RequirementKind::Kill)
-                .enforcement,
-            Enforcement::Enforced,
-            "a cgroup base with atomic cgroup.kill backs Kill Enforced"
-        );
-        // WITHOUT a cgroup base: Kill is absent from the ceiling ⇒ Unsupported ⇒ plan()
-        // fails closed for a kill spec (NO unbacked atomic-kill guarantee — no inflation).
-        let without = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
-        assert_eq!(
-            without
-                .profile(&without.probe())
-                .ceiling_for(RequirementKind::Kill)
-                .enforcement,
-            Enforcement::Unsupported,
-            "no cgroup base ⇒ Kill Unsupported (no unbacked atomic-kill guarantee)"
-        );
-    }
-}
+#[path = "backend_impl_tests.rs"]
+mod tests;

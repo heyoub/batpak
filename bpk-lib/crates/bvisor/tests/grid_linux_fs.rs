@@ -50,8 +50,9 @@
 
 use bvisor::{
     Backend, BackendId, BackendRegistry, BoundaryPlanner, BoundaryReportBody, BoundaryRunner,
-    BoundarySpec, BudgetRequirements, Capability, EvidenceRequirements, FsAccess, FsConfinement,
-    HostControl, LinuxBackend, MinGuarantee, Outcome, PathSet, StdStreams, Workload,
+    BoundarySpec, BudgetFinding, BudgetRequirements, Capability, EvidenceRequirements, FsAccess,
+    FsConfinement, GuaranteeProfile, HostControl, LinuxBackend, MinGuarantee, Outcome, PathSet,
+    StdStreams, Workload,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -403,6 +404,39 @@ fn cgroup_leaf_is_created_and_reported_through_execute() {
             && f.detail.contains("cgroup_placement=clone_into_cgroup")),
         "the launcher must note CLONE_INTO_CGROUP placement: {:?}",
         body.observed
+    );
+
+    // 8b-ii-b2: the process_count budget dimension is now STRUCTURALLY enforced by the
+    // cgroup pids.max cap and WITNESSED from the kernel's pids.peak — a real measurement,
+    // Hard guarantee, within the admitted limit. The other dimensions stay unwitnessed.
+    let pc = &body.budget.process_count;
+    assert_eq!(
+        pc.supplied_guarantee,
+        GuaranteeProfile::Hard,
+        "process_count is a HARD cgroup pids.max cap (not sampled): {pc:?}"
+    );
+    assert_eq!(
+        pc.finding,
+        BudgetFinding::WithinLimit,
+        "the workload's peak pid count stayed within the cap: {pc:?}"
+    );
+    assert!(
+        pc.observed_usage >= 1,
+        "the witnessed peak is a REAL measurement of at least the workload itself: {pc:?}"
+    );
+    assert!(
+        body.observed
+            .iter()
+            .any(|f| f.kind == "process_count_witnessed"),
+        "execute() must surface the pids.peak witness as honest evidence: {:?}",
+        body.observed
+    );
+    // CPU stays genuinely unwitnessed — no over-claim of dimensions we do not measure.
+    assert_eq!(
+        body.budget.cpu_micros.finding,
+        BudgetFinding::ObservationUnavailable,
+        "CPU is NOT witnessed this step (no over-claim): {:?}",
+        body.budget.cpu_micros
     );
 }
 
