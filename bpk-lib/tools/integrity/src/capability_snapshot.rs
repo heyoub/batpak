@@ -90,18 +90,31 @@ pub(crate) struct WitnessRow {
     pub(crate) witnessed: bool,
 }
 
+/// One declared capability split. This is not a downgrade waiver: it records
+/// that an old aggregate capability was split into replacement cells, and the
+/// meta-gate only honors it when the diff actually adds those replacement cells.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct SplitManifestRow {
+    pub(crate) backend: String,
+    pub(crate) from_kind: String,
+    pub(crate) to_kinds: Vec<String>,
+    pub(crate) reason: String,
+}
+
 /// The full committed snapshot: the capability floor + the witnessed-invariant
 /// floor. Both lists are kept sorted so the on-disk form is deterministic and
 /// line-stable (each cell is exactly one diff-able line).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Snapshot {
     pub(crate) aspiration_floor: Vec<AspirationFloorRow>,
+    pub(crate) split_manifest: Vec<SplitManifestRow>,
     pub(crate) witnesses: Vec<WitnessRow>,
 }
 
 impl Snapshot {
     fn sorted(mut self) -> Self {
         self.aspiration_floor.sort();
+        self.split_manifest.sort();
         self.witnesses.sort();
         self
     }
@@ -124,7 +137,8 @@ pub(crate) fn enforcement_rank(enforcement: &str) -> u8 {
 /// `capability_snapshot.yaml` (`check == false`) or assert the committed file
 /// already matches (`check == true`, folded into `structural-check`).
 pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
-    let derived = derive_snapshot(repo_root)?.sorted();
+    let mut derived = derive_snapshot(repo_root)?.sorted();
+    derived.split_manifest = existing_split_manifest(repo_root)?.unwrap_or_default();
     let rendered = render(&derived);
     let path = repo_root.join(SNAPSHOT_REL);
 
@@ -170,6 +184,16 @@ fn check_gate(repo_root: &Path, derived: &Snapshot) -> Result<()> {
     Ok(())
 }
 
+fn existing_split_manifest(repo_root: &Path) -> Result<Option<Vec<SplitManifestRow>>> {
+    let path = repo_root.join(SNAPSHOT_REL);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path).with_context(|| format!("read {SNAPSHOT_REL}"))?;
+    let parsed = parse(&text).with_context(|| format!("parse existing {SNAPSHOT_REL}"))?;
+    Ok(Some(parsed.split_manifest))
+}
+
 /// Anti-rot: every `CapabilityDowngrade` waiver's `target` must name a real
 /// `backend:kind` cell present in the floor. A waiver for a non-existent cell is
 /// stale debt masking a moved/renamed capability — fail so the justification
@@ -211,8 +235,19 @@ pub(crate) fn assert_mirror(committed_text: &str, derived: &Snapshot) -> Result<
         .with_context(|| format!("parse committed {SNAPSHOT_REL}"))?
         .sorted();
     let derived = derived.clone().sorted();
+    validate_split_manifest(&committed.split_manifest, &committed.aspiration_floor)?;
+    let committed_mirror = Snapshot {
+        aspiration_floor: committed.aspiration_floor,
+        split_manifest: Vec::new(),
+        witnesses: committed.witnesses,
+    };
+    let derived_mirror = Snapshot {
+        aspiration_floor: derived.aspiration_floor,
+        split_manifest: Vec::new(),
+        witnesses: derived.witnesses,
+    };
     ensure(
-        committed == derived,
+        committed_mirror == derived_mirror,
         format!(
             "capability-snapshot: {SNAPSHOT_REL} is STALE — it no longer mirrors the source \
              `support_matrix()` best-case tables (or the witnessed-invariant set).\n\
@@ -224,6 +259,44 @@ pub(crate) fn assert_mirror(committed_text: &str, derived: &Snapshot) -> Result<
              waiver (owner + expiry + ADR). The meta-gate blocks an unapproved downgrade diff."
         ),
     )
+}
+
+fn validate_split_manifest(
+    splits: &[SplitManifestRow],
+    aspiration_floor: &[AspirationFloorRow],
+) -> Result<()> {
+    for split in splits {
+        ensure(
+            !split.to_kinds.is_empty(),
+            format!(
+                "capability-snapshot: split_manifest entry for {}:{} must name at least one \
+                 replacement kind",
+                split.backend, split.from_kind
+            ),
+        )?;
+        ensure(
+            !split.to_kinds.iter().any(|kind| kind == &split.from_kind),
+            format!(
+                "capability-snapshot: split_manifest entry for {}:{} cannot list itself as a \
+                 replacement",
+                split.backend, split.from_kind
+            ),
+        )?;
+        for to_kind in &split.to_kinds {
+            let exists = aspiration_floor
+                .iter()
+                .any(|cell| cell.backend == split.backend && cell.kind == *to_kind);
+            ensure(
+                exists,
+                format!(
+                    "capability-snapshot: split_manifest entry for {}:{} points at missing \
+                     replacement kind `{}`",
+                    split.backend, split.from_kind, to_kind
+                ),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Derive the live snapshot from source: AST-walk each backend's
@@ -240,6 +313,7 @@ pub(crate) fn derive_snapshot(repo_root: &Path) -> Result<Snapshot> {
     let witnesses = derive_witnesses(repo_root)?;
     Ok(Snapshot {
         aspiration_floor,
+        split_manifest: Vec::new(),
         witnesses,
     })
 }
@@ -435,6 +509,14 @@ pub(crate) fn render(snapshot: &Snapshot) -> String {
             cell.backend, cell.kind, cell.enforcement, evidence
         ));
     }
+    out.push_str("split_manifest:\n");
+    for split in &snapshot.split_manifest {
+        let to_kinds = split.to_kinds.join(", ");
+        out.push_str(&format!(
+            "  - {{ backend: {}, from: {}, to: [{}], reason: {} }}\n",
+            split.backend, split.from_kind, to_kinds, split.reason
+        ));
+    }
     out.push_str("witnesses:\n");
     for row in &snapshot.witnesses {
         out.push_str(&format!(
@@ -464,6 +546,10 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
             section = Section::Witnesses;
             continue;
         }
+        if line == "split_manifest:" {
+            section = Section::SplitManifest;
+            continue;
+        }
         let body = line
             .strip_prefix("- ")
             .and_then(|l| l.strip_prefix('{'))
@@ -474,6 +560,7 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
             Section::AspirationFloor => snapshot
                 .aspiration_floor
                 .push(parse_aspiration_floor(body)?),
+            Section::SplitManifest => snapshot.split_manifest.push(parse_split_manifest(body)?),
             Section::Witnesses => snapshot.witnesses.push(parse_witness(body)?),
             Section::None => bail!("capability-snapshot: row before any section header: `{line}`"),
         }
@@ -484,6 +571,7 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
 enum Section {
     None,
     AspirationFloor,
+    SplitManifest,
     Witnesses,
 }
 
@@ -512,6 +600,27 @@ fn parse_witness(body: &str) -> Result<WitnessRow> {
     Ok(WitnessRow {
         id: field(&fields, "id", body)?,
         witnessed,
+    })
+}
+
+fn parse_split_manifest(body: &str) -> Result<SplitManifestRow> {
+    let fields = parse_fields(body);
+    let to_raw = field(&fields, "to", body)?;
+    let mut to_kinds: Vec<String> = to_raw
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    to_kinds.sort();
+    to_kinds.dedup();
+    Ok(SplitManifestRow {
+        backend: field(&fields, "backend", body)?,
+        from_kind: field(&fields, "from", body)?,
+        to_kinds,
+        reason: field(&fields, "reason", body)?,
     })
 }
 

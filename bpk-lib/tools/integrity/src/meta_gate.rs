@@ -662,8 +662,12 @@ fn detect_capability_downgrade(file: &FileDiff, findings: &mut Vec<Weakening>) {
     }
     let removed = ceiling_cells(&file.removed);
     let added = ceiling_cells(&file.added);
+    let added_splits = split_manifest_rows(&file.added);
     for ((backend, kind), (enf_removed, ev_removed)) in &removed {
         let Some((enf_added, ev_added)) = added.get(&(backend.clone(), kind.clone())) else {
+            if split_manifest_covers_removed_row(backend, kind, &added, &added_splits) {
+                continue;
+            }
             // The cell is gone from the added side and not re-added: the family no
             // longer advertises this capability at all.
             findings.push(capability_weakening(
@@ -705,6 +709,30 @@ fn detect_capability_downgrade(file: &FileDiff, findings: &mut Vec<Weakening>) {
             ));
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct SplitManifestDiffRow {
+    backend: String,
+    from_kind: String,
+    to_kinds: BTreeSet<String>,
+}
+
+fn split_manifest_covers_removed_row(
+    backend: &str,
+    kind: &str,
+    added: &BTreeMap<(String, String), (String, BTreeSet<String>)>,
+    added_splits: &[SplitManifestDiffRow],
+) -> bool {
+    added_splits.iter().any(|split| {
+        split.backend == backend
+            && split.from_kind == kind
+            && !split.to_kinds.is_empty()
+            && split
+                .to_kinds
+                .iter()
+                .all(|to_kind| added.contains_key(&(backend.to_string(), to_kind.clone())))
+    })
 }
 
 fn capability_weakening(detail: String, file: &FileDiff, l4: bool) -> Weakening {
@@ -755,6 +783,30 @@ fn witness_cells(lines: &[String]) -> BTreeMap<String, bool> {
         map.insert(id, witnessed == "true");
     }
     map
+}
+
+fn split_manifest_rows(lines: &[String]) -> Vec<SplitManifestDiffRow> {
+    let mut rows = Vec::new();
+    for line in lines {
+        if !line.trim_start().starts_with("- {") {
+            continue;
+        }
+        let (Some(backend), Some(from_kind)) =
+            (flow_field(line, "backend"), flow_field(line, "from"))
+        else {
+            continue;
+        };
+        let to_kinds = flow_list(line, "to");
+        if to_kinds.is_empty() {
+            continue;
+        }
+        rows.push(SplitManifestDiffRow {
+            backend,
+            from_kind,
+            to_kinds,
+        });
+    }
+    rows
 }
 
 /// Extract a scalar flow-mapping field value (`key: value` up to the next `,`/`}`).
