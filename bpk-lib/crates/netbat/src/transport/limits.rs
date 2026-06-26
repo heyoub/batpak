@@ -6,6 +6,14 @@ pub const DEFAULT_MAX_OPERATION_NAME_BYTES: usize = syncbat::MAX_OPERATION_NAME_
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 32 * 1024;
 /// Default maximum handler output size encoded into a response frame.
 pub const DEFAULT_MAX_OUTPUT_BYTES: usize = 32 * 1024;
+/// Default maximum subscription id bytes accepted by NETBAT/2 stream frames.
+pub const DEFAULT_MAX_SUBSCRIPTION_ID_BYTES: usize = 128;
+/// Default maximum opaque cursor bytes decoded from stream frames.
+pub const DEFAULT_MAX_CURSOR_BYTES: usize = 4 * 1024;
+/// Default maximum decoded subscription event payload bytes.
+pub const DEFAULT_MAX_STREAM_PAYLOAD_BYTES: usize = 32 * 1024;
+/// Default maximum decoded SUB_ERR message bytes.
+pub const DEFAULT_MAX_STREAM_ERROR_MESSAGE_BYTES: usize = 4 * 1024;
 
 macro_rules! protocol_prefix {
     () => {
@@ -19,6 +27,22 @@ pub const PROTOCOL_PREFIX: &str = protocol_prefix!();
 pub const LINE_PROTOCOL_VERSION: &str = concat!(protocol_prefix!(), "1");
 /// Request verb used by netbat's line protocol.
 pub const CALL_VERB: &str = "CALL";
+/// Current version token accepted by NETBAT/2 subscription streaming frames.
+pub const STREAM_PROTOCOL_VERSION: &str = concat!(protocol_prefix!(), "2");
+/// Open/resume verb for NETBAT/2 streaming frames.
+pub const SUBSCRIBE_VERB: &str = "SUBSCRIBE";
+/// Delivery verb for NETBAT/2 streaming frames.
+pub const SUB_EVENT_VERB: &str = "SUB_EVENT";
+/// Watermark verb for NETBAT/2 streaming frames.
+pub const SUB_WATERMARK_VERB: &str = "SUB_WATERMARK";
+/// Cumulative ack verb for NETBAT/2 streaming frames.
+pub const SUB_ACK_VERB: &str = "SUB_ACK";
+/// Cancel verb for NETBAT/2 streaming frames.
+pub const SUB_CANCEL_VERB: &str = "SUB_CANCEL";
+/// Error verb for NETBAT/2 streaming frames.
+pub const SUB_ERR_VERB: &str = "SUB_ERR";
+/// End verb for NETBAT/2 streaming frames.
+pub const SUB_END_VERB: &str = "SUB_END";
 
 /// Bounded transport limits for netbat's blocking line protocol.
 ///
@@ -35,6 +59,14 @@ pub struct Limits {
     pub max_input_bytes: usize,
     /// Maximum output bytes encoded into a response frame.
     pub max_output_bytes: usize,
+    /// Maximum subscription id token bytes in a stream frame.
+    pub max_subscription_id_bytes: usize,
+    /// Maximum decoded opaque cursor bytes in a stream frame.
+    pub max_cursor_bytes: usize,
+    /// Maximum decoded subscription payload bytes in a stream frame.
+    pub max_stream_payload_bytes: usize,
+    /// Maximum decoded SUB_ERR message bytes in a stream frame.
+    pub max_stream_error_message_bytes: usize,
 }
 
 impl Default for Limits {
@@ -44,6 +76,10 @@ impl Default for Limits {
             max_operation_name_bytes: DEFAULT_MAX_OPERATION_NAME_BYTES,
             max_input_bytes: DEFAULT_MAX_INPUT_BYTES,
             max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
+            max_subscription_id_bytes: DEFAULT_MAX_SUBSCRIPTION_ID_BYTES,
+            max_cursor_bytes: DEFAULT_MAX_CURSOR_BYTES,
+            max_stream_payload_bytes: DEFAULT_MAX_STREAM_PAYLOAD_BYTES,
+            max_stream_error_message_bytes: DEFAULT_MAX_STREAM_ERROR_MESSAGE_BYTES,
         }
     }
 }
@@ -81,6 +117,34 @@ impl Limits {
     #[must_use]
     pub const fn with_max_output_bytes(mut self, value: usize) -> Self {
         self.max_output_bytes = value;
+        self
+    }
+
+    /// Override [`Limits::max_subscription_id_bytes`].
+    #[must_use]
+    pub const fn with_max_subscription_id_bytes(mut self, value: usize) -> Self {
+        self.max_subscription_id_bytes = value;
+        self
+    }
+
+    /// Override [`Limits::max_cursor_bytes`].
+    #[must_use]
+    pub const fn with_max_cursor_bytes(mut self, value: usize) -> Self {
+        self.max_cursor_bytes = value;
+        self
+    }
+
+    /// Override [`Limits::max_stream_payload_bytes`].
+    #[must_use]
+    pub const fn with_max_stream_payload_bytes(mut self, value: usize) -> Self {
+        self.max_stream_payload_bytes = value;
+        self
+    }
+
+    /// Override [`Limits::max_stream_error_message_bytes`].
+    #[must_use]
+    pub const fn with_max_stream_error_message_bytes(mut self, value: usize) -> Self {
+        self.max_stream_error_message_bytes = value;
         self
     }
 }

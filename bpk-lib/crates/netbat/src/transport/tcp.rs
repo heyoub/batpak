@@ -380,6 +380,11 @@ fn record_request_failure(stats: &mut TcpServeStats, error: &NetbatError) {
         NetbatError::MalformedRequest { .. } | NetbatError::UnsupportedProtocolVersion { .. } => {
             stats.malformed_requests += 1;
         }
+        NetbatError::MalformedStreamFrame { .. } => stats.malformed_requests += 1,
+        NetbatError::SubscriptionIdTooLong { .. }
+        | NetbatError::CursorTooLarge { .. }
+        | NetbatError::StreamPayloadTooLarge { .. }
+        | NetbatError::StreamMessageTooLarge { .. } => stats.limit_failures += 1,
         NetbatError::Runtime(_) => stats.runtime_failures += 1,
         NetbatError::Io { .. } | NetbatError::EmptyStream => {}
     }

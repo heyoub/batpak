@@ -186,11 +186,69 @@ rows:
 
   - id: NETBAT-2-STREAM-FRAMES
     title: NETBAT/2 subscription streaming frame layer
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/netbat/tests/stream_frame.rs::stream_frame_goldens_match_encoder
+      - crates/netbat/tests/stream_frame.rs::stream_frame_goldens_decode_to_expected_frames
+      - crates/netbat/tests/stream_frame.rs::stream_frame_encode_decode_roundtrip_for_all_variants
+      - crates/netbat/tests/stream_frame.rs::encoded_stream_frames_use_lowercase_hex
+      - crates/netbat/tests/stream_frame.rs::decode_line_rejects_netbat2_stream_frames_as_call_requests
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_rejects_netbat1_call_frames
+      - crates/netbat/tests/stream_frame.rs::red_unsupported_stream_protocol_version
+      - crates/netbat/tests/stream_frame.rs::red_unknown_stream_verb
+      - crates/netbat/tests/stream_frame.rs::red_wrong_field_count_and_invalid_subscription_id
+      - crates/netbat/tests/stream_frame.rs::red_zero_delivery_index_and_client_window
+      - crates/netbat/tests/stream_frame.rs::red_cursor_payload_and_message_limits
+      - crates/netbat/tests/stream_frame.rs::red_invalid_hex_and_reason_code_and_line_too_long
+      - crates/netbat/tests/stream_frame.rs::red_subscription_id_too_long_uses_typed_error
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_is_total_on_arbitrary_bytes
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_is_total_on_netbat2_prefix_plus_garbage
+      - crates/netbat/tests/stream_frame.rs::stream_frame_encoder_is_deterministic
+      - crates/netbat/tests/stream_frame.rs::stream_frame_roundtrip
+    proof_commands:
+      - just cargo test -p netbat stream
+
+  - id: S12-SUBSCRIPTION-RUNTIME-EVENTS
+    title: Subscription runtime event stream delivery (NETBAT/2 serving)
     status: INCOMPLETE
     terminal_required: true
     surface: netbat
     blocked_by:
-      - Packet B not started; runtime remains NETBAT/1 for calls
+      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+
+  - id: S12-SUBSCRIPTION-RUNTIME-PROJECTIONS
+    title: Subscription runtime projection stream delivery
+    status: INCOMPLETE
+    terminal_required: true
+    surface: netbat
+    blocked_by:
+      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+
+  - id: S12-SUBSCRIPTION-RUNTIME-OPERATION-STATUS
+    title: Subscription runtime operation-status stream delivery
+    status: INCOMPLETE
+    terminal_required: true
+    surface: netbat
+    blocked_by:
+      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+
+  - id: S12-SUBSCRIPTION-RUNTIME-RECEIPTS
+    title: Subscription runtime receipt stream delivery
+    status: INCOMPLETE
+    terminal_required: true
+    surface: netbat
+    blocked_by:
+      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+
+  - id: S12-SUBSCRIPTION-RUNTIME-ENTITY
+    title: Subscription runtime entity stream delivery
+    status: INCOMPLETE
+    terminal_required: true
+    surface: netbat
+    blocked_by:
+      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
 
   # ── Cloud-only proof batch ───────────────────────────────────────────────────
 

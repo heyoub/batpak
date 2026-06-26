@@ -63,10 +63,17 @@ pub use route::{
 // syncbat directly.
 pub use syncbat::{OperationName, OperationNameError};
 pub use transport::{
-    decode_hex, decode_hex_str, decode_line, dispatch_frame, encode_hex, encode_hex_into,
-    encode_hex_str, encode_request, encode_response, serve_stream, serve_tcp_listener, IoTimeouts,
-    Limits, NetbatError, RequestFrame, ResponseFrame, ShutdownHandle, TcpServeStats,
-    TcpServerConfig, CALL_VERB, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_INPUT_BYTES,
-    DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_OPERATION_NAME_BYTES, DEFAULT_MAX_OUTPUT_BYTES,
-    DEFAULT_MAX_REQUESTS_PER_CONNECTION, LINE_PROTOCOL_VERSION, PROTOCOL_PREFIX,
+    decode_hex, decode_hex_str, decode_line, decode_stream_line, dispatch_frame, encode_hex,
+    encode_hex_into, encode_hex_str, encode_request, encode_response, encode_stream_frame,
+    serve_stream, serve_tcp_listener, ClientWindow, CursorBytes, DeliveryIndex, IoTimeouts, Limits,
+    MaybeCursor, NetbatError, PayloadSchemaRef, RequestFrame, ResponseFrame, ShutdownHandle,
+    StreamFrame, StreamReasonCode, SubAckFrame, SubCancelFrame, SubEndFrame, SubErrFrame,
+    SubEventFrame, SubWatermarkFrame, SubscribeFrame, SubscriptionToken, TcpServeStats,
+    TcpServerConfig, CALL_VERB, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_CURSOR_BYTES,
+    DEFAULT_MAX_INPUT_BYTES, DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_OPERATION_NAME_BYTES,
+    DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_REQUESTS_PER_CONNECTION,
+    DEFAULT_MAX_STREAM_ERROR_MESSAGE_BYTES, DEFAULT_MAX_STREAM_PAYLOAD_BYTES,
+    DEFAULT_MAX_SUBSCRIPTION_ID_BYTES, LINE_PROTOCOL_VERSION, PROTOCOL_PREFIX,
+    STREAM_PROTOCOL_VERSION, SUBSCRIBE_VERB, SUB_ACK_VERB, SUB_CANCEL_VERB, SUB_END_VERB,
+    SUB_ERR_VERB, SUB_EVENT_VERB, SUB_WATERMARK_VERB,
 };

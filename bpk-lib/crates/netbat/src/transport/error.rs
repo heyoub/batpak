@@ -49,6 +49,31 @@ pub enum NetbatError {
     },
     /// syncbat rejected the checkout.
     Runtime(syncbat::RuntimeError),
+    /// NETBAT/2 stream frame was malformed.
+    MalformedStreamFrame {
+        /// Stable malformed-stream reason.
+        reason: &'static str,
+    },
+    /// Subscription id exceeded the configured byte limit.
+    SubscriptionIdTooLong {
+        /// Configured byte limit.
+        max: usize,
+    },
+    /// Decoded cursor bytes exceeded the configured limit.
+    CursorTooLarge {
+        /// Configured byte limit.
+        max: usize,
+    },
+    /// Decoded stream payload exceeded the configured limit.
+    StreamPayloadTooLarge {
+        /// Configured byte limit.
+        max: usize,
+    },
+    /// Decoded SUB_ERR message exceeded the configured limit.
+    StreamMessageTooLarge {
+        /// Configured byte limit.
+        max: usize,
+    },
 }
 
 impl fmt::Display for NetbatError {
@@ -69,6 +94,17 @@ impl fmt::Display for NetbatError {
             Self::InputTooLarge { max } => write!(f, "input exceeded {max} bytes"),
             Self::OutputTooLarge { max } => write!(f, "output exceeded {max} bytes"),
             Self::Runtime(error) => write!(f, "runtime error: {error}"),
+            Self::MalformedStreamFrame { reason } => write!(f, "malformed stream frame: {reason}"),
+            Self::SubscriptionIdTooLong { max } => {
+                write!(f, "subscription id exceeded {max} bytes")
+            }
+            Self::CursorTooLarge { max } => write!(f, "cursor exceeded {max} bytes"),
+            Self::StreamPayloadTooLarge { max } => {
+                write!(f, "stream payload exceeded {max} bytes")
+            }
+            Self::StreamMessageTooLarge { max } => {
+                write!(f, "stream error message exceeded {max} bytes")
+            }
         }
     }
 }
@@ -106,6 +142,11 @@ impl NetbatError {
             Self::OperationNameTooLong { .. } => "operation_name_too_long",
             Self::InputTooLarge { .. } => "input_too_large",
             Self::OutputTooLarge { .. } => "output_too_large",
+            Self::MalformedStreamFrame { .. } => "malformed_stream_frame",
+            Self::SubscriptionIdTooLong { .. } => "subscription_id_too_long",
+            Self::CursorTooLarge { .. } => "cursor_too_large",
+            Self::StreamPayloadTooLarge { .. } => "stream_payload_too_large",
+            Self::StreamMessageTooLarge { .. } => "stream_message_too_large",
             Self::Runtime(syncbat::RuntimeError::UnknownOperation { .. }) => "unknown_operation",
             Self::Runtime(syncbat::RuntimeError::MissingHandler { .. }) => "missing_handler",
             Self::Runtime(syncbat::RuntimeError::Handler { .. }) => "handler",
