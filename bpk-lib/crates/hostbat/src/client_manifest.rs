@@ -4,8 +4,9 @@ use serde::Serialize;
 
 use crate::host::Host;
 use crate::schema::{GoldenVector, SchemaDescriptor};
+use crate::subscription::{SubscriptionDescriptor, SubscriptionSource, SUBSCRIPTION_WIRE_REQUIRES};
 
-const CLIENT_MANIFEST_VERSION: u16 = 1;
+const CLIENT_MANIFEST_VERSION: u16 = 2;
 const NETBAT_VERSION: &str = "NETBAT/1";
 const CANONICAL_ENCODING_KIND: &str = "named-field-msgpack";
 /// Stable wire-encoding contract version — NOT the `rmp-serde` crate patch, so a
@@ -29,8 +30,10 @@ const WIRE_ENCODING_CONTRACT_VERSION: &str = "v1";
 pub struct ClientManifest {
     /// Manifest schema version for this hostbat client projection.
     pub manifest_version: u16,
-    /// Wire protocol version understood by generated clients.
+    /// Wire protocol version understood by generated clients for callable operations.
     pub netbat_version: &'static str,
+    /// Streaming transport required to serve declared subscriptions (not yet implemented).
+    pub subscription_wire_requires: &'static str,
     /// Hostbat crate version that emitted this manifest.
     pub hostbat_version: &'static str,
     /// Canonical byte encoding used by golden vectors.
@@ -39,6 +42,8 @@ pub struct ClientManifest {
     pub interface_fingerprint_hex: String,
     /// Exported operations in canonical operation-name order.
     pub operations: Vec<ClientManifestOperation>,
+    /// Exported subscriptions in canonical `(module-id, subscription-id)` order.
+    pub subscriptions: Vec<ClientManifestSubscription>,
     /// Exported schemas in canonical `(id, version, role)` order.
     pub schemas: Vec<ClientManifestSchema>,
 }
@@ -57,6 +62,12 @@ impl ClientManifest {
                 receipt_kind: descriptor.receipt_kind().to_owned(),
             })
             .collect();
+        let subscriptions = host
+            .subscriptions()
+            .map(|(module_id, descriptor)| {
+                ClientManifestSubscription::from_descriptor(module_id, descriptor)
+            })
+            .collect();
         let schemas = host
             .composition_schemas()
             .schemas()
@@ -65,6 +76,7 @@ impl ClientManifest {
         Self {
             manifest_version: CLIENT_MANIFEST_VERSION,
             netbat_version: NETBAT_VERSION,
+            subscription_wire_requires: SUBSCRIPTION_WIRE_REQUIRES,
             hostbat_version: env!("CARGO_PKG_VERSION"),
             canonical_encoding: ClientManifestEncoding {
                 kind: CANONICAL_ENCODING_KIND,
@@ -72,6 +84,7 @@ impl ClientManifest {
             },
             interface_fingerprint_hex: host.interface_fingerprint().to_hex(),
             operations,
+            subscriptions,
             schemas,
         }
     }
@@ -101,6 +114,49 @@ pub struct ClientManifestOperation {
     pub output_schema_ref: String,
     /// Receipt kind emitted by this operation.
     pub receipt_kind: String,
+}
+
+/// Subscription exported to generated clients.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientManifestSubscription {
+    /// Owning module id.
+    pub module_id: String,
+    /// Globally unique subscription id.
+    pub id: String,
+    /// Source axis for the subscription stream.
+    pub source: SubscriptionSource,
+    /// Referenced payload schema id.
+    pub payload_schema_ref: String,
+    /// Required payload schema role spelling.
+    pub payload_schema_role: String,
+    /// Declared delivery semantics spelling.
+    pub delivery: String,
+    /// Declared backpressure policy kind.
+    pub backpressure_kind: String,
+    /// Bounded-queue capacity when applicable.
+    pub backpressure_capacity: Option<u32>,
+}
+
+impl ClientManifestSubscription {
+    fn from_descriptor(module_id: &str, descriptor: &SubscriptionDescriptor) -> Self {
+        let backpressure = descriptor.backpressure();
+        let (backpressure_kind, backpressure_capacity) = match backpressure {
+            crate::subscription::BackpressurePolicy::BoundedQueue { capacity } => {
+                (backpressure.kind().to_owned(), Some(capacity))
+            }
+        };
+        Self {
+            module_id: module_id.to_owned(),
+            id: descriptor.id().as_str().to_owned(),
+            source: descriptor.source().clone(),
+            payload_schema_ref: descriptor.payload_schema_ref().to_owned(),
+            payload_schema_role: descriptor.required_payload_role().as_str().to_owned(),
+            delivery: descriptor.delivery().as_str().to_owned(),
+            backpressure_kind,
+            backpressure_capacity,
+        }
+    }
 }
 
 /// Schema exported to generated clients.

@@ -44,12 +44,13 @@ pub mod interface;
 pub mod manifest;
 pub mod module;
 pub mod schema;
+pub mod subscription;
 pub mod supervisor;
 
 pub use builder::HostBuilder;
 pub use client_manifest::{
     ClientManifest, ClientManifestEncoding, ClientManifestGoldenVector, ClientManifestOperation,
-    ClientManifestSchema,
+    ClientManifestSchema, ClientManifestSubscription,
 };
 pub use composition::{CompositionSchema, HostCompositionManifest};
 pub use descriptor::{GuardDescriptor, HookDescriptor, HookPhase, JobDescriptor};
@@ -61,5 +62,10 @@ pub use module::{HostModule, HostModuleBuilder, JobBody, LifecycleHook};
 pub use schema::{
     CanonicalEncoding, DiagnosticRustType, GoldenVector, SchemaDescriptor, SchemaId,
     SchemaRegistry, SchemaRole, SchemaVersion,
+};
+pub use subscription::{
+    BackpressurePolicy, EventCategory, OperationStatusSelector, ProjectionId, ReceiptFilter,
+    SubscriptionDelivery, SubscriptionDescriptor, SubscriptionId, SubscriptionSource,
+    SUBSCRIPTION_WIRE_REQUIRES,
 };
 pub use supervisor::Supervisor;

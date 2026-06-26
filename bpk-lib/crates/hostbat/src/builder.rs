@@ -26,6 +26,7 @@ use crate::identity::{canonical_digest, HostFingerprint};
 use crate::interface::compute_interface_fingerprint;
 use crate::module::{BoxedJob, HostModule, HostModuleParts};
 use crate::schema::{SchemaRegistry, SchemaRole};
+use crate::subscription::SubscriptionDescriptor;
 
 type BoxedGuard = Box<dyn AdmissionGuard + 'static>;
 type BoxedHandler = Box<dyn Handler + 'static>;
@@ -43,6 +44,7 @@ pub struct HostBuilder {
     operation_effect_rows: BTreeMap<String, OperationEffectRow>,
     receipt_namespaces: BTreeMap<String, String>,
     job_owners: BTreeMap<String, String>,
+    subscription_owners: BTreeMap<String, String>,
     schemas: CompositionSchemaBuilder,
     spawn: Arc<dyn Spawn>,
     receipt_sink: Option<BoxedReceiptSink>,
@@ -58,6 +60,7 @@ impl Default for HostBuilder {
             operation_effect_rows: BTreeMap::new(),
             receipt_namespaces: BTreeMap::new(),
             job_owners: BTreeMap::new(),
+            subscription_owners: BTreeMap::new(),
             schemas: CompositionSchemaBuilder::default(),
             spawn: Arc::new(ThreadSpawn),
             receipt_sink: None,
@@ -167,6 +170,19 @@ impl HostBuilder {
                 });
             }
         }
+        for descriptor in parts.manifest.subscriptions() {
+            let subscription_id = descriptor.id().as_str().to_owned();
+            if self
+                .subscription_owners
+                .insert(subscription_id.clone(), id.clone())
+                .is_some()
+            {
+                return Err(HostError::DuplicateSubscriptionId {
+                    id: subscription_id,
+                    module: id,
+                });
+            }
+        }
         // Aggregate this module's schemas into the composition, failing closed on
         // a cross-module identity collision with a differing canonical encoding.
         for descriptor in parts.manifest.schemas() {
@@ -191,6 +207,7 @@ impl HostBuilder {
 
         let fingerprint = compute_fingerprint(&self.modules)?;
         let composition_schemas = self.schemas.seal()?;
+        validate_subscription_payload_schemas(&self.modules, &composition_schemas)?;
         let interface_fingerprint =
             compute_interface_fingerprint(&self.modules, &composition_schemas)?;
         let schema_registry = SchemaRegistry::from_descriptors(
@@ -206,6 +223,7 @@ impl HostBuilder {
         let mut shutdown: Vec<HostHook> = Vec::new();
         let mut job_factories: BTreeMap<String, BoxedJob> = BTreeMap::new();
         let mut operation_descriptors: Vec<OperationDescriptor> = Vec::new();
+        let mut subscriptions: Vec<(String, SubscriptionDescriptor)> = Vec::new();
 
         for parts in self.modules {
             let HostModuleParts {
@@ -242,6 +260,9 @@ impl HostBuilder {
             for (kind, body) in jobs {
                 job_factories.insert(kind, body);
             }
+            for descriptor in manifest.subscriptions() {
+                subscriptions.push((module_id.clone(), descriptor.clone()));
+            }
         }
 
         if !guard.is_empty() {
@@ -259,6 +280,10 @@ impl HostBuilder {
         startup.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
         shutdown.sort_by(|a, b| a.order_key().cmp(&b.order_key()));
         operation_descriptors.sort_by(|a, b| a.name().cmp(b.name()));
+        subscriptions.sort_by(|(a_id, a), (b_id, b)| {
+            a_id.cmp(b_id)
+                .then_with(|| a.id().as_str().cmp(b.id().as_str()))
+        });
 
         let core = core_builder.build()?;
         Ok(Host::new(HostParts {
@@ -267,6 +292,7 @@ impl HostBuilder {
             fingerprint,
             interface_fingerprint,
             operations: operation_descriptors,
+            subscriptions,
             composition_schemas,
             schema_registry,
             startup,
@@ -274,6 +300,42 @@ impl HostBuilder {
             job_factories,
         }))
     }
+}
+
+fn validate_subscription_payload_schemas(
+    modules: &[HostModuleParts],
+    composition_schemas: &crate::composition::HostCompositionManifest,
+) -> Result<(), HostError> {
+    for parts in modules {
+        let module_id = parts.manifest.id();
+        for descriptor in parts.manifest.subscriptions() {
+            let role = descriptor.required_payload_role();
+            let reference = descriptor.payload_schema_ref();
+            let matches = composition_schemas
+                .schemas()
+                .filter_map(|entry| {
+                    let schema = entry.descriptor();
+                    if schema.id().as_str() == reference && schema.role() == role {
+                        Some(schema)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [_descriptor] => {}
+                _ => {
+                    return Err(HostError::SubscriptionPayloadSchemaMissing {
+                        module: module_id.to_owned(),
+                        subscription: descriptor.id().as_str().to_owned(),
+                        reference: reference.to_owned(),
+                        role: role.as_str().to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 struct SchemaValidatingHandler {
