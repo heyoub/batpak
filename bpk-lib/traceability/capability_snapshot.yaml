@@ -74,6 +74,7 @@ aspiration_floor:
   - { backend: windows, kind: NetworkAllowList, enforcement: Mediated, evidence: [DeniedAttempts, NetworkActivity] }
   - { backend: windows, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
   - { backend: windows, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
+split_manifest:
 witnesses:
   - { id: INV-ALLOW-IS-DESIGN, witnessed: true }
   - { id: INV-BATCH-ATOMIC-VISIBILITY, witnessed: true }

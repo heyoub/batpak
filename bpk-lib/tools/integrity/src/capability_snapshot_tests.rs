@@ -33,6 +33,40 @@ fn render_parse_round_trips() {
 }
 
 #[test]
+fn split_manifest_validates_replacement_cells() {
+    let mut snapshot = derived();
+    let replacement = snapshot
+        .aspiration_floor
+        .iter()
+        .find(|cell| cell.backend == "linux")
+        .expect("linux floor row exists")
+        .kind
+        .clone();
+    snapshot.split_manifest.push(SplitManifestRow {
+        backend: "linux".to_string(),
+        from_kind: "AggregateCapability".to_string(),
+        to_kinds: vec![replacement],
+        reason: "split-for-test".to_string(),
+    });
+    assert_mirror(&render(&snapshot), &derived())
+        .expect("valid split manifest row is preserved and mirror-compatible");
+
+    let mut invalid = snapshot.clone();
+    invalid
+        .split_manifest
+        .first_mut()
+        .expect("split row exists")
+        .to_kinds = vec!["MissingReplacement".to_string()];
+    let err = assert_mirror(&render(&invalid), &derived())
+        .expect_err("split manifest pointing at a missing replacement must fail");
+    assert!(
+        err.to_string().contains("split_manifest")
+            && err.to_string().contains("MissingReplacement"),
+        "got: {err}"
+    );
+}
+
+#[test]
 fn derived_floor_is_non_empty_and_covers_every_backend() {
     let snapshot = derived();
     assert!(

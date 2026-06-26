@@ -616,6 +616,40 @@ fn removed_capability_row_is_l4() {
 }
 
 #[test]
+fn capability_split_manifest_prevents_false_removed_row_downgrade() {
+    let mut diff =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,3 @@\n");
+    diff.push_str("-  - { backend: linux, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, from: ChildSpawn, to: [ChildSpawnAllowDescendants, ChildSpawnDenyNewTasks], reason: split-child-spawn }\n");
+    assert!(
+        classify_weakening(&diff, &l4_manifest()).is_empty(),
+        "an enforcement-preserving declared split must not look like a removed-row downgrade"
+    );
+
+    let mut missing_replacement =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,2 @@\n");
+    missing_replacement.push_str(
+        "-  - { backend: linux, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }\n",
+    );
+    missing_replacement.push_str(
+        "+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }\n",
+    );
+    missing_replacement.push_str(
+        "+  - { backend: linux, from: ChildSpawn, to: [ChildSpawnAllowDescendants, ChildSpawnDenyNewTasks], reason: split-child-spawn }\n",
+    );
+    let findings = classify_weakening(&missing_replacement, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("row removed")),
+        "a split manifest without all replacement rows must still flag the removed row; got {findings:?}"
+    );
+}
+
+#[test]
 fn removed_evidence_claim_errs() {
     let diff = cap_diff(
         "  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }",
