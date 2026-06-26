@@ -98,6 +98,7 @@ witnesses:
   - { id: INV-DELIVERY-AT-LEAST-ONCE-WITNESS, witnessed: true }
   - { id: INV-DEPENDENCY-DIRECTION, witnessed: true }
   - { id: INV-DOCS-CATALOG-VIEW-CURRENT, witnessed: true }
+  - { id: INV-DST-CORPUS-CURRENCY, witnessed: true }
   - { id: INV-DST-RECOVERY-LEGAL, witnessed: true }
   - { id: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT, witnessed: true }
   - { id: INV-EVENTKIND-PARSE-ROUNDTRIP, witnessed: true }
@@ -105,6 +106,7 @@ witnesses:
   - { id: INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH, witnessed: true }
   - { id: INV-FAULT-INJECT-GATED, witnessed: true }
   - { id: INV-FENCE-CANCELLED-STAYS-HIDDEN, witnessed: true }
+  - { id: INV-FORK-CRASH-ATOMIC, witnessed: true }
   - { id: INV-FORK-HOSTILE-FS-REFUSAL, witnessed: true }
   - { id: INV-FORK-ISOLATION, witnessed: true }
   - { id: INV-FRONTIER-APPEND-GATE-HONORED, witnessed: true }

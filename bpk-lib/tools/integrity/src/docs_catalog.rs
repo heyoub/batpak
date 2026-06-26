@@ -327,7 +327,11 @@ pub(crate) fn check_witness_tests(
 /// or a `fn fn_name` that appears inside a `proptest!{...}` macro body (which
 /// expands into a `#[test]` fn syn cannot see directly). A plain non-`#[test]`
 /// `fn` is intentionally REJECTED so the strong tier proves a real test.
-fn file_declares_test_fn(cache: &mut SourceCache, path: &Path, fn_name: &str) -> Result<bool> {
+pub(crate) fn file_declares_test_fn(
+    cache: &mut SourceCache,
+    path: &Path,
+    fn_name: &str,
+) -> Result<bool> {
     let parsed = cache.parse_rust(path)?;
     Ok(item_test_fns_match(&parsed.items, fn_name))
 }

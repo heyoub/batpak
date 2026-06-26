@@ -142,6 +142,13 @@ pub(crate) fn run() -> Result<()> {
 
     crate::receipts::run_gate("overclaim", || crate::overclaim::check(&repo_root))?;
 
+    crate::receipts::run_gate("release-status", || {
+        crate::release_status::check(
+            &repo_root,
+            &crate::release_status::ReleaseCheckOptions::structural(),
+        )
+    })?;
+
     // repo-ir-fitness (D9): fold the BLOCKING fitnesses over the live repo-IR and
     // additionally assert every seam glob PARSED from seam_registry.yaml resolves
     // to a tracked file. A finding fails the run — the IR is a real gate now, not

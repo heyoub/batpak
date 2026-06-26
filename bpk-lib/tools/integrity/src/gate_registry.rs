@@ -565,6 +565,14 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    Gate {
+        slug: "release-status",
+        red_fixture_test: Some(
+            "tools/integrity/src/release_status_tests.rs::release_status_strict_rejects_incomplete_terminal_row",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
     // --- D9 repo-IR fitness gate (GAUNTLET-REPO-IR, blocking, qualified
     //     GateNegativePath). The fitness runner is no longer advisory: `repo_ir::check`
     //     folds the blocking fitnesses over the live IR and asserts every seam glob
@@ -645,6 +653,7 @@ pub(crate) const RECEIPT_REQUIRED_GATES: &[&str] = &[
     "perf-gates-contract",
     "structural-source-lints",
     "overclaim",
+    "release-status",
     "repo-ir-fitness",
 ];
 

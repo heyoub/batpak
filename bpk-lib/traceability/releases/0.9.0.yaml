@@ -1,0 +1,243 @@
+# release 0.9.0 — terminal status ledger (Truth Gate program board).
+#
+# Each row is a release milestone or blocker with a terminal status:
+#   PROVEN | FAIL-CLOSED | WAIVED | FAULT-INJECTED | INCOMPLETE
+#
+# Normal `just inspect` validates schema + witness references + `justifies:` headers.
+# Strict release mode (`just seal`, `cargo xtask release --dry-run`) additionally
+# requires every `terminal_required: true` row to reach a terminal status.
+#
+# Row IDs use stable track prefixes (not version numbers):
+#   STORE-* GAUNTLET-* S12-* NETBAT-* BVISOR-* CLOUD-* CUT-*
+
+release: "0.9.0"
+active: true
+
+rows:
+  # ── Store / gauntlet loose-thread cut (batpak release surface) ─────────────
+
+  - id: STORE-FORK-CRASH-ATOMIC
+    title: Fork crash-atomicity offensive witness (INV-FORK-CRASH-ATOMIC)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-FORK-CRASH-ATOMIC
+    witness_tests:
+      - crates/core/tests/fork_under_fault.rs::fork_under_fault_is_legal_and_deterministic
+    proof_commands:
+      - just inspect
+
+  - id: STORE-FORK-HOSTILE-FS
+    title: Fork hostile destination refusal (symlink/ENOSPC/canonicalize)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-FORK-HOSTILE-FS-REFUSAL
+    witness_tests:
+      - crates/core/tests/fork_hostile_fs.rs::fork_enospc_mid_copy_publishes_nothing
+
+  - id: STORE-IMPORT-CRASH-IDEMPOTENT
+    title: Import survives StoreFs crash and re-import deduplicates
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-IMPORT-CRASH-IDEMPOTENT
+    witness_tests:
+      - crates/core/tests/import_under_fault.rs::import_under_fault_crash_reimport_deduplicates
+
+  - id: STORE-IMPORT-NO-RUNAWAY
+    title: Same-store import terminates at call-time ceiling
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-IMPORT-NO-RUNAWAY
+    witness_tests:
+      - crates/core/tests/import_same_store_ceiling.rs::same_store_import_terminates_under_segment_rotation
+
+  - id: STORE-64C-HYBRID-MUTATION
+    title: L4 mutation kill-test uses graduated DST corpus sweep (#64-C)
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+      - writer-commit
+    blocked_by:
+      - lanes.rs HYBRID MODE HOOK still deferred
+      - dst_coverage false for fork/import seams
+    notes: Corpus engine exists; hybrid mutation lane not wired.
+
+  - id: STORE-DST-FORK-IMPORT-CORPUS
+    title: Graduated corpus covers fork-isolation and import-reapply seams
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    blocked_by:
+      - seam_registry.yaml dst_coverage false for fork/import
+    notes: Add corpus seeds + flip dst_coverage when replay proofs exist.
+
+  - id: STORE-68-EXAMPLE-DEDUP
+    title: Full #68 example dedup (one canonical runnable per concept)
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    blocked_by:
+      - cross_crate_payloads still canonical in concept_catalog.yaml
+      - durability cluster not consolidated to two canonical examples
+    notes: Gap-fill examples exist; full dedup not done.
+
+  - id: STORE-LOOSE-EQUIV-MUTANT-AUDIT
+    title: Re-audit fork/import equivalent mutants after offensive fixtures
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    blocked_by:
+      - cloud mutation lane not re-run post-offensive fixtures
+
+  # ── Gauntlet / integrity meta (done locally) ───────────────────────────────
+
+  - id: GAUNTLET-WITNESS-CATALOG
+    title: Every catalog INV declares a resolved witness_test
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-INVARIANT-WITNESS-TEST
+    witness_gates:
+      - invariant-bridge
+
+  - id: GAUNTLET-OVERCLAIM
+    title: Over-claim detector (gate/doc/name-vs-behavior triangulation)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_gates:
+      - overclaim
+
+  - id: GAUNTLET-TRIANGULATION
+    title: Workspace DAG + dependency-direction oracles
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-WORKSPACE-DAG-ACYCLIC
+      - INV-DEPENDENCY-DIRECTION
+    witness_tests:
+      - tools/integrity/src/triangulation_tests.rs::live_workspace_crate_graph_is_acyclic_and_oracles_agree
+      - tools/integrity/src/triangulation_tests.rs::dependency_direction_rejects_upward_edge
+
+  - id: GAUNTLET-RELEASE-STATUS
+    title: Release terminal-status ledger gate (this board)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_gates:
+      - release-status
+    witness_tests:
+      - tools/integrity/src/release_status_tests.rs::committed_release_ledger_passes_structural_validation
+
+  # ── S12 hostbat / subscriptions / schema (not started) ─────────────────────
+
+  - id: S12-P1-SUBSCRIPTION-DESCRIPTORS
+    title: hostbat subscription descriptor types + module registration
+    status: INCOMPLETE
+    terminal_required: true
+    surface: hostbat
+    blocked_by:
+      - Packet A not started
+
+  - id: S12-P1-H-INTERFACE-SUBSCRIPTIONS
+    title: Subscriptions folded into H_interface / client manifest
+    status: INCOMPLETE
+    terminal_required: true
+    surface: hostbat
+    blocked_by:
+      - depends on S12-P1-SUBSCRIPTION-DESCRIPTORS
+
+  - id: S12-P3C-STRUCTURAL-SCHEMA
+    title: Language-neutral structural schema validation descriptors
+    status: INCOMPLETE
+    terminal_required: true
+    surface: hostbat
+    blocked_by:
+      - Packet D not started
+
+  - id: NETBAT-2-STREAM-FRAMES
+    title: NETBAT/2 subscription streaming frame layer
+    status: INCOMPLETE
+    terminal_required: true
+    surface: netbat
+    blocked_by:
+      - Packet B not started; runtime remains NETBAT/1 for calls
+
+  # ── Cloud-only proof batch ───────────────────────────────────────────────────
+
+  - id: CLOUD-MUTATION-PHASE4
+    title: Repo-wide mutation smoke confirms Phase4 floor (75%)
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    blocked_by:
+      - cloud lane only; D3 survivor cure pending
+
+  - id: CLOUD-SEAM-SMOKE-85
+    title: fork-isolation + import-reapply critical seams ≥85% on cloud
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+
+  # ── Cut ceremony ─────────────────────────────────────────────────────────────
+
+  - id: CUT-VERSION-091
+    title: Version 0.8.3 → 0.9.0 in all member manifests
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    blocked_by:
+      - explicit owner say-so for cut
+
+  - id: CUT-CHANGELOG
+    title: CHANGELOG [Unreleased] → [0.9.0]
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+
+  - id: CUT-PUBLIC-API-SEAL
+    title: Regenerate and strict-check traceability/public_api/batpak.txt
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+
+  - id: CUT-PUBLISH-TAG
+    title: Chain publish + tag after cloud proof green
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    blocked_by:
+      - requires CUT-* rows + CLOUD-* rows PROVEN
+
+  # ── bvisor platform matrix (kitchen-sink 0.9.0; publish=false ≠ out of scope) ─
+
+  - id: BVISOR-PLATFORM-MATRIX
+    title: Platform backend terminal statuses (PROVEN/FAIL-CLOSED/WAIVED per cell)
+    status: INCOMPLETE
+    terminal_required: true
+    surface: bvisor
+    notes: Blocking for 0.9.0; bvisor ships unpublished but must reach terminal matrix cells.
