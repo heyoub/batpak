@@ -114,7 +114,7 @@ pub(crate) fn run(sim: &Sim, steps: usize) -> Result<u64, String> {
                 let handle = sim.scheduler.spawn_owned(Box::new(move || {
                     // Pure body: its only effect is having run; the digest
                     // folds the token so the spawn is observable.
-                    let _ = token;
+                    std::hint::black_box(token);
                 }));
                 let joined = handle.join().is_ok();
                 digest = fold(fold(digest, token), u64::from(joined));

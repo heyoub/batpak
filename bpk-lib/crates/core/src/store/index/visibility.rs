@@ -179,7 +179,7 @@ impl SequenceGate {
     pub(crate) fn park_for_visibility_change(&self, since_epoch: u64, timeout: Duration) {
         let mut guard = self.visibility_wakeup.0.lock();
         if self.visibility_epoch.load(Ordering::Acquire) == since_epoch {
-            let _ = self.visibility_wakeup.1.wait_for(&mut guard, timeout);
+            let _timeout_state = self.visibility_wakeup.1.wait_for(&mut guard, timeout);
         }
     }
 

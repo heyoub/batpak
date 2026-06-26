@@ -128,8 +128,9 @@ fn clear_fork_store_artifacts(
         }
         let is_dir = fs
             .symlink_metadata(&path)
-            .map(|meta| meta.file_type().is_dir())
-            .unwrap_or(false);
+            .map_err(StoreError::Io)?
+            .file_type()
+            .is_dir();
         if is_dir {
             removed += usize::from(remove_dir_all_if_present(&path)?);
         } else {

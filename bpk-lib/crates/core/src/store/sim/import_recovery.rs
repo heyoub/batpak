@@ -52,9 +52,11 @@ pub(crate) fn run_seeded_import_fault(seed: u64) -> Result<ImportFaultOutcome, S
         let coord = Coordinate::new(entity, "scope:import")
             .map_err(|e| format!("seed=0x{seed:X}: coord: {e}"))?;
         for i in 0..event_count {
-            let _ = source
-                .append(&coord, kind, &serde_json::json!({ "n": i }))
-                .map_err(|e| format!("seed=0x{seed:X}: source append: {e}"))?;
+            drop(
+                source
+                    .append(&coord, kind, &serde_json::json!({ "n": i }))
+                    .map_err(|e| format!("seed=0x{seed:X}: source append: {e}"))?,
+            );
         }
         source
             .close()

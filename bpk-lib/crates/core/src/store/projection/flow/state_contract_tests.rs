@@ -83,6 +83,7 @@ fn unspecified_projection_contract_is_rejected() -> TestResult {
         matches!(err, StoreError::ProjectionStateContractUnspecified { .. }),
         "PROPERTY: unspecified projection contract must fail with the exact state-contract error, got {err:?}"
     );
+    store.close()?;
     Ok(())
 }
 
@@ -106,5 +107,6 @@ fn projection_exceeding_declared_state_bound_is_rejected() -> TestResult {
         matches!(err, StoreError::ProjectionStateBoundExceeded { .. }),
         "PROPERTY: over-bound projection must fail with the exact state-bound error, got {err:?}"
     );
+    store.close()?;
     Ok(())
 }

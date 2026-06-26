@@ -792,10 +792,12 @@ mod tests {
         );
 
         drop(lifecycle);
-        let _ = done_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("append completes after lifecycle gate opens")
-            .expect("append succeeds");
+        drop(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("append completes after lifecycle gate opens")
+                .expect("append succeeds"),
+        );
         worker.join().expect("append worker joins");
     }
 
@@ -836,9 +838,11 @@ mod tests {
         }
 
         // DATA still appends successfully through the same funnel.
-        let _ = store
-            .append(&coord, EventKind::DATA, &payload)
-            .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard");
+        drop(
+            store
+                .append(&coord, EventKind::DATA, &payload)
+                .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard"),
+        );
 
         store.close().expect("close store");
     }

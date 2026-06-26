@@ -79,6 +79,10 @@ struct MaybeStaleGenerationCounter {
 
 impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: batpak::prelude::ProjectionStateContract =
+        batpak::prelude::ProjectionStateContract::single_entity(
+            "projection-cache-freshness-generation-counter",
+        );
 
     fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -92,6 +96,10 @@ impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
 
     fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
         &[MAYBE_STALE_GENERATION_KIND]
+    }
+
+    fn state_extent(&self) -> batpak::prelude::StateExtent {
+        batpak::prelude::StateExtent::single_entity()
     }
 }
 

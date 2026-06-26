@@ -56,7 +56,7 @@ fn append_close_completed_event(store: &Store<Open>) -> Result<(), StoreError> {
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
     store.writer_handle()?.pump();
-    let _ = crate::store::recv_writer_reply(&rx)?;
+    drop(crate::store::recv_writer_reply(&rx)?);
     Ok(())
 }
 
@@ -84,12 +84,12 @@ pub(crate) fn close(mut store: Store<Open>) -> Result<Closed, StoreError> {
     }
 
     let (tx, rx) = flume::bounded(1);
-    store
-        .writer_handle()?
+    let writer = store.writer_handle()?;
+    writer
         .tx
         .send(crate::store::write::writer::WriterCommand::Shutdown { respond: tx })
         .map_err(|_| StoreError::WriterCrashed)?;
-    store.writer_handle()?.pump();
+    writer.pump();
     let result = crate::store::recv_writer_reply(&rx);
 
     result?;

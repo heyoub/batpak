@@ -407,13 +407,15 @@ mod tests {
         let coord = Coordinate::new("watch:startup-race", "watch:scope").expect("coord");
         let sub = store.subscribe_lossy(&crate::coordinate::Region::entity("watch:startup-race"));
 
-        let _ = store
-            .append(
-                &coord,
-                EventKind::custom(0xF, 1),
-                &serde_json::json!({"n": 1}),
-            )
-            .expect("append");
+        drop(
+            store
+                .append(
+                    &coord,
+                    EventKind::custom(0xF, 1),
+                    &serde_json::json!({"n": 1}),
+                )
+                .expect("append"),
+        );
 
         let mut watcher = ProjectionWatcher::<CountAll>::new(
             sub,

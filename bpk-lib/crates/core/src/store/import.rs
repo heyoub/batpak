@@ -486,9 +486,11 @@ mod tests {
 
         let coord = Coordinate::new("entity:prov:wrapper", "scope:import").expect("coord");
         let kind = EventKind::custom(0xF, 0x8A);
-        let _ = source
-            .append(&coord, kind, &serde_json::json!({"n": 1}))
-            .expect("source append");
+        drop(
+            source
+                .append(&coord, kind, &serde_json::json!({"n": 1}))
+                .expect("source append"),
+        );
 
         // Drive a real import so the source event is genuinely re-applied.
         let options = ImportOptions::new("source-prov-wrapper").expect("options");

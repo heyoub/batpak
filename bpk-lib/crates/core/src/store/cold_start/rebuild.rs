@@ -37,6 +37,10 @@ const NO_FAULT_INJECTOR: FaultInjectorRef<'static> = {
     }
 };
 
+#[cfg(not(feature = "dangerous-test-hooks"))]
+#[inline]
+fn disabled_fault_injection_input<T>(_value: T) {}
+
 mod load_status;
 mod report;
 mod topology;
@@ -425,7 +429,7 @@ fn scanned_entries_from_sidx_footer(
         fault_injector,
     )?;
     #[cfg(not(feature = "dangerous-test-hooks"))]
-    let _ = fault_injector;
+    disabled_fault_injection_input(fault_injector);
     match crate::store::segment::sidx::read_footer(path) {
         Ok(Some((entries, strings))) => {
             let mut scanned = Vec::with_capacity(entries.len());
@@ -623,7 +627,7 @@ fn inject_scan_frame(
     }
     #[cfg(not(feature = "dangerous-test-hooks"))]
     {
-        let _ = (fault_injector, segment_id, offset, this_frame);
+        disabled_fault_injection_input((fault_injector, segment_id, offset, this_frame));
     }
     Ok(())
 }

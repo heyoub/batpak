@@ -28,6 +28,8 @@ pub struct MaybeStaleCounter {
 
 impl batpak::prelude::EventSourced for MaybeStaleCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: batpak::prelude::ProjectionStateContract =
+        batpak::prelude::ProjectionStateContract::single_entity("testkit-projection-cache-counter");
 
     fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
         Some(MaybeStaleCounter {
@@ -39,5 +41,8 @@ impl batpak::prelude::EventSourced for MaybeStaleCounter {
     }
     fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
         &[]
+    }
+    fn state_extent(&self) -> batpak::prelude::StateExtent {
+        batpak::prelude::StateExtent::single_entity()
     }
 }
