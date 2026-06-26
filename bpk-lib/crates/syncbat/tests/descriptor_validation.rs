@@ -2,15 +2,20 @@
 //! CATCHES: invalid operation names and schema/receipt references before catalog or runtime insertion.
 //! SEEDED: fixed descriptor-token tables.
 
-use syncbat::{Core, EffectClass, HandlerResult, Module, OperationDescriptor, Register};
+use syncbat::{
+    Core, EffectClass, HandlerResult, Module, OperationDescriptor, OperationEffectRow, Register,
+};
 
-const VALID: OperationDescriptor = OperationDescriptor::new(
-    "repo.patch",
-    EffectClass::Persist,
-    "schema.repo.patch.input.v1",
-    "schema.repo.patch.output.v1",
-    "receipt.repo.patch.v1",
-);
+fn valid_descriptor() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "repo.patch",
+        EffectClass::Persist,
+        "schema.repo.patch.input.v1",
+        "schema.repo.patch.output.v1",
+        "receipt.repo.patch.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.repo.patch.v1"))
+}
 
 fn descriptor_with_name(name: &'static str) -> OperationDescriptor {
     OperationDescriptor::new(
@@ -44,7 +49,8 @@ fn descriptor_validation_accepts_stable_ascii_tokens() {
         "schema.repo.patch-v1_test.input",
         "schema.repo.patch-v1_test.output",
         "receipt.repo.patch-v1_test",
-    );
+    )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.repo.patch-v1_test"));
 
     descriptor.validate().expect("descriptor is valid");
     Register::from_operations([descriptor]).expect("register accepts descriptor");
@@ -116,7 +122,7 @@ fn module_validation_rejects_invalid_module_names() {
         "bad.",
         "bad..module",
     ] {
-        let err = Module::from_operations(name, [VALID])
+        let err = Module::from_operations(name, [valid_descriptor()])
             .map(|_| ())
             .expect_err(&format!("expected module rejection for {name:?}"));
 

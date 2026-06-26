@@ -25,6 +25,14 @@ fn descriptor(
     SchemaDescriptor::new(id(id_str), SchemaVersion(version), role, golden).expect("descriptor")
 }
 
+fn canonical_fixture(value: &str) -> Vec<u8> {
+    batpak::canonical::to_bytes(&value).expect("fixture encodes")
+}
+
+fn invalid_canonical_fixture() -> Vec<u8> {
+    vec![0xc1]
+}
+
 // ---- schema id grammar --------------------------------------------------
 
 #[test]
@@ -265,6 +273,72 @@ fn diagnostic_rust_type_is_non_load_bearing() {
         "the diagnostic type is still recorded (informational), just not identity",
     );
     assert!(failures.is_empty(), "{failures:?}");
+}
+
+// ---- runtime registry validation ---------------------------------------
+
+#[test]
+fn schema_registry_accepts_canonical_payload_for_resolved_descriptor() {
+    let descriptor = descriptor(
+        "hostbat.op.echo.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("nominal", canonical_fixture("golden"))],
+    );
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = canonical_fixture("payload");
+
+    registry
+        .validate("hostbat.op.echo.in", SchemaRole::OperationInput, &payload)
+        .expect("canonical payload validates");
+}
+
+#[test]
+fn schema_registry_rejects_payload_that_is_not_canonical_bytes() {
+    let descriptor = descriptor(
+        "hostbat.op.echo.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("nominal", canonical_fixture("golden"))],
+    );
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let invalid = invalid_canonical_fixture();
+    let outcome = registry.validate("hostbat.op.echo.in", SchemaRole::OperationInput, &invalid);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "non-canonical payload bytes must fail closed with SchemaValidation"
+    );
+}
+
+#[test]
+fn schema_registry_rejects_bad_golden_vector_on_validation() {
+    let descriptor = descriptor(
+        "hostbat.op.echo.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("bad", invalid_canonical_fixture())],
+    );
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = canonical_fixture("payload");
+    let outcome = registry.validate("hostbat.op.echo.in", SchemaRole::OperationInput, &payload);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "a descriptor with a non-canonical golden vector must fail validation"
+    );
+}
+
+#[test]
+fn schema_registry_rejects_missing_schema_ref() {
+    let registry = SchemaRegistry::default();
+    let payload = canonical_fixture("payload");
+    let outcome = registry.validate("hostbat.missing", SchemaRole::OperationInput, &payload);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "missing schema descriptors must fail closed"
+    );
 }
 
 // ---- descriptor coherence -----------------------------------------------

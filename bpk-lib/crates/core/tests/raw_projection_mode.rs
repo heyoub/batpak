@@ -32,6 +32,8 @@ struct ValueCounter {
 
 impl EventSourced for ValueCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-mode-value-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -54,6 +56,10 @@ impl EventSourced for ValueCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +70,8 @@ struct RawCounter {
 
 impl EventSourced for RawCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-mode-raw-counter");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -85,6 +93,10 @@ impl EventSourced for RawCounter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

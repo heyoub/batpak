@@ -20,6 +20,8 @@ struct BenchCounter {
 
 impl EventSourced for BenchCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-unified-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -40,6 +42,10 @@ impl EventSourced for BenchCounter {
     }
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

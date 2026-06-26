@@ -31,6 +31,8 @@ struct ValueIncrementalCounter {
 
 impl EventSourced for ValueIncrementalCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-incremental-value-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -58,6 +60,10 @@ impl EventSourced for ValueIncrementalCounter {
     fn supports_incremental_apply() -> bool {
         true
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 impl MatrixCounterState for ValueIncrementalCounter {
@@ -74,6 +80,8 @@ struct RawIncrementalCounter {
 
 impl EventSourced for RawIncrementalCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-incremental-raw-counter");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -100,6 +108,10 @@ impl EventSourced for RawIncrementalCounter {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

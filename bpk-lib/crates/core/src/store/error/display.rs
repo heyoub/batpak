@@ -72,6 +72,9 @@ impl StoreError {
             | Self::WriterCrashed
             | Self::WaitTimeout { .. }
             | Self::CacheFailed(_)
+            | Self::ProjectionStateContractUnspecified { .. }
+            | Self::ProjectionStateExtentUnavailable { .. }
+            | Self::ProjectionStateBoundExceeded { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
             | Self::PlatformProfileInvalid { .. }
@@ -171,6 +174,9 @@ impl StoreError {
             | Self::WriterCrashed
             | Self::WaitTimeout { .. }
             | Self::CacheFailed(_)
+            | Self::ProjectionStateContractUnspecified { .. }
+            | Self::ProjectionStateExtentUnavailable { .. }
+            | Self::ProjectionStateBoundExceeded { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
             | Self::PlatformProfileInvalid { .. }
@@ -209,6 +215,59 @@ impl StoreError {
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => Ok(()),
         }
+    }
+
+    fn fmt_projection_state_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::ProjectionStateContractUnspecified { projection } = self {
+            return write!(
+                f,
+                "projection {projection} was refused because it did not declare a state growth contract"
+            );
+        }
+        if let Self::ProjectionStateExtentUnavailable {
+            projection,
+            declared,
+            actual,
+        } = self
+        {
+            return write!(
+                f,
+                "projection {projection} was refused because bounded contract {declared:?} requires a measurable state extent; actual={actual:?}"
+            );
+        }
+        if let Self::ProjectionStateBoundExceeded {
+            projection,
+            declared,
+            actual,
+        } = self
+        {
+            return write!(
+                f,
+                "projection {projection} exceeded declared state bound {declared:?}; actual={actual:?}"
+            );
+        }
+        Ok(())
+    }
+
+    fn fmt_platform_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::PlatformProfileInvalid { path, kind } = self {
+            return write!(
+                f,
+                "platform profile at {} is invalid: {kind}",
+                path.display()
+            );
+        }
+        if let Self::PlatformProfileMismatch { path, reason } = self {
+            return write!(
+                f,
+                "platform profile at {} does not match current platform evidence: {reason}",
+                path.display()
+            );
+        }
+        if let Self::PlatformAdmissionFailed { capability, reason } = self {
+            return write!(f, "platform admission failed for {capability}: {reason}");
+        }
+        Ok(())
     }
 }
 
@@ -256,6 +315,9 @@ impl std::fmt::Display for StoreError {
                 "wait for {watermark:?} watermark to reach {target:?} timed out after {waited_ms}ms"
             ),
             Self::CacheFailed(e) => write!(f, "cache error: {e}"),
+            Self::ProjectionStateContractUnspecified { .. }
+            | Self::ProjectionStateExtentUnavailable { .. }
+            | Self::ProjectionStateBoundExceeded { .. } => self.fmt_projection_state_violation(f),
             Self::SequenceGateViolation {
                 operation,
                 requested,
@@ -266,19 +328,9 @@ impl std::fmt::Display for StoreError {
                 "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
             ),
             Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
-            Self::PlatformProfileInvalid { path, kind } => write!(
-                f,
-                "platform profile at {} is invalid: {kind}",
-                path.display()
-            ),
-            Self::PlatformProfileMismatch { path, reason } => write!(
-                f,
-                "platform profile at {} does not match current platform evidence: {reason}",
-                path.display()
-            ),
-            Self::PlatformAdmissionFailed { capability, reason } => {
-                write!(f, "platform admission failed for {capability}: {reason}")
-            }
+            Self::PlatformProfileInvalid { .. }
+            | Self::PlatformProfileMismatch { .. }
+            | Self::PlatformAdmissionFailed { .. } => self.fmt_platform_violation(f),
             Self::EventPayloadRegistry(error) => write!(f, "{error}"),
             Self::IdempotencyRequired => write!(
                 f,

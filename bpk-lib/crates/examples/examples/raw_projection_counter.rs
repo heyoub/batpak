@@ -38,6 +38,8 @@ struct RawCounterState {
 
 impl EventSourced for RawCounterState {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-counter-example");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -62,6 +64,10 @@ impl EventSourced for RawCounterState {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[INCREMENTED, DECREMENTED]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

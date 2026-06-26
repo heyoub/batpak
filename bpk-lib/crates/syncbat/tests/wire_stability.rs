@@ -2,7 +2,8 @@
 //! CATCHES: MessagePack byte drift in syncbat receipt envelopes and durable catalog rows.
 //! SEEDED: deterministic descriptors, fixed hashes, and sorted extension drawers.
 use syncbat::{
-    EffectClass, OperationDescriptor, ReceiptEnvelope, ReceiptOutcome, RegisterOperationRowV1,
+    EffectClass, OperationDescriptor, OperationEffectRow, ReceiptEnvelope, ReceiptOutcome,
+    RegisterOperationRowV1,
 };
 
 const RECEIPT_ENVELOPE_COMPLETED_HEX: &str = include_str!("golden/receipt_envelope_completed.hex");
@@ -24,6 +25,7 @@ fn descriptor() -> OperationDescriptor {
         "receipt.inventory.reserve.v1",
         "Reserve Inventory",
     )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.inventory.reserve.v1"))
 }
 
 #[test]

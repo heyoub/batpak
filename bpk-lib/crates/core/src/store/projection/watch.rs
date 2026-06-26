@@ -355,6 +355,8 @@ mod tests {
 
     impl EventSourced for CountAll {
         type Input = JsonValueInput;
+        const STATE_CONTRACT: crate::event::ProjectionStateContract =
+            crate::event::ProjectionStateContract::single_entity("projection-watch-count-all");
 
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             (!events.is_empty()).then_some(Self(events.len() as u64))
@@ -366,6 +368,10 @@ mod tests {
 
         fn relevant_event_kinds() -> &'static [EventKind] {
             &[]
+        }
+
+        fn state_extent(&self) -> crate::event::StateExtent {
+            crate::event::StateExtent::single_entity()
         }
     }
 

@@ -26,6 +26,8 @@ struct BenchProjection {
 
 impl EventSourced for BenchProjection {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-evidence-report-projection");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -41,6 +43,10 @@ impl EventSourced for BenchProjection {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 0x51)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

@@ -30,6 +30,15 @@ use batpak_testkit::small_store as small_store_support;
 use bounded_blocking::blocking;
 use small_store_support::small_segment_store;
 
+const COUNTER_STATE_CONTRACT: batpak::event::ProjectionStateContract =
+    batpak::event::ProjectionStateContract::Bounded {
+        key_space: "derive-parity-counter",
+        max_cardinality: 1,
+        retention_policy: "single aggregate per entity",
+        compaction_policy: "projection cache overwrite",
+        checkpoint_policy: "projection cache",
+    };
+
 // ─── Payload types shared across all parity variants ─────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EventPayload)]
@@ -55,6 +64,7 @@ struct HandCounter {
 
 impl batpak::event::EventSourced for HandCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: batpak::event::ProjectionStateContract = COUNTER_STATE_CONTRACT;
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -93,12 +103,16 @@ impl batpak::event::EventSourced for HandCounter {
         static KINDS: [EventKind; 2] = [Incremented::KIND, Decremented::KIND];
         &KINDS
     }
+
+    fn state_extent(&self) -> batpak::event::StateExtent {
+        batpak::event::StateExtent::cardinality(1, batpak::event::StateExtentCost::ConstantTime)
+    }
 }
 
 // ─── Derived projection (JSON lane) ──────────────────────────────────────────
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Incremented, handler = on_inc)]
 #[batpak(event = Decremented, handler = on_dec)]
 struct DerivedJson {
@@ -121,7 +135,7 @@ impl DerivedJson {
 // ─── Derived projection (raw msgpack lane) ───────────────────────────────────
 
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-#[batpak(input = RawMsgpackInput, cache_version = 0)]
+#[batpak(input = RawMsgpackInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Incremented, handler = on_inc)]
 #[batpak(event = Decremented, handler = on_dec)]
 struct DerivedRaw {
@@ -227,7 +241,7 @@ fn schema_version_derives_from_cache_version_not_type_id() {
     // change the projection's schema_version. This pins invariant 4:
     // cache_version (projection cache) ≠ type_id (wire identity).
     #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-    #[batpak(input = JsonValueInput, cache_version = 42)]
+    #[batpak(input = JsonValueInput, cache_version = 42, state_max_cardinality = 1)]
     #[batpak(event = Incremented, handler = on_inc)]
     struct Bumped {
         v: i64,

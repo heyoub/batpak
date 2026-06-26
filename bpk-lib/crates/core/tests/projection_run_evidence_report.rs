@@ -27,6 +27,8 @@ struct CounterProjection {
 
 impl EventSourced for CounterProjection {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("projection-run-evidence-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -42,6 +44,10 @@ impl EventSourced for CounterProjection {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 0x61)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

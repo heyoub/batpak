@@ -8,11 +8,23 @@ use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
+macro_rules! single_entity_state_contract {
+    ($key_space:literal) => {
+        const STATE_CONTRACT: crate::event::ProjectionStateContract =
+            crate::event::ProjectionStateContract::single_entity($key_space);
+
+        fn state_extent(&self) -> crate::event::StateExtent {
+            crate::event::StateExtent::single_entity()
+        }
+    };
+}
+
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct Counter;
 
 impl EventSourced for Counter {
     type Input = crate::event::JsonValueInput;
+    single_entity_state_contract!("projection-flow-counter");
 
     fn apply_event(&mut self, event: &Event<serde_json::Value>) {
         std::hint::black_box(event.event_kind());
@@ -451,6 +463,7 @@ fn incremental_projection_applies_events_after_cached_watermark() -> TestResult 
     }
     impl EventSourced for IncCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-incremental-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(IncCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -528,6 +541,7 @@ fn external_cache_path_full_replays_for_non_incremental_type() -> TestResult {
     }
     impl EventSourced for NonIncCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-non-incremental-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(NonIncCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -631,6 +645,7 @@ fn maybe_stale_external_cache_age_boundary_is_pinned() -> TestResult {
     }
     impl EventSourced for AgeCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-age-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(AgeCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -720,6 +735,7 @@ fn external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed(
     }
     impl EventSourced for FreshnessCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-freshness-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(FreshnessCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -818,6 +834,7 @@ fn ahead_of_disk_external_cache_row_is_not_served_on_freshness_path() -> TestRes
     }
     impl EventSourced for AheadCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-ahead-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(AheadCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),

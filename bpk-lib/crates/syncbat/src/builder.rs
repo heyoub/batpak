@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::admission::AdmissionGuard;
 use crate::core::Core;
+use crate::effect_backend::EffectBackend;
 use crate::error::BuildError;
 use crate::receipt::ReceiptHashPolicy;
 use crate::{handler, module, operation, receipt, register};
@@ -11,6 +12,7 @@ use crate::{handler, module, operation, receipt, register};
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
 type BoxedAdmissionGuard = Box<dyn AdmissionGuard + 'static>;
+type BoxedEffectBackend = Box<dyn EffectBackend + 'static>;
 
 /// Builder for [`Core`].
 ///
@@ -25,6 +27,7 @@ pub struct CoreBuilder {
     admission_guard: Option<BoxedAdmissionGuard>,
     receipt_sink: Option<BoxedReceiptSink>,
     receipt_hash_policy: ReceiptHashPolicy,
+    effect_backend: Option<BoxedEffectBackend>,
 }
 
 impl CoreBuilder {
@@ -217,6 +220,29 @@ impl CoreBuilder {
         self
     }
 
+    /// Configure the runtime-owned effect backend.
+    ///
+    /// Operations append events only through `Ctx`, which performs the append
+    /// through this backend. Without a backend bound, an `append_event` call from
+    /// a handler fails closed rather than reaching a store the runtime did not
+    /// mediate.
+    pub fn effect_backend<B>(&mut self, backend: B) -> &mut Self
+    where
+        B: EffectBackend + 'static,
+    {
+        self.effect_backend = Some(Box::new(backend));
+        self
+    }
+
+    /// Configure the effect backend from an already-boxed trait object.
+    ///
+    /// Equivalent to [`Self::effect_backend`] for a composition layer that holds
+    /// its backend as a trait object.
+    pub fn effect_backend_boxed(&mut self, backend: BoxedEffectBackend) -> &mut Self {
+        self.effect_backend = Some(backend);
+        self
+    }
+
     /// Build a runnable [`Core`].
     ///
     /// # Errors
@@ -240,6 +266,7 @@ impl CoreBuilder {
             admission_guard: self.admission_guard,
             receipt_sink: self.receipt_sink,
             receipt_hash_policy: self.receipt_hash_policy,
+            effect_backend: self.effect_backend,
         })
     }
 }

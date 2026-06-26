@@ -17,6 +17,8 @@ pub struct VersionedCounterV2 {
 
 impl EventSourced for VersionedCounterV2 {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("testkit-versioned-counter-v2");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -40,6 +42,10 @@ impl EventSourced for VersionedCounterV2 {
     fn schema_version() -> u64 {
         2
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 /// Like `AllCounter`, but opts into incremental apply so projection tests can
@@ -51,6 +57,8 @@ pub struct IncrementalCounter {
 
 impl EventSourced for IncrementalCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("testkit-incremental-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -73,5 +81,9 @@ impl EventSourced for IncrementalCounter {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }

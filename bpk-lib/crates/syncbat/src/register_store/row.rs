@@ -3,6 +3,7 @@
 use batpak::event::{EventKind, EventPayload};
 use serde::{Deserialize, Serialize};
 
+use crate::effect::OperationEffectRow;
 use crate::operation::{EffectClass, OperationDescriptor};
 
 use super::error::StoreRegisterCatalogError;
@@ -75,6 +76,9 @@ pub struct RegisterOperationRowV1 {
     pub output_schema_ref: String,
     /// Stable receipt kind.
     pub receipt_kind: String,
+    /// Fine-grained declared effect row.
+    #[serde(default, skip_serializing_if = "OperationEffectRow::is_empty")]
+    pub effect_row: OperationEffectRow,
 }
 
 impl EventPayload for RegisterOperationRowV1 {
@@ -95,6 +99,7 @@ impl RegisterOperationRowV1 {
             input_schema_ref: descriptor.input_schema_ref().to_owned(),
             output_schema_ref: descriptor.output_schema_ref().to_owned(),
             receipt_kind: descriptor.receipt_kind().to_owned(),
+            effect_row: descriptor.effect_row().clone(),
         }
     }
 
@@ -119,6 +124,7 @@ impl RegisterOperationRowV1 {
             input_schema_ref: String::new(),
             output_schema_ref: String::new(),
             receipt_kind: String::new(),
+            effect_row: OperationEffectRow::empty(),
         }
     }
 
@@ -162,7 +168,8 @@ impl RegisterOperationRowV1 {
             self.input_schema_ref.clone(),
             self.output_schema_ref.clone(),
             self.receipt_kind.clone(),
-        );
+        )
+        .with_effect_row(self.effect_row.clone());
         if let Some(title) = &self.title {
             descriptor = descriptor.with_owned_title(title.clone());
         }
@@ -178,5 +185,6 @@ impl RegisterOperationRowV1 {
             && self.input_schema_ref.is_empty()
             && self.output_schema_ref.is_empty()
             && self.receipt_kind.is_empty()
+            && self.effect_row.is_empty()
     }
 }

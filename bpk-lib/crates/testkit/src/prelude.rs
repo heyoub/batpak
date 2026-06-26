@@ -22,8 +22,8 @@ pub use batpak::event::{
     revalidate_event_payload_registry, validate_event_payload_registry, DecodeSource, DecodeTyped,
     Event, EventHeader, EventKind, EventKindError, EventPayload, EventPayloadKindCollision,
     EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain, JsonValueInput,
-    ProjectionEvent, ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
-    TypedDecodeError,
+    ProjectionEvent, ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput,
+    ReplayLane, StateExtent, StateExtentCost, StoredEvent, TypedDecodeError,
 };
 pub use batpak::guard::{Denial, Gate, GateSet, Receipt};
 pub use batpak::id::{CausationId, CorrelationId, EventId};

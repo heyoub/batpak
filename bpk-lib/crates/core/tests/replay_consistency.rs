@@ -18,6 +18,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("replay-consistency-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -31,6 +33,10 @@ impl EventSourced for Counter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

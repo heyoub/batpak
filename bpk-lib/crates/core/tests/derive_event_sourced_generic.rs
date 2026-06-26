@@ -26,7 +26,7 @@ struct Bumped {
 /// store requires of a projection payload field plus what `Default::default()`
 /// and serde replay need.
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Bumped, handler = on_bump)]
 struct Foo<T>
 where

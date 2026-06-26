@@ -3,6 +3,11 @@
 use std::collections::BTreeMap;
 
 use crate::admission::{AdmissionDecision, AdmissionGuard};
+use crate::effect::{
+    EventAppendHandle, EventReadHandle, HostControlHandle, OperationEffectRow,
+    ProjectionReadHandle, ReceiptEmitHandle,
+};
+use crate::effect_backend::EffectBackend;
 use crate::error::{ReceiptSinkHandlerCause, RuntimeError};
 use crate::receipt::{ReceiptHashPolicy, ReceiptMetadata, ReceiptOutcome, RecordedReceipt};
 use crate::{handler, operation, receipt};
@@ -10,6 +15,7 @@ use crate::{handler, operation, receipt};
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
 type BoxedAdmissionGuard = Box<dyn AdmissionGuard + 'static>;
+type BoxedEffectBackend = Box<dyn EffectBackend + 'static>;
 
 /// Composition root for a sync-first operation runtime.
 ///
@@ -23,6 +29,9 @@ pub struct Core {
     pub(crate) admission_guard: Option<BoxedAdmissionGuard>,
     pub(crate) receipt_sink: Option<BoxedReceiptSink>,
     pub(crate) receipt_hash_policy: ReceiptHashPolicy,
+    /// Runtime-owned capability backend that performs declared effects (event
+    /// appends) so observation through `Ctx` is authoritative.
+    pub(crate) effect_backend: Option<BoxedEffectBackend>,
 }
 
 impl Core {
@@ -109,7 +118,7 @@ impl Core {
         // One borrowed context spans the optional guard and the handler, so a
         // guard may stamp receipt metadata (e.g. correlation identity) that
         // survives into the handler's eventual receipt.
-        let mut ctx = Ctx::new(&descriptor);
+        let mut ctx = Ctx::new(&descriptor, self.effect_backend.as_deref_mut());
 
         // Pre-handler admission: a guard may DENY before the handler runs. This
         // is the only place `Core` dispatch emits `ReceiptOutcome::Denied`.
@@ -137,7 +146,26 @@ impl Core {
             RuntimeError::missing_handler(name)
         })?;
         let handler_result = handler.handle(&input, &mut ctx);
+        let observed_effects = ctx.observed_effects().clone();
         let metadata = ctx.into_metadata();
+
+        if let Some(violation) = observed_effects.first_violation_against(descriptor.effect_row()) {
+            tracing::warn!(
+                operation = %name,
+                code = %violation.code(),
+                message = %violation.message(),
+                outcome = "effect_denied",
+                "checkout denied by observed effect row",
+            );
+            let outcome = ReceiptOutcome::denied(violation.code(), violation.message());
+            self.record_runtime_receipt(&descriptor, &input, None, outcome, None, metadata)?;
+            tracing::Span::current().record("outcome", "effect_denied");
+            return Err(RuntimeError::denied(
+                name,
+                violation.code(),
+                violation.message(),
+            ));
+        }
 
         let output = match handler_result {
             Ok(output) => output,
@@ -306,13 +334,20 @@ impl Checkout {
 pub struct Ctx<'a> {
     descriptor: &'a operation::OperationDescriptor,
     metadata: ReceiptMetadata,
+    observed_effects: OperationEffectRow,
+    effect_backend: Option<&'a mut (dyn EffectBackend + 'static)>,
 }
 
 impl<'a> Ctx<'a> {
-    pub(crate) fn new(descriptor: &'a operation::OperationDescriptor) -> Self {
+    pub(crate) fn new(
+        descriptor: &'a operation::OperationDescriptor,
+        effect_backend: Option<&'a mut (dyn EffectBackend + 'static)>,
+    ) -> Self {
         Self {
             descriptor,
             metadata: ReceiptMetadata::default(),
+            observed_effects: OperationEffectRow::empty(),
+            effect_backend,
         }
     }
 
@@ -334,6 +369,42 @@ impl<'a> Ctx<'a> {
     /// receipt extensions.
     pub fn attach_local_extension(&mut self, key: impl Into<String>, value: impl Into<Vec<u8>>) {
         self.metadata.local.insert(key.into(), value.into());
+    }
+
+    /// Borrow an event-read capability handle for this invocation.
+    pub fn event_read_handle(&mut self) -> EventReadHandle<'_> {
+        EventReadHandle::new(&mut self.observed_effects)
+    }
+
+    /// Borrow an event-append capability handle for this invocation. This is the
+    /// only path to the runtime's event log; the handle performs the append and
+    /// records it so the observed row is authoritative.
+    pub fn event_append_handle(&mut self) -> EventAppendHandle<'_> {
+        EventAppendHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Borrow a projection-read capability handle for this invocation.
+    pub fn projection_read_handle(&mut self) -> ProjectionReadHandle<'_> {
+        ProjectionReadHandle::new(&mut self.observed_effects)
+    }
+
+    /// Borrow a receipt-emission capability handle for this invocation.
+    pub fn receipt_emit_handle(&mut self) -> ReceiptEmitHandle<'_> {
+        ReceiptEmitHandle::new(&mut self.observed_effects)
+    }
+
+    /// Borrow a host-control capability handle for this invocation.
+    pub fn host_control_handle(&mut self) -> HostControlHandle<'_> {
+        HostControlHandle::new(&mut self.observed_effects)
+    }
+
+    /// Effects observed so far through this invocation context.
+    #[must_use]
+    pub fn observed_effects(&self) -> &OperationEffectRow {
+        &self.observed_effects
     }
 
     pub(crate) fn into_metadata(self) -> ReceiptMetadata {

@@ -7,7 +7,7 @@
 //! SEEDED: a single deterministic store driven through every public submit path.
 
 use batpak::coordinate::{Coordinate, Region};
-use batpak::event::{Event, EventKind, EventSourced};
+use batpak::event::{Event, EventKind, EventSourced, ProjectionStateContract, StateExtent};
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
 use batpak::store::delivery::subscription::{ScanSubscriptionOps, SubscriptionOps};
 use batpak::store::Freshness;
@@ -34,6 +34,8 @@ struct CounterProjection {
 
 impl EventSourced for CounterProjection {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("control-plane-surface-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -56,6 +58,10 @@ impl EventSourced for CounterProjection {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

@@ -13,6 +13,8 @@ struct JsonCounter {
 
 impl EventSourced for JsonCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-replay-lanes-json-counter");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         if events.is_empty() {
@@ -30,6 +32,10 @@ impl EventSourced for JsonCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -40,6 +46,8 @@ struct RawCounter {
 
 impl EventSourced for RawCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-replay-lanes-raw-counter");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         if events.is_empty() {
@@ -57,6 +65,10 @@ impl EventSourced for RawCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

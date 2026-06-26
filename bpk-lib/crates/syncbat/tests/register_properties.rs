@@ -2,7 +2,7 @@
 //! CATCHES: duplicate operation names, lookup drift, and cache-register projection mismatch.
 //! SEEDED: fixed register descriptor sets.
 
-use syncbat::{EffectClass, OperationDescriptor, Register};
+use syncbat::{EffectClass, OperationDescriptor, OperationEffectRow, Register};
 
 const ALPHA: OperationDescriptor = OperationDescriptor::new(
     "alpha",
@@ -20,18 +20,21 @@ const BRAVO: OperationDescriptor = OperationDescriptor::new(
     "receipt.bravo.v1",
 );
 
-const CHARLIE: OperationDescriptor = OperationDescriptor::new(
-    "charlie",
-    EffectClass::Emit,
-    "schema.charlie.input.v1",
-    "schema.charlie.output.v1",
-    "receipt.charlie.v1",
-);
+fn charlie() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "charlie",
+        EffectClass::Emit,
+        "schema.charlie.input.v1",
+        "schema.charlie.output.v1",
+        "receipt.charlie.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().emits_receipt("receipt.charlie.v1"))
+}
 
 #[test]
 fn register_order_is_deterministic_independent_of_insertion_order() {
-    let left = Register::from_operations([CHARLIE, ALPHA, BRAVO]).expect("left register");
-    let right = Register::from_operations([BRAVO, CHARLIE, ALPHA]).expect("right register");
+    let left = Register::from_operations([charlie(), ALPHA, BRAVO]).expect("left register");
+    let right = Register::from_operations([BRAVO, charlie(), ALPHA]).expect("right register");
 
     assert_eq!(
         left.names().collect::<Vec<_>>(),
@@ -45,7 +48,7 @@ fn register_order_is_deterministic_independent_of_insertion_order() {
 
 #[test]
 fn cache_register_is_projection_equivalent_to_register() {
-    let register = Register::from_operations([CHARLIE, ALPHA, BRAVO]).expect("register");
+    let register = Register::from_operations([charlie(), ALPHA, BRAVO]).expect("register");
     let cache = syncbat::CacheRegister::from_register(&register);
 
     assert_eq!(cache.len(), register.len());

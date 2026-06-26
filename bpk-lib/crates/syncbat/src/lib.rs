@@ -64,6 +64,8 @@ pub extern crate self as syncbat;
 pub mod admission;
 pub mod builder;
 pub mod core;
+pub mod effect;
+pub mod effect_backend;
 pub mod error;
 pub mod handler;
 pub mod module;
@@ -72,12 +74,19 @@ pub mod operation_name;
 pub mod receipt;
 pub mod register;
 pub mod register_store;
+pub mod store_effect;
 pub mod store_sink;
 
 pub use admission::{AdmissionDecision, AdmissionGuard};
 pub use batpak_macros::operation;
 pub use builder::CoreBuilder;
 pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
+pub use effect::{
+    append_target, EffectIdentity, EffectIdentityError, EventAppendHandle, EventReadHandle,
+    HostControlHandle, ObservedEffectViolation, OperationEffectRow, ProjectionReadHandle,
+    ReceiptEmitHandle,
+};
+pub use effect_backend::{EffectBackend, EffectError};
 pub use error::{BuildError, ReceiptSinkHandlerCause, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
@@ -96,6 +105,7 @@ pub use register_store::{
     rebuild_register_from_store, RegisterOperationActionV1, RegisterOperationRowV1,
     StoreRegisterCatalog, StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
 };
+pub use store_effect::StoreEffectBackend;
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.

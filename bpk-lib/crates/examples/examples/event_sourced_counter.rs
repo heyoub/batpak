@@ -54,7 +54,7 @@ struct Decremented {
 //   - `schema_version` — from `cache_version` (projection cache invalidation
 //     only; unrelated to payload wire `type_id`).
 #[derive(Debug, Default, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Incremented, handler = on_incremented)]
 #[batpak(event = Decremented, handler = on_decremented)]
 struct CounterState {

@@ -56,6 +56,114 @@ pub type ProjectionPayload<T> = <<T as EventSourced>::Input as ProjectionInput>:
 /// Convenience alias for the event shape used by a projection type.
 pub type ProjectionEvent<T> = Event<ProjectionPayload<T>>;
 
+/// Declared memory-growth contract for a replayed projection state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ProjectionStateContract {
+    /// Projection state is bounded by a finite key space and cardinality.
+    Bounded {
+        /// Human-readable key-space name, such as `per-entity-counter`.
+        key_space: &'static str,
+        /// Maximum number of logical entries this projection may retain.
+        max_cardinality: u64,
+        /// Retention policy that keeps the state within the declared key space.
+        retention_policy: &'static str,
+        /// Compaction policy applied before or during checkpoint/cache writes.
+        compaction_policy: &'static str,
+        /// Checkpoint/cache policy used for this projection state.
+        checkpoint_policy: &'static str,
+    },
+    /// Projection is intentionally unbounded and carries a review record.
+    UnboundedDeclared {
+        /// Reason this projection cannot be bounded.
+        reason: &'static str,
+        /// Owner accountable for reviewing the unbounded state.
+        owner: &'static str,
+        /// Date or ticket reference for the next required review.
+        review_by: &'static str,
+    },
+    /// No growth contract was declared.
+    Unspecified,
+}
+
+impl ProjectionStateContract {
+    /// Builds a bounded projection contract.
+    pub const fn bounded(
+        key_space: &'static str,
+        max_cardinality: u64,
+        retention_policy: &'static str,
+        compaction_policy: &'static str,
+        checkpoint_policy: &'static str,
+    ) -> Self {
+        Self::Bounded {
+            key_space,
+            max_cardinality,
+            retention_policy,
+            compaction_policy,
+            checkpoint_policy,
+        }
+    }
+
+    /// Builds the common contract for one aggregate state object per entity.
+    pub const fn single_entity(key_space: &'static str) -> Self {
+        Self::bounded(
+            key_space,
+            1,
+            "single aggregate per entity",
+            "projection cache overwrite",
+            "projection cache",
+        )
+    }
+}
+
+/// Cost class for measuring a projection's current state extent.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum StateExtentCost {
+    /// Measurement is a fixed-cost field read.
+    ConstantTime,
+    /// Measurement is maintained incrementally as events are applied.
+    Incremental,
+    /// Measurement requires an expensive scan of the current state.
+    Expensive,
+    /// Measurement is only available at checkpoint/cache boundaries.
+    CheckpointOnly,
+    /// Measurement is not available.
+    Unavailable,
+}
+
+/// Current measured extent of a projection state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StateExtent {
+    /// Logical retained cardinality, when the projection can report it.
+    pub cardinality: Option<u64>,
+    /// Cost class for obtaining this extent.
+    pub cost: StateExtentCost,
+}
+
+impl StateExtent {
+    /// Builds an extent with a known logical cardinality.
+    pub const fn cardinality(cardinality: u64, cost: StateExtentCost) -> Self {
+        Self {
+            cardinality: Some(cardinality),
+            cost,
+        }
+    }
+
+    /// Builds an unavailable extent report.
+    pub const fn unavailable() -> Self {
+        Self {
+            cardinality: None,
+            cost: StateExtentCost::Unavailable,
+        }
+    }
+
+    /// Builds the common extent for a materialized single aggregate state.
+    pub const fn single_entity() -> Self {
+        Self::cardinality(1, StateExtentCost::ConstantTime)
+    }
+}
+
 /// `EventSourced`: backward-looking fold. Replay events to reconstruct state.
 ///
 /// The associated `Input` selects the replay decode lane. The default and
@@ -66,6 +174,9 @@ pub type ProjectionEvent<T> = Event<ProjectionPayload<T>>;
 pub trait EventSourced: Sized {
     /// Replay decode mode used for this projection.
     type Input: ProjectionInput;
+
+    /// Declared growth contract for this projection's materialized state.
+    const STATE_CONTRACT: ProjectionStateContract = ProjectionStateContract::Unspecified;
 
     /// Reconstructs state by folding over a slice of events.
     ///
@@ -99,6 +210,14 @@ pub trait EventSourced: Sized {
     /// from full replay.
     fn supports_incremental_apply() -> bool {
         false
+    }
+
+    /// Returns the current measured extent of the projection state.
+    ///
+    /// Bounded projections should make this cheap, preferably by maintaining
+    /// the value incrementally while applying events.
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::unavailable()
     }
 }
 

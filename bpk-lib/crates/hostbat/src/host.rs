@@ -11,13 +11,14 @@
 
 use std::collections::BTreeMap;
 
-use syncbat::{CheckoutResult, Core, RuntimeError};
+use syncbat::{CheckoutResult, Core, OperationDescriptor, RuntimeError};
 
 use crate::composition::HostCompositionManifest;
 use crate::descriptor::{HookDescriptor, HookPhase};
 use crate::error::{HookFailure, HostRuntimeError};
-use crate::identity::HostFingerprint;
+use crate::identity::{HostFingerprint, InterfaceFingerprint};
 use crate::module::{BoxedHook, BoxedJob};
+use crate::schema::SchemaRegistry;
 use crate::supervisor::Supervisor;
 
 /// One lifecycle hook bound to the module that owns it, ready to run in the
@@ -66,7 +67,10 @@ pub struct Host {
     core: Core,
     supervisor: Supervisor,
     fingerprint: HostFingerprint,
+    interface_fingerprint: InterfaceFingerprint,
+    operations: Vec<OperationDescriptor>,
     composition_schemas: HostCompositionManifest,
+    schema_registry: SchemaRegistry,
     startup: Vec<HostHook>,
     shutdown: Vec<HostHook>,
     job_factories: BTreeMap<String, BoxedJob>,
@@ -79,7 +83,10 @@ pub(crate) struct HostParts {
     pub(crate) core: Core,
     pub(crate) supervisor: Supervisor,
     pub(crate) fingerprint: HostFingerprint,
+    pub(crate) interface_fingerprint: InterfaceFingerprint,
+    pub(crate) operations: Vec<OperationDescriptor>,
     pub(crate) composition_schemas: HostCompositionManifest,
+    pub(crate) schema_registry: SchemaRegistry,
     pub(crate) startup: Vec<HostHook>,
     pub(crate) shutdown: Vec<HostHook>,
     pub(crate) job_factories: BTreeMap<String, BoxedJob>,
@@ -91,7 +98,10 @@ impl Host {
             core,
             supervisor,
             fingerprint,
+            interface_fingerprint,
+            operations,
             composition_schemas,
+            schema_registry,
             startup,
             shutdown,
             job_factories,
@@ -100,7 +110,10 @@ impl Host {
             core,
             supervisor,
             fingerprint,
+            interface_fingerprint,
+            operations,
             composition_schemas,
+            schema_registry,
             startup,
             shutdown,
             job_factories,
@@ -114,12 +127,29 @@ impl Host {
         self.fingerprint
     }
 
+    /// The client-visible interface fingerprint `H_interface`.
+    #[must_use]
+    pub fn interface_fingerprint(&self) -> InterfaceFingerprint {
+        self.interface_fingerprint
+    }
+
+    /// Operation descriptors in canonical operation-name order.
+    pub fn operations(&self) -> impl Iterator<Item = &OperationDescriptor> {
+        self.operations.iter()
+    }
+
     /// The content-addressed composition schema manifest aggregating every
     /// mounted module's schema descriptors (collision-checked at build). This is
     /// the surface S12's TypeScript codegen consumes.
     #[must_use]
     pub fn composition_schemas(&self) -> &HostCompositionManifest {
         &self.composition_schemas
+    }
+
+    /// Runtime schema registry used to validate operation input/output bytes.
+    #[must_use]
+    pub fn schema_registry(&self) -> &SchemaRegistry {
+        &self.schema_registry
     }
 
     /// Whether [`start`](Self::start) has completed successfully.

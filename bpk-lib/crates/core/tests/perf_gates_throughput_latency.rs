@@ -127,6 +127,8 @@ struct BenchCounter {
 
 impl EventSourced for BenchCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("perf-gates-bench-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -144,6 +146,10 @@ impl EventSourced for BenchCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

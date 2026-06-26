@@ -137,6 +137,7 @@
     - crates/syncbat/src/builder.rs
     - crates/syncbat/src/core.rs
     - crates/syncbat/src/error.rs
+    - crates/syncbat/src/effect.rs
     - crates/syncbat/src/handler.rs
     - crates/syncbat/src/module.rs
     - crates/syncbat/src/operation.rs
@@ -152,6 +153,7 @@
   kind: tests
   paths:
     - crates/syncbat/tests/descriptor_validation.rs
+    - crates/syncbat/tests/effect_enforcement.rs
     - crates/syncbat/tests/operation_macro.rs
     - crates/syncbat/tests/operation_macro_errors.rs
     - crates/syncbat/tests/receipt_namespace.rs

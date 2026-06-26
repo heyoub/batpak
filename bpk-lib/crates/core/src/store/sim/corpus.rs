@@ -346,11 +346,11 @@ fn parse_boundary(seed: u64, boundary: Option<&str>) -> Result<Option<Boundary>,
 ///
 /// This is the public, doc-hidden entry point the `dst_corpus_currency`
 /// integration gate uses to exercise the real graduation path
-/// ([`run_corpus_sweep`] → [`check_graduation_for`]) for honest-disk rows. A
+/// (`run_corpus_sweep` -> `check_graduation_for`) for honest-disk rows. A
 /// graduated seed's digest must equal the `op_trace_digest` recorded in the YAML.
 ///
 /// # Errors
-/// Returns the [`GraduationRefusal`] rendered as a string when the seed fails
+/// Returns the `GraduationRefusal` rendered as a string when the seed fails
 /// determinism, legality, or names an empty seam.
 pub fn graduate_corpus_seed(
     seed: u64,
@@ -421,7 +421,7 @@ pub fn graduate_corpus_cell(req: &GraduationRequest<'_>) -> Result<u64, String> 
 ///
 /// Public, doc-hidden entry point for the `dst_corpus_currency` integration gate.
 /// Each [`CorpusRowDescriptor`] mirrors a `traceability/dst_corpus.yaml` row.
-/// Drives [`assert_corpus_currency`] over reconstructed [`CorpusEntry`] rows,
+/// Drives `assert_corpus_currency` over reconstructed `CorpusEntry` rows,
 /// exercising both the digest and the outcome-label identity.
 ///
 /// # Errors

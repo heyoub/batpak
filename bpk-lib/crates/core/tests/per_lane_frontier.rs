@@ -23,6 +23,8 @@ struct FrontierCount {
 
 impl EventSourced for FrontierCount {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("per-lane-frontier-count");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -36,6 +38,10 @@ impl EventSourced for FrontierCount {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[EventKind::DATA]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

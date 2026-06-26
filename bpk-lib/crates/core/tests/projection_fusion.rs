@@ -18,6 +18,17 @@ const LEFT_KIND: EventKind = EventKind::custom(0xF, 51);
 const RIGHT_KIND: EventKind = EventKind::custom(0xF, 52);
 const NOISE_KIND: EventKind = EventKind::custom(0xF, 53);
 
+macro_rules! single_entity_state_contract {
+    ($key_space:literal) => {
+        const STATE_CONTRACT: ProjectionStateContract =
+            ProjectionStateContract::single_entity($key_space);
+
+        fn state_extent(&self) -> StateExtent {
+            StateExtent::single_entity()
+        }
+    };
+}
+
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct LeftCount {
     count: usize,
@@ -25,6 +36,7 @@ struct LeftCount {
 
 impl EventSourced for LeftCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("integration-fusion-left-count");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -46,6 +58,7 @@ struct LeftNone;
 
 impl EventSourced for LeftNone {
     type Input = JsonValueInput;
+    single_entity_state_contract!("integration-fusion-left-none");
 
     fn from_events(_events: &[ProjectionEvent<Self>]) -> Option<Self> {
         None
@@ -65,6 +78,7 @@ struct RightTotal {
 
 impl EventSourced for RightTotal {
     type Input = JsonValueInput;
+    single_entity_state_contract!("integration-fusion-right-total");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         let total = events
@@ -93,6 +107,7 @@ struct NoiseCount {
 
 impl EventSourced for NoiseCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("integration-fusion-noise-count");
 
     fn from_events(events: &[ProjectionEvent<Self>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {

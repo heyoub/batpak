@@ -52,10 +52,11 @@ fn syncbat_key(field: &str) -> ExtensionKey {
 }
 
 fn close_store(store: Arc<Store>) {
+    Store::sync(store.as_ref()).expect("sync store before close");
     let store = Arc::try_unwrap(store)
         .map_err(|_| ())
         .expect("expected test to release all Store references before close");
-    store.close().expect("close store");
+    drop(store);
 }
 
 #[test]

@@ -99,6 +99,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("observability-flows-counter");
 
     fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
         self.count += 1;
@@ -118,6 +120,10 @@ impl EventSourced for Counter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

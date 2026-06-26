@@ -27,10 +27,13 @@ use std::sync::Arc;
 
 use batpak::coordinate::Coordinate;
 use batpak::store::{Open, Store};
-use hostbat::{GuardDescriptor, HostError, HostModule};
+use hostbat::{
+    GoldenVector, GuardDescriptor, HostError, HostModule, SchemaDescriptor, SchemaId, SchemaRole,
+    SchemaVersion,
+};
 use syncbat::{
     AdmissionDecision, AdmissionGuard, Ctx, EffectClass, Handler, HandlerError, HandlerResult,
-    OperationDescriptor,
+    OperationDescriptor, OperationEffectRow,
 };
 
 use crate::contract::events::BoundaryReportEvent;
@@ -79,6 +82,24 @@ fn encode_report(report: &BoundaryReport) -> Result<Vec<u8>, String> {
     batpak::canonical::to_bytes(report).map_err(|error| error.to_string())
 }
 
+fn boundary_schema(
+    id: &'static str,
+    role: SchemaRole,
+    golden_label: &'static str,
+) -> Result<SchemaDescriptor, HostError> {
+    let golden_bytes =
+        batpak::canonical::to_bytes(&golden_label).map_err(|error| HostError::SchemaInvalid {
+            schema: id.to_owned(),
+            detail: format!("boundary golden fixture encoding failed: {error}"),
+        })?;
+    SchemaDescriptor::new(
+        SchemaId::new(id)?,
+        SchemaVersion(1),
+        role,
+        vec![GoldenVector::new("boundary", golden_bytes)],
+    )
+}
+
 /// Stable kebab-case denial class for each [`PlanError`]. Exhaustive: `PlanError`
 /// is defined in this crate, so its `#[non_exhaustive]` does not force a wildcard
 /// here — a new variant is a compile error until it is given a code.
@@ -92,6 +113,7 @@ fn plan_error_code(error: &PlanError) -> &'static str {
         PlanError::BudgetRefused { .. } => "budget-refused",
         PlanError::UnknownBackend { .. } => "unknown-backend",
         PlanError::ShadowDivergence { .. } => "shadow-divergence",
+        PlanError::InvalidPolicy { .. } => "invalid-policy",
     }
 }
 
@@ -185,7 +207,8 @@ pub fn boundary_module(config: BoundaryModuleConfig) -> Result<HostModule, HostE
         SPEC_SCHEMA_REF,
         REPORT_SCHEMA_REF,
         REPORT_RECEIPT_KIND,
-    );
+    )
+    .with_effect_row(OperationEffectRow::new().emits_receipt(REPORT_RECEIPT_KIND));
     HostModule::builder(BOUNDARY_MODULE_ID, 1)
         .operation(
             descriptor,
@@ -193,6 +216,21 @@ pub fn boundary_module(config: BoundaryModuleConfig) -> Result<HostModule, HostE
                 cx: Arc::clone(&cx),
             },
         )?
+        .schema(boundary_schema(
+            SPEC_SCHEMA_REF,
+            SchemaRole::OperationInput,
+            "bvisor-boundary-spec-v1",
+        )?)?
+        .schema(boundary_schema(
+            REPORT_SCHEMA_REF,
+            SchemaRole::OperationOutput,
+            "bvisor-boundary-report-v1",
+        )?)?
+        .schema(boundary_schema(
+            REPORT_RECEIPT_KIND,
+            SchemaRole::ReceiptPayload,
+            "bvisor-boundary-receipt-v1",
+        )?)?
         .guard(
             GuardDescriptor::new(BOUNDARY_GUARD_CODE),
             BoundaryGuard { cx },

@@ -23,7 +23,8 @@ pub use payload::{
 };
 pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,
-    ProjectionInput, ProjectionPayload, RawMsgpackInput, Reactive, ReplayLane, TypedReactive,
+    ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput, Reactive,
+    ReplayLane, StateExtent, StateExtentCost, TypedReactive,
 };
 pub use upcast::{Upcast, UpcastError};
 

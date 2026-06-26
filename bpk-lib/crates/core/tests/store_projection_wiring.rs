@@ -71,6 +71,8 @@ fn project_calls_prefetch_only_when_supported() {
 
     impl EventSourced for Counter {
         type Input = batpak::prelude::JsonValueInput;
+        const STATE_CONTRACT: ProjectionStateContract =
+            ProjectionStateContract::single_entity("store-projection-wiring-counter");
 
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(Counter {
@@ -84,6 +86,10 @@ fn project_calls_prefetch_only_when_supported() {
 
         fn relevant_event_kinds() -> &'static [EventKind] {
             &[]
+        }
+
+        fn state_extent(&self) -> StateExtent {
+            StateExtent::single_entity()
         }
     }
 

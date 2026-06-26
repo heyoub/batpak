@@ -14,6 +14,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-projection-latency-counter");
 
     fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
         self.count += 1;
@@ -34,6 +36,10 @@ impl EventSourced for Counter {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -43,6 +49,8 @@ struct CounterRaw {
 
 impl EventSourced for CounterRaw {
     type Input = batpak::prelude::RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-projection-latency-counter-raw");
 
     fn apply_event(&mut self, _event: &Event<Vec<u8>>) {
         self.count += 1;
@@ -62,6 +70,10 @@ impl EventSourced for CounterRaw {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

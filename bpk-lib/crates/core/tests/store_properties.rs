@@ -576,6 +576,8 @@ struct StrictCounter {
 
 impl EventSourced for StrictCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("store-properties-strict-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -595,6 +597,10 @@ impl EventSourced for StrictCounter {
         // Only cares about one kind, but receives all
         static KINDS: [EventKind; 1] = [EventKind::custom(1, 1)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

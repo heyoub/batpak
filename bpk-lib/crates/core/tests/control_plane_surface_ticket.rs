@@ -8,7 +8,7 @@
 //! SEEDED: a deterministic per-test store; scan parity seeds 10 + appends 10.
 
 use batpak::coordinate::{Coordinate, Region};
-use batpak::event::{Event, EventKind, EventSourced};
+use batpak::event::{Event, EventKind, EventSourced, ProjectionStateContract, StateExtent};
 use batpak::store::Freshness;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreError};
 use std::time::{Duration, Instant};
@@ -24,6 +24,8 @@ struct CounterProjection {
 
 impl EventSourced for CounterProjection {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("control-plane-ticket-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -46,6 +48,10 @@ impl EventSourced for CounterProjection {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

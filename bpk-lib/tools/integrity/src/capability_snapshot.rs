@@ -3,7 +3,7 @@
 //! claim NON-REGRESSABLE.
 //!
 //! THE LIABILITY THIS CLOSES. A backend's `support_matrix()` is the FAMILY
-//! ASPIRATION table: per [`RequirementKind`] it advertises an [`Enforcement`]
+//! ASPIRATION table: per `RequirementKind` it advertises an `Enforcement`
 //! grade (Enforced/Mediated/Unsupported) and the evidence it can witness. A
 //! consumer targeting a regulated industry reads that table as a CONTRACT. The
 //! catastrophic, owner-undetectable failure is a SILENT NERF: a "made it honest"

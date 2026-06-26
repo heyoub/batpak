@@ -18,7 +18,10 @@
 
 use batpak_testkit::durable_frontier_semantics as dfs_support;
 
-use batpak::prelude::{Event, EventKind, EventSourced, Freshness, JsonValueInput, Region};
+use batpak::prelude::{
+    Event, EventKind, EventSourced, Freshness, JsonValueInput, ProjectionStateContract, Region,
+    StateExtent,
+};
 use batpak::store::{
     CountdownAction, CountdownInjector, HlcPoint, InjectionPoint, Store, StoreConfig, StoreError,
 };
@@ -38,6 +41,8 @@ struct FrontierProjection {
 
 impl EventSourced for FrontierProjection {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("durable-frontier-projection");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -52,6 +57,10 @@ impl EventSourced for FrontierProjection {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 0x90)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

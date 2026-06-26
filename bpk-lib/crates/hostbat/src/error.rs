@@ -47,6 +47,14 @@ pub enum HostError {
         /// The id of the module that re-declared it.
         module: String,
     },
+    /// Two mounted modules redeclare an operation name with different
+    /// fine-grained effect authority.
+    EffectConflict {
+        /// The conflicted operation name.
+        operation: String,
+        /// The id of the module that re-declared it.
+        module: String,
+    },
     /// Two mounted modules claim the same receipt-extension namespace.
     DuplicateReceiptNamespace {
         /// The duplicated namespace.
@@ -98,6 +106,43 @@ pub enum HostError {
     /// allowed; this fires only on a byte divergence at a fixed identity. The
     /// payload is boxed to keep [`HostError`] small.
     SchemaCollision(Box<SchemaCollision>),
+    /// An operation descriptor references a schema id that the mounted
+    /// composition does not declare for the required role.
+    SchemaReferenceMissing {
+        /// Module containing the reference.
+        module: String,
+        /// Operation containing the reference, when the reference is operation-owned.
+        operation: Option<String>,
+        /// Referenced schema id.
+        reference: String,
+        /// Required role for the reference.
+        role: String,
+    },
+    /// An operation descriptor references a schema id with more than one
+    /// declared version for the required role. The v1 string-ref surface admits
+    /// only exact unique refs; callers must pick one id per version or move to a
+    /// future typed ref.
+    SchemaReferenceAmbiguous {
+        /// Module containing the reference.
+        module: String,
+        /// Operation containing the reference, when the reference is operation-owned.
+        operation: Option<String>,
+        /// Referenced schema id.
+        reference: String,
+        /// Required role for the reference.
+        role: String,
+        /// Versions found for the referenced id and role.
+        versions: Vec<u32>,
+    },
+    /// Runtime schema validation failed for canonical payload bytes.
+    SchemaValidation {
+        /// Schema id being validated.
+        schema: String,
+        /// Required schema role.
+        role: String,
+        /// Stable validation detail.
+        detail: String,
+    },
     /// `build` was called with no mounted modules — an empty host has no
     /// operations to serve and no identity to fingerprint.
     EmptyHost,
@@ -138,6 +183,12 @@ impl std::fmt::Display for HostError {
                 write!(
                     f,
                     "operation {operation:?} re-declared by module {module:?} is already mounted"
+                )
+            }
+            Self::EffectConflict { operation, module } => {
+                write!(
+                    f,
+                    "operation {operation:?} re-declared by module {module:?} has conflicting effect authority"
                 )
             }
             Self::DuplicateReceiptNamespace { namespace, module } => {
@@ -181,9 +232,48 @@ impl std::fmt::Display for HostError {
                     f,
                     "schema {schema:?} v{version} ({role}) declared with conflicting encodings: \
                      module {first_module:?} => {first_encoding}, \
-                     module {second_module:?} => {second_encoding}"
+                    module {second_module:?} => {second_encoding}"
                 )
             }
+            Self::SchemaReferenceMissing {
+                module,
+                operation,
+                reference,
+                role,
+            } => {
+                write!(
+                    f,
+                    "module {module:?} references missing schema {reference:?} for role {role}"
+                )?;
+                if let Some(operation) = operation {
+                    write!(f, " on operation {operation:?}")?;
+                }
+                Ok(())
+            }
+            Self::SchemaReferenceAmbiguous {
+                module,
+                operation,
+                reference,
+                role,
+                versions,
+            } => {
+                write!(
+                    f,
+                    "module {module:?} references ambiguous schema {reference:?} for role {role}; versions: {versions:?}"
+                )?;
+                if let Some(operation) = operation {
+                    write!(f, " on operation {operation:?}")?;
+                }
+                Ok(())
+            }
+            Self::SchemaValidation {
+                schema,
+                role,
+                detail,
+            } => write!(
+                f,
+                "schema validation failed for {schema:?} ({role}): {detail}"
+            ),
             Self::EmptyHost => write!(f, "cannot build a host with no mounted modules"),
             Self::Build(error) => write!(f, "lowering into the syncbat runtime failed: {error}"),
         }
@@ -196,6 +286,7 @@ impl std::error::Error for HostError {
             Self::Build(error) => Some(error),
             Self::DuplicateModuleId { .. }
             | Self::DuplicateOperation { .. }
+            | Self::EffectConflict { .. }
             | Self::DuplicateReceiptNamespace { .. }
             | Self::DuplicateJobKind { .. }
             | Self::ModuleHashMismatch { .. }
@@ -203,6 +294,9 @@ impl std::error::Error for HostError {
             | Self::CanonicalEncoding { .. }
             | Self::SchemaInvalid { .. }
             | Self::SchemaCollision(_)
+            | Self::SchemaReferenceMissing { .. }
+            | Self::SchemaReferenceAmbiguous { .. }
+            | Self::SchemaValidation { .. }
             | Self::EmptyHost => None,
         }
     }

@@ -198,8 +198,9 @@ pub enum RuntimeError {
         /// Handler-supplied error message.
         message: String,
     },
-    /// A pre-handler admission guard denied the invocation; the handler never
-    /// ran. The runtime records a `Denied` receipt before returning this.
+    /// Runtime policy denied the invocation. Admission guards and observed
+    /// effect-row enforcement both record a `Denied` receipt before returning
+    /// this variant.
     Denied {
         /// Operation name that was denied.
         name: String,
@@ -307,10 +308,7 @@ impl fmt::Display for RuntimeError {
                 code,
                 message,
             } => {
-                write!(
-                    f,
-                    "operation `{name}` denied by admission guard with {code}: {message}"
-                )
+                write!(f, "operation `{name}` denied with {code}: {message}")
             }
             Self::ReceiptSink {
                 name,

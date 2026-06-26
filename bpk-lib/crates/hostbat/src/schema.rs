@@ -18,6 +18,8 @@
 //! this is what replaces the `refbat::*` rust-type-path-as-identity model that
 //! broke when those types were deleted.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use crate::error::HostError;
@@ -241,6 +243,12 @@ pub struct SchemaDescriptor {
     encoding: CanonicalEncoding,
 }
 
+/// Runtime registry for resolving schema refs and validating canonical bytes.
+#[derive(Clone, Debug, Default)]
+pub struct SchemaRegistry {
+    by_ref: BTreeMap<(String, SchemaRole), Vec<SchemaDescriptor>>,
+}
+
 /// Domain-separated canonical view of a schema's identity-bearing shape. The
 /// [`DiagnosticRustType`] is intentionally absent — it is not identity.
 #[derive(Serialize)]
@@ -383,6 +391,123 @@ impl SchemaDescriptor {
         let mut bytes = self.encoding.0;
         bytes[0] ^= 0xff;
         self.encoding = CanonicalEncoding(bytes);
+    }
+}
+
+impl SchemaRegistry {
+    /// Build a registry from composition-resolved schema descriptors.
+    pub fn from_descriptors<I>(descriptors: I) -> Self
+    where
+        I: IntoIterator<Item = SchemaDescriptor>,
+    {
+        let mut by_ref = BTreeMap::<(String, SchemaRole), Vec<SchemaDescriptor>>::new();
+        for descriptor in descriptors {
+            by_ref
+                .entry((descriptor.id().as_str().to_owned(), descriptor.role()))
+                .or_default()
+                .push(descriptor);
+        }
+        for descriptors in by_ref.values_mut() {
+            descriptors.sort_by_key(|descriptor| descriptor.version().get());
+        }
+        Self { by_ref }
+    }
+
+    /// Validate bytes against the v1 runtime schema contract.
+    ///
+    /// This checks descriptor presence, unique schema ref resolution for the
+    /// requested role, descriptor encoding integrity, committed golden-vector
+    /// canonical decode, and payload canonical decode. It does not claim full
+    /// structural field/type validation until a descriptor carries a structural
+    /// validator.
+    ///
+    /// IMPORTANT: the payload check proves the bytes are well-formed canonical
+    /// MessagePack — it is schema-INDEPENDENT. Any canonical payload passes
+    /// regardless of `schema_id`; this verifies descriptor integrity + payload
+    /// well-formedness, NOT that the payload conforms to the schema's shape.
+    ///
+    /// # Errors
+    /// [`HostError::SchemaValidation`] if the schema cannot be resolved or the
+    /// bytes fail the v1 validation contract; [`HostError::CanonicalEncoding`]
+    /// if descriptor re-encoding fails.
+    pub fn validate(
+        &self,
+        schema_id: &str,
+        role: SchemaRole,
+        bytes: &[u8],
+    ) -> Result<(), HostError> {
+        let descriptor = self.resolve(schema_id, role)?;
+        if !descriptor.verify_encoding()? {
+            return Err(schema_validation(
+                schema_id,
+                role,
+                "descriptor encoding no longer matches its declared shape",
+            ));
+        }
+        for golden in descriptor.golden() {
+            decode_canonical(&golden.bytes).map_err(|detail| {
+                schema_validation(
+                    schema_id,
+                    role,
+                    format!(
+                        "golden vector {:?} is not canonical bytes: {detail}",
+                        golden.case
+                    ),
+                )
+            })?;
+        }
+        decode_canonical(bytes).map_err(|detail| {
+            schema_validation(
+                schema_id,
+                role,
+                format!("payload is not canonical bytes: {detail}"),
+            )
+        })
+    }
+
+    fn resolve(&self, schema_id: &str, role: SchemaRole) -> Result<&SchemaDescriptor, HostError> {
+        let Some(descriptors) = self.by_ref.get(&(schema_id.to_owned(), role)) else {
+            return Err(schema_validation(
+                schema_id,
+                role,
+                "required descriptor is not present",
+            ));
+        };
+        if descriptors.len() != 1 {
+            let versions: Vec<String> = descriptors
+                .iter()
+                .map(|descriptor| descriptor.version().get().to_string())
+                .collect();
+            return Err(schema_validation(
+                schema_id,
+                role,
+                format!(
+                    "schema ref is ambiguous across versions [{}]",
+                    versions.join(", ")
+                ),
+            ));
+        }
+        descriptors
+            .first()
+            .ok_or_else(|| schema_validation(schema_id, role, "required descriptor is not present"))
+    }
+}
+
+fn decode_canonical(bytes: &[u8]) -> Result<(), String> {
+    batpak::canonical::from_bytes::<serde::de::IgnoredAny>(bytes)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn schema_validation(
+    schema: impl Into<String>,
+    role: SchemaRole,
+    detail: impl Into<String>,
+) -> HostError {
+    HostError::SchemaValidation {
+        schema: schema.into(),
+        role: role.to_string(),
+        detail: detail.into(),
     }
 }
 

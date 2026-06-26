@@ -9,16 +9,18 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use syncbat::{AdmissionDecision, Ctx, EffectClass, HandlerResult, OperationDescriptor};
+use syncbat::{
+    AdmissionDecision, Ctx, EffectClass, HandlerResult, OperationDescriptor, OperationEffectRow,
+};
 
 use crate::descriptor::{GuardDescriptor, HookPhase};
 use crate::error::{HostError, HostRuntimeError};
 use crate::host::Host;
-use crate::module::HostModule;
+use crate::module::{HostModule, HostModuleBuilder};
 use crate::schema::{
     DiagnosticRustType, GoldenVector, SchemaDescriptor, SchemaId, SchemaRole, SchemaVersion,
 };
-use crate::HostBuilder;
+use crate::{ClientManifest, HostBuilder};
 
 fn op(name: &'static str) -> OperationDescriptor {
     OperationDescriptor::new(
@@ -30,18 +32,85 @@ fn op(name: &'static str) -> OperationDescriptor {
     )
 }
 
+fn op_with_row(name: &'static str, row: OperationEffectRow) -> OperationDescriptor {
+    op(name).with_effect_row(row)
+}
+
 /// An echo handler: returns its input unchanged.
 fn echo(input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
     Ok(input.to_vec())
 }
 
+fn canonical_bytes(value: &str) -> Vec<u8> {
+    batpak::canonical::to_bytes(&value).expect("canonical fixture encodes")
+}
+
+fn invalid_canonical_bytes() -> Vec<u8> {
+    vec![0xc1]
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(char::from(HEX[usize::from(byte >> 4)]));
+        out.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    out
+}
+
 /// A module with one operation and a stable id.
 fn single_op_module(id: &'static str, op_name: &'static str) -> HostModule {
-    HostModule::builder(id, 1)
-        .operation(op(op_name), echo)
-        .expect("operation registers")
-        .build()
-        .expect("module builds")
+    with_default_operation_schemas(
+        HostModule::builder(id, 1)
+            .operation(op(op_name), echo)
+            .expect("operation registers"),
+    )
+    .build()
+    .expect("module builds")
+}
+
+fn with_default_operation_schemas(builder: HostModuleBuilder) -> HostModuleBuilder {
+    builder
+        .schema(schema_with_role(
+            "schema.in.v1",
+            SchemaRole::OperationInput,
+            &canonical_bytes("default-in"),
+        ))
+        .expect("input schema")
+        .schema(schema_with_role(
+            "schema.out.v1",
+            SchemaRole::OperationOutput,
+            &canonical_bytes("default-out"),
+        ))
+        .expect("output schema")
+        .schema(schema_with_role(
+            "receipt.v1",
+            SchemaRole::ReceiptPayload,
+            &canonical_bytes("default-receipt"),
+        ))
+        .expect("receipt schema")
+}
+
+fn module_builder_with_op(id: &'static str, op_name: &'static str) -> HostModuleBuilder {
+    with_default_operation_schemas(
+        HostModule::builder(id, 1)
+            .operation(op(op_name), echo)
+            .expect("op"),
+    )
+}
+
+fn single_op_module_with_descriptor(
+    id: &'static str,
+    descriptor: OperationDescriptor,
+) -> HostModule {
+    with_default_operation_schemas(
+        HostModule::builder(id, 1)
+            .operation(descriptor, echo)
+            .expect("operation registers"),
+    )
+    .build()
+    .expect("module builds")
 }
 
 // ---- green: identity ----------------------------------------------------
@@ -112,24 +181,190 @@ fn host_fingerprint_changes_with_module_set() {
     assert_ne!(two, one, "dropping a module changes H_host");
 }
 
+#[test]
+fn interface_fingerprint_is_stable_for_internal_hook_changes() {
+    let plain = HostBuilder::new()
+        .mount(single_op_module("mod.a", "mod.a.echo"))
+        .expect("mount")
+        .build()
+        .expect("build")
+        .interface_fingerprint();
+    let with_hook = HostBuilder::new()
+        .mount(
+            module_builder_with_op("mod.a", "mod.a.echo")
+                .hook(HookPhase::Startup, "internal", 0, || Ok(()))
+                .build()
+                .expect("module"),
+        )
+        .expect("mount")
+        .build()
+        .expect("build")
+        .interface_fingerprint();
+    assert_eq!(
+        plain, with_hook,
+        "internal lifecycle hooks do not change the client-visible interface",
+    );
+}
+
+#[test]
+fn interface_fingerprint_changes_for_operation_or_schema_surface() {
+    let base = HostBuilder::new()
+        .mount(single_op_module("mod.a", "mod.a.echo"))
+        .expect("mount")
+        .build()
+        .expect("build")
+        .interface_fingerprint();
+    let renamed = HostBuilder::new()
+        .mount(single_op_module("mod.a", "mod.a.renamed"))
+        .expect("mount")
+        .build()
+        .expect("build")
+        .interface_fingerprint();
+    let schema_changed = HostBuilder::new()
+        .mount(
+            HostModule::builder("mod.a", 1)
+                .operation(op("mod.a.echo"), echo)
+                .expect("op")
+                .schema(schema_with_role(
+                    "schema.in.v1",
+                    SchemaRole::OperationInput,
+                    b"changed-in",
+                ))
+                .expect("input schema")
+                .schema(schema_with_role(
+                    "schema.out.v1",
+                    SchemaRole::OperationOutput,
+                    b"default-out",
+                ))
+                .expect("output schema")
+                .schema(schema_with_role(
+                    "receipt.v1",
+                    SchemaRole::ReceiptPayload,
+                    b"default-receipt",
+                ))
+                .expect("receipt schema")
+                .build()
+                .expect("module"),
+        )
+        .expect("mount")
+        .build()
+        .expect("build")
+        .interface_fingerprint();
+    assert_ne!(base, renamed, "operation rename changes H_interface");
+    assert_ne!(
+        base, schema_changed,
+        "operation payload schema identity changes H_interface",
+    );
+}
+
+#[test]
+fn client_manifest_projects_live_host_contract() {
+    let host = HostBuilder::new()
+        .mount(single_op_module("mod.a", "mod.a.echo"))
+        .expect("mount")
+        .build()
+        .expect("build");
+
+    let manifest = ClientManifest::from_host(&host);
+
+    assert_eq!(manifest.manifest_version, 1);
+    assert_eq!(manifest.netbat_version, "NETBAT/1");
+    assert_eq!(
+        manifest.interface_fingerprint_hex,
+        host.interface_fingerprint().to_hex()
+    );
+    assert_eq!(manifest.operations.len(), 1);
+    assert_eq!(manifest.operations[0].name, "mod.a.echo");
+    assert_eq!(manifest.operations[0].input_schema_ref, "schema.in.v1");
+    assert_eq!(manifest.schemas.len(), 3);
+    let input_schema = manifest
+        .schemas
+        .iter()
+        .find(|schema| schema.id == "schema.in.v1")
+        .expect("input schema exported");
+    assert_eq!(input_schema.role, "operation-input");
+    assert_eq!(
+        input_schema.golden[0].bytes_hex,
+        hex(&canonical_bytes("default-in"))
+    );
+}
+
+#[test]
+fn client_manifest_changes_when_schema_golden_changes() {
+    let make = |bytes: &[u8]| {
+        let module = HostModule::builder("mod.a", 1)
+            .operation(op("mod.a.echo"), echo)
+            .expect("operation")
+            .schema(schema_with_role(
+                "schema.in.v1",
+                SchemaRole::OperationInput,
+                bytes,
+            ))
+            .expect("input schema")
+            .schema(schema_with_role(
+                "schema.out.v1",
+                SchemaRole::OperationOutput,
+                &canonical_bytes("default-out"),
+            ))
+            .expect("output schema")
+            .schema(schema_with_role(
+                "receipt.v1",
+                SchemaRole::ReceiptPayload,
+                &canonical_bytes("default-receipt"),
+            ))
+            .expect("receipt schema")
+            .build()
+            .expect("module");
+        HostBuilder::new()
+            .mount(module)
+            .expect("mount")
+            .build()
+            .expect("build")
+    };
+    let left = ClientManifest::from_host(&make(&canonical_bytes("left")));
+    let right = ClientManifest::from_host(&make(&canonical_bytes("right")));
+
+    assert_ne!(
+        left.interface_fingerprint_hex,
+        right.interface_fingerprint_hex
+    );
+    assert_ne!(left.schemas, right.schemas);
+}
+
+#[test]
+fn red_missing_operation_schema_ref_is_rejected_at_build() {
+    let module = HostModule::builder("mod.a", 1)
+        .operation(op("mod.a.echo"), echo)
+        .expect("op")
+        .build()
+        .expect("module");
+    let outcome = HostBuilder::new().mount(module).expect("mount").build();
+    assert!(matches!(
+        outcome,
+        Err(HostError::SchemaReferenceMissing { .. })
+    ));
+}
+
 // ---- green: schema descriptors fold into module identity ----------------
 
-fn schema(id: &str, bytes: &[u8]) -> SchemaDescriptor {
+fn schema_with_role(id: &str, role: SchemaRole, bytes: &[u8]) -> SchemaDescriptor {
     SchemaDescriptor::new(
         SchemaId::new(id).expect("id"),
         SchemaVersion(1),
-        SchemaRole::OperationInput,
+        role,
         vec![GoldenVector::new("c", bytes.to_vec())],
     )
     .expect("descriptor")
 }
 
+fn schema(id: &str, bytes: &[u8]) -> SchemaDescriptor {
+    schema_with_role(id, SchemaRole::OperationInput, bytes)
+}
+
 #[test]
 fn declaring_a_schema_changes_module_identity() {
     let plain = single_op_module("mod.a", "mod.a.echo");
-    let with_schema = HostModule::builder("mod.a", 1)
-        .operation(op("mod.a.echo"), echo)
-        .expect("op")
+    let with_schema = module_builder_with_op("mod.a", "mod.a.echo")
         .schema(schema("hostbat.op.a.in", b"shape"))
         .expect("schema")
         .build()
@@ -140,15 +375,13 @@ fn declaring_a_schema_changes_module_identity() {
         "a declared schema is sealed into H_module",
     );
     assert!(with_schema.manifest().verify_hash().expect("verify"));
-    assert_eq!(with_schema.manifest().schemas().count(), 1);
+    assert_eq!(with_schema.manifest().schemas().count(), 4);
 }
 
 #[test]
 fn schema_bytes_change_module_identity() {
     let make = |bytes: &[u8]| {
-        HostModule::builder("mod.a", 1)
-            .operation(op("mod.a.echo"), echo)
-            .expect("op")
+        module_builder_with_op("mod.a", "mod.a.echo")
             .schema(schema("hostbat.op.a.in", bytes))
             .expect("schema")
             .build()
@@ -166,16 +399,12 @@ fn schema_bytes_change_module_identity() {
 /// Rust type (the `refbat::*` failure) cannot break wire identity.
 #[test]
 fn diagnostic_rust_type_does_not_change_module_identity() {
-    let bare = HostModule::builder("mod.a", 1)
-        .operation(op("mod.a.echo"), echo)
-        .expect("op")
+    let bare = module_builder_with_op("mod.a", "mod.a.echo")
         .schema(schema("hostbat.op.a.in", b"shape"))
         .expect("schema")
         .build()
         .expect("module");
-    let with_type = HostModule::builder("mod.a", 1)
-        .operation(op("mod.a.echo"), echo)
-        .expect("op")
+    let with_type = module_builder_with_op("mod.a", "mod.a.echo")
         .schema(
             schema("hostbat.op.a.in", b"shape")
                 .with_diagnostic_rust_type(DiagnosticRustType::new("any_crate::AnyType")),
@@ -208,11 +437,114 @@ fn host_dispatches_to_the_composed_core() {
         .expect("mount")
         .build()
         .expect("build");
-    let result = host.invoke("mod.a.echo", b"ping".to_vec()).expect("invoke");
+    let input = canonical_bytes("ping");
+    let result = host.invoke("mod.a.echo", input.clone()).expect("invoke");
     assert_eq!(
         result.output(),
-        b"ping",
+        input.as_slice(),
         "the host delegates dispatch to syncbat"
+    );
+}
+
+#[test]
+fn host_rejects_noncanonical_operation_input_before_handler_runs() {
+    struct FlaggedHandler {
+        ran: Arc<AtomicBool>,
+    }
+
+    impl syncbat::Handler for FlaggedHandler {
+        fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+            self.ran.store(true, Ordering::SeqCst);
+            Ok(input.to_vec())
+        }
+    }
+
+    let ran = Arc::new(AtomicBool::new(false));
+    let module = with_default_operation_schemas(
+        HostModule::builder("mod.schema.input", 1)
+            .operation(
+                op("mod.schema.input.echo"),
+                FlaggedHandler {
+                    ran: Arc::clone(&ran),
+                },
+            )
+            .expect("operation"),
+    )
+    .build()
+    .expect("module");
+    let mut host = HostBuilder::new()
+        .mount(module)
+        .expect("mount")
+        .build()
+        .expect("build");
+
+    let err = match host.invoke("mod.schema.input.echo", invalid_canonical_bytes()) {
+        Ok(_) => {
+            assert!(
+                std::hint::black_box(false),
+                "PROPERTY: non-canonical input must be rejected before handler execution"
+            );
+            return;
+        }
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            syncbat::RuntimeError::Handler {
+                ref code,
+                ref message,
+                ..
+            } if code == "invalid_input" && message.contains("input schema validation failed")
+        ),
+        "PROPERTY: invalid input must surface as schema-validation-backed invalid_input, got {err:?}"
+    );
+    assert!(
+        !ran.load(Ordering::SeqCst),
+        "PROPERTY: invalid input must not reach the user handler"
+    );
+}
+
+#[test]
+fn host_rejects_noncanonical_operation_output() {
+    fn bad_output(_input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+        Ok(invalid_canonical_bytes())
+    }
+
+    let module = with_default_operation_schemas(
+        HostModule::builder("mod.schema.output", 1)
+            .operation(op("mod.schema.output.bad"), bad_output)
+            .expect("operation"),
+    )
+    .build()
+    .expect("module");
+    let mut host = HostBuilder::new()
+        .mount(module)
+        .expect("mount")
+        .build()
+        .expect("build");
+    let input = canonical_bytes("valid");
+
+    let err = match host.invoke("mod.schema.output.bad", input) {
+        Ok(_) => {
+            assert!(
+                std::hint::black_box(false),
+                "PROPERTY: non-canonical output must be rejected before checkout completion"
+            );
+            return;
+        }
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            err,
+            syncbat::RuntimeError::Handler {
+                ref code,
+                ref message,
+                ..
+            } if code == "failed" && message.contains("output schema validation failed")
+        ),
+        "PROPERTY: invalid output must surface as schema-validation-backed handler failure, got {err:?}"
     );
 }
 
@@ -221,9 +553,7 @@ fn guard_governs_only_its_own_modules_operations() {
     fn deny(_d: &OperationDescriptor, _i: &[u8], _c: &mut Ctx<'_>) -> AdmissionDecision {
         AdmissionDecision::deny("test.policy", "blocked")
     }
-    let guarded = HostModule::builder("mod.guarded", 1)
-        .operation(op("mod.guarded.echo"), echo)
-        .expect("op")
+    let guarded = module_builder_with_op("mod.guarded", "mod.guarded.echo")
         .guard(GuardDescriptor::new("test.guard.v1"), deny)
         .expect("guard")
         .build()
@@ -238,12 +568,13 @@ fn guard_governs_only_its_own_modules_operations() {
         .build()
         .expect("build");
 
+    let input = canonical_bytes("x");
     assert!(
-        host.invoke("mod.guarded.echo", b"x".to_vec()).is_err(),
+        host.invoke("mod.guarded.echo", input.clone()).is_err(),
         "the guarded module's op is denied by its guard",
     );
     assert!(
-        host.invoke("mod.open.echo", b"x".to_vec()).is_ok(),
+        host.invoke("mod.open.echo", input).is_ok(),
         "an op from a module with no guard is admitted",
     );
 }
@@ -262,16 +593,12 @@ fn startup_hooks_run_in_global_deterministic_order() {
     };
 
     // mod.a declares its hooks out of order (2 then 0); mod.b sits between (1).
-    let a = HostModule::builder("mod.a", 1)
-        .operation(op("mod.a.echo"), echo)
-        .expect("op")
+    let a = module_builder_with_op("mod.a", "mod.a.echo")
         .hook(HookPhase::Startup, "late", 2, record(&log, "a-late"))
         .hook(HookPhase::Startup, "early", 0, record(&log, "a-early"))
         .build()
         .expect("module a");
-    let b = HostModule::builder("mod.b", 1)
-        .operation(op("mod.b.echo"), echo)
-        .expect("op")
+    let b = module_builder_with_op("mod.b", "mod.b.echo")
         .hook(HookPhase::Startup, "mid", 1, record(&log, "b-mid"))
         .build()
         .expect("module b");
@@ -294,9 +621,7 @@ fn startup_hooks_run_in_global_deterministic_order() {
 
 #[test]
 fn a_failing_startup_hook_aborts_start_fail_closed() {
-    let module = HostModule::builder("mod.a", 1)
-        .operation(op("mod.a.echo"), echo)
-        .expect("op")
+    let module = module_builder_with_op("mod.a", "mod.a.echo")
         .hook(HookPhase::Startup, "boom", 0, || {
             Err("precondition failed".to_owned())
         })
@@ -328,9 +653,7 @@ fn a_supervised_job_runs_and_joins_on_shutdown() {
         let ran = Arc::clone(&ran_for_job);
         Box::new(move || ran.store(true, Ordering::Release))
     };
-    let module = HostModule::builder("mod.worker", 1)
-        .operation(op("mod.worker.echo"), echo)
-        .expect("op")
+    let module = module_builder_with_op("mod.worker", "mod.worker.echo")
         .job("background", factory)
         .expect("job")
         .build()
@@ -387,11 +710,24 @@ fn red_duplicate_operation_across_modules_is_rejected() {
 }
 
 #[test]
+fn red_operation_effect_conflict_across_modules_is_rejected() {
+    let outcome = HostBuilder::new()
+        .mount(single_op_module_with_descriptor("mod.a", op("shared.op")))
+        .expect("first mount")
+        .mount(single_op_module_with_descriptor(
+            "mod.b",
+            op_with_row(
+                "shared.op",
+                OperationEffectRow::new().reads_event("event.shared.v1"),
+            ),
+        ));
+    assert!(matches!(outcome, Err(HostError::EffectConflict { .. })));
+}
+
+#[test]
 fn red_duplicate_receipt_namespace_is_rejected() {
     let make = |id: &'static str, op_name: &'static str| {
-        HostModule::builder(id, 1)
-            .operation(op(op_name), echo)
-            .expect("op")
+        module_builder_with_op(id, op_name)
             .receipt_namespace("shared.ns")
             .expect("ns")
             .build()
@@ -411,9 +747,7 @@ fn red_duplicate_receipt_namespace_is_rejected() {
 fn red_duplicate_job_kind_across_modules_is_rejected() {
     let factory = || -> Box<dyn FnOnce() + Send + 'static> { Box::new(|| {}) };
     let make = |id: &'static str, op_name: &'static str| {
-        HostModule::builder(id, 1)
-            .operation(op(op_name), echo)
-            .expect("op")
+        module_builder_with_op(id, op_name)
             .job("shared.kind", factory)
             .expect("job")
             .build()

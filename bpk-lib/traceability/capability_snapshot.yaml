@@ -166,6 +166,7 @@ witnesses:
   - { id: INV-SUBSCRIPTION-STATE-MACHINE, witnessed: true }
   - { id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL, witnessed: true }
   - { id: INV-SYNCBAT-DISPATCH-RECEIPTS, witnessed: true }
+  - { id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT, witnessed: true }
   - { id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC, witnessed: true }
   - { id: INV-TEST-PANIC-AS-ASSERTION, witnessed: false }
   - { id: INV-TRACEABILITY-COMPLETE, witnessed: true }

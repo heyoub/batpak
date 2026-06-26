@@ -18,7 +18,7 @@ struct NoteAdded {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = NoteAdded, handler = on_note_added)]
 struct NoteStream {
     count: usize,

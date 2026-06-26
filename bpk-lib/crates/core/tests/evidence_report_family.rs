@@ -87,6 +87,8 @@ struct FamilyProjection {
 
 impl EventSourced for FamilyProjection {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("evidence-report-family-projection");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -102,6 +104,10 @@ impl EventSourced for FamilyProjection {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xE, 0x71)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

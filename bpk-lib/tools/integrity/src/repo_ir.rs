@@ -404,7 +404,7 @@ impl Fitness for WitnessTestIsPathFnShaped {
 /// a free `String` field (NOT deserialized into the `AssuranceLevel` enum), so a
 /// typo'd or invalid tier is otherwise unchecked — the lockstep compares only
 /// `(slug, glob)` pairs, never the level. This fitness folds over the seam column
-/// and is a BLOCKING fitness ([`BLOCKING_FITNESSES`]). Distinct family from the
+/// and is a BLOCKING fitness (`BLOCKING_FITNESSES`). Distinct family from the
 /// Gate/DocInvariant fitnesses above.
 pub(crate) struct SeamLevelIsRecognized;
 

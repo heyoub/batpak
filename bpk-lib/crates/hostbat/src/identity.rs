@@ -87,3 +87,28 @@ impl std::fmt::Display for HostFingerprint {
         f.write_str(&self.to_hex())
     }
 }
+
+/// Client-visible interface identity of a whole host composition:
+/// `H_interface = H("hostbat.interface.v1" ‖ canonical(client-visible surface))`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InterfaceFingerprint(pub Digest);
+
+impl InterfaceFingerprint {
+    /// The raw 32 bytes.
+    #[must_use]
+    pub const fn bytes(&self) -> &Digest {
+        &self.0
+    }
+
+    /// Lowercase-hex rendering of the fingerprint.
+    #[must_use]
+    pub fn to_hex(&self) -> String {
+        hex(&self.0)
+    }
+}
+
+impl std::fmt::Display for InterfaceFingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}

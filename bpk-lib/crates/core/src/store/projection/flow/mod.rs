@@ -1,13 +1,16 @@
 mod cache_identity;
+mod external_cache;
 mod fusion;
 mod outcome;
 mod replay_input;
+mod state_contract;
 mod strategy;
 
 use crate::event::{EventSourced, ProjectionInput};
 use crate::store::index::columnar::CachedProjectionSlot;
 use crate::store::index::{ProjectionCacheStoreStatus, ProjectionReplayItem};
 use crate::store::{Freshness, HlcPoint, Store, StoreError};
+use external_cache::execute_external_cache_path;
 use std::any::TypeId;
 use std::collections::BTreeMap;
 
@@ -24,6 +27,7 @@ pub(crate) use outcome::{
 };
 #[doc(hidden)]
 pub use replay_input::ReplayInput;
+use state_contract::validate_projection_state;
 #[cfg(test)]
 use strategy::{compute_strategy, ProjectionStrategy};
 use strategy::{
@@ -266,12 +270,8 @@ where
         }
     );
 
-    // ── Phase 1: Gather metadata ──────────────────────────────────────
-
     let preparation =
         prepare_projection::<T, State>(store, entity, freshness, t_start, timings.as_deref_mut());
-
-    // ── Phase 2: Compute strategy ─────────────────────────────────────
 
     let dispatch = match preparation {
         ProjectionPreparation::Empty => ProjectionDispatch::Empty,
@@ -289,8 +289,6 @@ where
     );
     let replay_items = replay_items_for_dispatch(&dispatch);
 
-    // ── Phase 3: Dispatch ─────────────────────────────────────────────
-    //
     // Each branch returns a `ProjectionOutcome<T>` whose `returned_generation`
     // is the generation at which the returned state was actually materialized:
     //   * Cache hit  → slot.generation (the generation stamped on that cache row)
@@ -304,12 +302,15 @@ where
     // "consumed" against stale data.
 
     let outcome = match dispatch {
-        ProjectionDispatch::Empty => Ok(finish_empty_projection(
-            &mut timings,
-            store.runtime.clock(),
-            t_start,
-            observed_generation,
-        )),
+        ProjectionDispatch::Empty => {
+            validate_projection_state::<T>(entity, None)?;
+            Ok(finish_empty_projection(
+                &mut timings,
+                store.runtime.clock(),
+                t_start,
+                observed_generation,
+            ))
+        }
 
         ProjectionDispatch::GroupLocalHit { slot, replay } => {
             if let Some(value) = decode_cached_state::<T>(
@@ -317,6 +318,7 @@ where
                 &slot.bytes,
                 "group-local projection cache deserialize failed (falling back)",
             ) {
+                validate_projection_state::<T>(entity, Some(&value))?;
                 Ok(finish_projection(
                     &mut timings,
                     store.runtime.clock(),
@@ -355,6 +357,7 @@ where
                     &mut cached_state,
                     slot.watermark,
                 )?;
+                validate_projection_state::<T>(execution.entity, Some(&cached_state))?;
                 observe_projection_cache_store_outcome(
                     "group_local_incremental",
                     execution.entity,
@@ -526,172 +529,6 @@ fn notify_projection_applied<T, State: crate::store::StoreState>(
     }
 }
 
-/// External cache probe with incremental apply and fresh-hit paths, then fallback to full replay.
-// cold path -- keep out of the hot dispatch to reduce instruction cache pressure
-#[inline(never)]
-fn execute_external_cache_path<T, I, State: crate::store::StoreState>(
-    store: &Store<State>,
-    execution: ReplayExecution<'_>,
-    mut fallback_cache_status: ProjectionCacheObservation,
-    timings: &mut Option<&mut ProjectionTimings>,
-) -> Result<ProjectionOutcome<T>, StoreError>
-where
-    T: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
-    I: ReplayInput<Payload = <T::Input as ProjectionInput>::Payload>,
-{
-    // Prefetch already fired in Phase 1c (before group-local check).
-    // External cache probe
-
-    // `plan.generation` was sampled BEFORE the replay stream executed and is
-    // the honest generation for any state served from this path — see F5.
-    let plan_generation = execution.replay.plan.generation;
-
-    let t_ext = store.runtime.now_mono_ns();
-    let cache_row = store.cache.get(&execution.replay.cache_key);
-    let probe_us = elapsed_us(store.runtime.clock(), t_ext);
-    let probe_outcome = match &cache_row {
-        Ok(Some(_)) => "some",
-        Ok(None) => "none",
-        Err(_) => "error",
-    };
-    tracing::trace!(
-        target: "batpak::projection",
-        flow = "external_cache_probe",
-        entity = execution.entity,
-        outcome = probe_outcome,
-        probe_us,
-    );
-    match cache_row {
-        Ok(Some((bytes, meta))) => {
-            record_external_cache_probe_time(timings, store.runtime.clock(), t_ext);
-            let is_fresh = match execution.freshness {
-                Freshness::Consistent => meta.watermark == execution.replay.watermark,
-                Freshness::MaybeStale { max_stale_ms } => {
-                    // Age-based freshness runs through the Store's monotonic
-                    // clock — which is derived from the injected wall clock
-                    // via `MonotonicClock` (see `StoreConfig::with_clock`).
-                    // This makes fast-forwarded test clocks observable in the
-                    // MaybeStale path: a test that advances the injected
-                    // clock past `max_stale_ms` forces a re-project on the
-                    // next call. See G6.
-                    //
-                    // The comparison is against `cached_at_us` on the cache
-                    // meta, which is stamped at `ProjectionCache::put` time
-                    // (not plan-build time) so "age" means actual time since
-                    // the bytes were written, not since the plan was drawn.
-                    let now_us = store.runtime.cache_now_us();
-                    let age_us = now_us.saturating_sub(meta.cached_at_us).max(0);
-                    age_us < (*max_stale_ms as i64) * 1000
-                }
-            };
-
-            // R16: never incrementally apply onto a cache row that is AHEAD of disk (post-rebuild/rollback); fall through to full replay so disk is authoritative.
-            if !is_fresh
-                && meta.watermark <= execution.replay.watermark
-                && T::supports_incremental_apply()
-                && store.runtime.incremental_projection
-            {
-                if let Some(mut cached_state) = decode_cached_state::<T>(
-                    execution.entity,
-                    &bytes,
-                    "incremental projection deser failed, falling back to full replay",
-                ) {
-                    apply_incremental_events::<T, I, State>(
-                        store,
-                        &execution,
-                        &mut cached_state,
-                        meta.watermark,
-                    )?;
-                    observe_projection_cache_store_outcome(
-                        "incremental",
-                        execution.entity,
-                        store_projection_value(store, &execution, &cached_state),
-                    );
-                    return Ok(finish_projection(
-                        timings,
-                        store.runtime.clock(),
-                        execution.started_at_ns,
-                        Some(cached_state),
-                        plan_generation,
-                        finish_observation(
-                            store,
-                            execution.replay.watermark,
-                            ProjectionCacheObservation::Hit,
-                            ProjectionObservedFreshness::Fresh,
-                        ),
-                    ));
-                }
-            }
-
-            // R16 (cache-hit path): never serve a cache row that is AHEAD of
-            // disk. The `Consistent` freshness check already requires
-            // `meta.watermark == replay.watermark`, but `MaybeStale` derives
-            // `is_fresh` purely from age and would otherwise return bytes from a
-            // future watermark after a rollback/rebuild — reporting state for
-            // events no longer present in the current segment log. Force full
-            // replay (disk authoritative) for ahead-of-disk rows.
-            if is_fresh && meta.watermark <= execution.replay.watermark {
-                if let Some(value) = decode_cached_state::<T>(
-                    execution.entity,
-                    &bytes,
-                    "cache deserialize failed (falling back to replay)",
-                ) {
-                    let index_outcome = store_index_cached_projection(
-                        store,
-                        execution.entity,
-                        execution.replay.type_id,
-                        bytes,
-                        meta.watermark,
-                    );
-                    tracing::trace!(
-                        target: "batpak::projection",
-                        flow = "group_local_cache_warm",
-                        entity = execution.entity,
-                        outcome = ?index_outcome,
-                    );
-                    return Ok(finish_projection(
-                        timings,
-                        store.runtime.clock(),
-                        execution.started_at_ns,
-                        Some(value),
-                        plan_generation,
-                        finish_observation(
-                            store,
-                            meta.watermark,
-                            ProjectionCacheObservation::Hit,
-                            if meta.watermark == execution.replay.watermark {
-                                ProjectionObservedFreshness::Fresh
-                            } else {
-                                ProjectionObservedFreshness::StaleAllowed
-                            },
-                        ),
-                    ));
-                }
-            }
-        }
-        Ok(None) => {
-            fallback_cache_status = ProjectionCacheObservation::Miss;
-            record_external_cache_probe_time(timings, store.runtime.clock(), t_ext);
-        }
-        Err(e) => {
-            fallback_cache_status = ProjectionCacheObservation::Unavailable {
-                reason: "cache_get_failed",
-            };
-            record_external_cache_probe_time(timings, store.runtime.clock(), t_ext);
-            tracing::warn!("cache get failed (falling back to replay): {e}");
-        }
-    }
-
-    // Fallback: full replay
-    execute_full_replay::<T, I, State>(
-        store,
-        execution,
-        fallback_cache_status,
-        ProjectionObservedFreshness::Fresh,
-        timings,
-    )
-}
-
 /// Full replay from disk: batch-read events, fold, and store back to cache.
 // cold path -- keep out of the hot dispatch to reduce instruction cache pressure
 #[inline(never)]
@@ -735,6 +572,7 @@ where
     if let Some(t) = timings.as_deref_mut() {
         t.replay_fold_us = elapsed_us(store.runtime.clock(), t_fold);
     }
+    validate_projection_state::<T>(execution.entity, result.as_ref())?;
 
     if result.is_none() && !events.is_empty() {
         tracing::debug!(
@@ -893,5 +731,7 @@ fn store_index_cached_projection<State: crate::store::StoreState>(
 
 #[cfg(test)]
 mod fusion_tests;
+#[cfg(test)]
+mod state_contract_tests;
 #[cfg(test)]
 mod tests;

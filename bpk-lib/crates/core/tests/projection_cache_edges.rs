@@ -18,6 +18,8 @@ struct GenerationCounter {
 
 impl EventSourced for GenerationCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("projection-cache-generation-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -31,6 +33,10 @@ impl EventSourced for GenerationCounter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[GENERATION_KIND]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 

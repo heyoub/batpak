@@ -202,6 +202,10 @@ mod relevant_kinds_tests {
         ($ty:ty, $kind:expr) => {
             impl EventSourced for $ty {
                 type Input = JsonValueInput;
+                const STATE_CONTRACT: crate::event::ProjectionStateContract =
+                    crate::event::ProjectionStateContract::single_entity(
+                        "fusion-relevant-kinds-test",
+                    );
 
                 fn from_events(_events: &[Event<serde_json::Value>]) -> Option<Self> {
                     None
@@ -211,6 +215,10 @@ mod relevant_kinds_tests {
 
                 fn relevant_event_kinds() -> &'static [EventKind] {
                     &[$kind]
+                }
+
+                fn state_extent(&self) -> crate::event::StateExtent {
+                    crate::event::StateExtent::single_entity()
                 }
             }
         };

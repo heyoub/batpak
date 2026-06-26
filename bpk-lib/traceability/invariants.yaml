@@ -41,6 +41,14 @@
     - ART-SYNCBAT-TESTS
     - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
+- id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT
+  statement: syncbat operation descriptors declare an effect row consistent with their EffectClass (validated at registration); cross-module effect conflicts are rejected at composition; and operations append events only through a Ctx capability handle that performs the append through the runtime-owned effect backend and records it in the same step, so the observed appends are authoritative. checkout fails closed with a denied receipt when an operation appends an event kind outside its declared row, and an append with no backend bound fails closed rather than reaching a store the runtime did not mediate.
+  witness_test: crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_append_outside_declared_row
+  artifacts:
+    - ART-SYNCBAT-SOURCE
+    - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
+    - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-NETBAT-LINE-PROTOCOL-STABLE
   statement: netbat request and response frames keep stable NETBAT/1 CALL and OK/ERR line shapes, bounded decode behavior, and deterministic error-code mapping.
   witness_test: crates/netbat/tests/boundary.rs::encodes_request_with_stable_versioned_line_protocol

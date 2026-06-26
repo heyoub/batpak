@@ -1,5 +1,5 @@
 use crate::coordinate::CoordinateError;
-use crate::event::EventPayloadRegistryError;
+use crate::event::{EventPayloadRegistryError, ProjectionStateContract, StateExtent};
 use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
@@ -71,6 +71,31 @@ pub enum StoreError {
     },
     /// A projection cache operation failed.
     CacheFailed(Box<dyn std::error::Error + Send + Sync>),
+    /// A projection was materialized without declaring a growth contract.
+    ProjectionStateContractUnspecified {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+    },
+    /// A bounded projection could not report its current state extent.
+    ProjectionStateExtentUnavailable {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+        /// Declared growth contract for the projection (boxed to keep
+        /// `StoreError` small enough for the clippy large-Err threshold).
+        declared: Box<ProjectionStateContract>,
+        /// Actual extent report returned by the projection.
+        actual: StateExtent,
+    },
+    /// A bounded projection exceeded its declared maximum cardinality.
+    ProjectionStateBoundExceeded {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+        /// Declared growth contract for the projection (boxed to keep
+        /// `StoreError` small enough for the clippy large-Err threshold).
+        declared: Box<ProjectionStateContract>,
+        /// Actual extent report returned by the projection.
+        actual: StateExtent,
+    },
     /// A visibility-watermark publish request violated sequence-gate bounds.
     SequenceGateViolation {
         /// Human-readable operation that attempted the publish.
@@ -428,6 +453,9 @@ impl std::error::Error for StoreError {
             | Self::WaitTimeout { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
+            | Self::ProjectionStateContractUnspecified { .. }
+            | Self::ProjectionStateExtentUnavailable { .. }
+            | Self::ProjectionStateBoundExceeded { .. }
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::IdempotencyRequired

@@ -14,6 +14,17 @@ const RIGHT_KIND: EventKind = EventKind::custom(0xF, 42);
 const OVERLAP_KIND: EventKind = EventKind::custom(0xF, 43);
 const NOISE_KIND: EventKind = EventKind::custom(0xF, 44);
 
+macro_rules! single_entity_state_contract {
+    ($key_space:literal) => {
+        const STATE_CONTRACT: crate::event::ProjectionStateContract =
+            crate::event::ProjectionStateContract::single_entity($key_space);
+
+        fn state_extent(&self) -> crate::event::StateExtent {
+            crate::event::StateExtent::single_entity()
+        }
+    };
+}
+
 #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 struct LeftCount {
     count: usize,
@@ -21,6 +32,7 @@ struct LeftCount {
 
 impl EventSourced for LeftCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-left-count");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -44,6 +56,7 @@ struct RightTotal {
 
 impl EventSourced for RightTotal {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-right-total");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         let total = events
@@ -74,6 +87,7 @@ struct OverlapCount {
 
 impl EventSourced for OverlapCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-overlap-count");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -97,6 +111,7 @@ struct OverlapTotal {
 
 impl EventSourced for OverlapTotal {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-overlap-total");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         let total = events
@@ -132,6 +147,7 @@ struct NoiseCount {
 
 impl EventSourced for NoiseCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-noise-count");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -150,6 +166,7 @@ impl EventSourced for NoiseCount {
 
 impl EventSourced for MatchAllCount {
     type Input = JsonValueInput;
+    single_entity_state_contract!("fusion-match-all-count");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {

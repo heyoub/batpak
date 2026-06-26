@@ -43,10 +43,6 @@
   lines: 199
   nesting: 4
   cyclomatic: 19
-- key: "crates/core/src/store/projection/flow/mod.rs::execute_external_cache_path"
-  lines: 148
-  nesting: 5
-  cyclomatic: 18
 - key: "crates/core/src/store/segment/scan/full_scan.rs::Reader::scan_segment"
   lines: 183
   nesting: 5
@@ -75,10 +71,6 @@
   lines: 167
   nesting: 3
   cyclomatic: 22
-- key: "crates/macros/src/lib.rs::classify_batpak_attr"
-  lines: 87
-  nesting: 4
-  cyclomatic: 32
 - key: "crates/macros/src/lib.rs::expand_event_sourced"
   lines: 223
   nesting: 5
@@ -91,10 +83,6 @@
   lines: 203
   nesting: 4
   cyclomatic: 38
-- key: "crates/macros/src/operation.rs::parse_args"
-  lines: 46
-  nesting: 3
-  cyclomatic: 27
 - key: "crates/syncbat/src/register_store/rebuild.rs::fold_catalog_entries"
   lines: 195
   nesting: 4

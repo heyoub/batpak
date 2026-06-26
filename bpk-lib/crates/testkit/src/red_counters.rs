@@ -18,6 +18,8 @@ pub struct KindFilteredCounter {
 
 impl EventSourced for KindFilteredCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("testkit-kind-filtered-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -42,6 +44,10 @@ impl EventSourced for KindFilteredCounter {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 /// Counts every event regardless of kind.
@@ -52,6 +58,8 @@ pub struct AllCounter {
 
 impl EventSourced for AllCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("testkit-all-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -70,5 +78,9 @@ impl EventSourced for AllCounter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }

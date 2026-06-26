@@ -13,8 +13,8 @@ pub use crate::event::{
     revalidate_event_payload_registry, validate_event_payload_registry, DecodeTyped, Event,
     EventHeader, EventKind, EventKindError, EventPayload, EventPayloadKindCollision,
     EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain, JsonValueInput,
-    ProjectionEvent, ProjectionInput, ProjectionPayload, RawMsgpackInput, ReplayLane, StoredEvent,
-    TypedDecodeError,
+    ProjectionEvent, ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput,
+    ReplayLane, StateExtent, StateExtentCost, StoredEvent, TypedDecodeError,
 };
 pub use crate::id::EventId;
 pub use crate::store::{

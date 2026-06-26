@@ -9,7 +9,7 @@ use batpak::prelude::*;
 use batpak::store::{Store, StoreConfig};
 use syncbat::register_store::RegisterOperationActionV1;
 use syncbat::{
-    rebuild_register_from_store, EffectClass, OperationDescriptor, Register,
+    rebuild_register_from_store, EffectClass, OperationDescriptor, OperationEffectRow, Register,
     RegisterOperationRowV1, StoreRegisterCatalog, StoreRegisterCatalogError,
 };
 
@@ -21,13 +21,16 @@ const ALPHA: OperationDescriptor = OperationDescriptor::new(
     "receipt.alpha.v1",
 );
 
-const BRAVO: OperationDescriptor = OperationDescriptor::new(
-    "bravo",
-    EffectClass::Emit,
-    "schema.bravo.input.v1",
-    "schema.bravo.output.v1",
-    "receipt.bravo.v1",
-);
+fn bravo() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "bravo",
+        EffectClass::Emit,
+        "schema.bravo.input.v1",
+        "schema.bravo.output.v1",
+        "receipt.bravo.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().emits_receipt("receipt.bravo.v1"))
+}
 
 const ALPHA_V2: OperationDescriptor = OperationDescriptor::new(
     "alpha",
@@ -37,21 +40,27 @@ const ALPHA_V2: OperationDescriptor = OperationDescriptor::new(
     "receipt.alpha.v1",
 );
 
-const CHARLIE: OperationDescriptor = OperationDescriptor::new(
-    "charlie",
-    EffectClass::Control,
-    "schema.charlie.input.v1",
-    "schema.charlie.output.v1",
-    "receipt.charlie.v1",
-);
+fn charlie() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "charlie",
+        EffectClass::Inspect,
+        "schema.charlie.input.v1",
+        "schema.charlie.output.v1",
+        "receipt.charlie.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().reads_event("event.charlie.read.v1"))
+}
 
-const CHARLIE_V2: OperationDescriptor = OperationDescriptor::new(
-    "charlie",
-    EffectClass::Persist,
-    "schema.charlie.input.v2",
-    "schema.charlie.output.v1",
-    "receipt.charlie.v1",
-);
+fn charlie_v2() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "charlie",
+        EffectClass::Persist,
+        "schema.charlie.input.v2",
+        "schema.charlie.output.v1",
+        "receipt.charlie.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.charlie.v1"))
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct OtherRow {
@@ -82,16 +91,17 @@ fn other_coord() -> Coordinate {
 }
 
 fn close_store(store: Arc<Store>) {
+    Store::sync(store.as_ref()).expect("sync store before close");
     let store = Arc::try_unwrap(store)
         .map_err(|_| ())
         .expect("expected test to release all Store references before close");
-    store.close().expect("close store");
+    drop(store);
 }
 
 #[test]
 fn store_register_catalog_persists_and_rebuilds_deterministic_register() {
     let (store, _dir) = test_store();
-    let register = Register::from_operations([BRAVO.clone(), ALPHA.clone()]).expect("register");
+    let register = Register::from_operations([bravo(), ALPHA.clone()]).expect("register");
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
 
     let receipts = catalog
@@ -102,7 +112,7 @@ fn store_register_catalog_persists_and_rebuilds_deterministic_register() {
     assert_eq!(receipts.len(), 2);
     assert_eq!(rebuilt.names().collect::<Vec<_>>(), vec!["alpha", "bravo"]);
     assert_eq!(rebuilt.descriptor("alpha"), Some(&ALPHA));
-    assert_eq!(rebuilt.descriptor("bravo"), Some(&BRAVO));
+    assert_eq!(rebuilt.descriptor("bravo"), Some(&bravo()));
 
     drop(catalog);
     close_store(store);
@@ -120,22 +130,25 @@ fn rebuilt_register_survives_store_reopen() {
     let store = Arc::new(store);
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
-    let _ = catalog.persist_operation(&BRAVO).expect("persist bravo");
+    let _ = catalog.persist_operation(&bravo()).expect("persist bravo");
     let _ = catalog.delete_operation("alpha").expect("delete alpha");
     drop(catalog);
     close_store(store);
 
-    let reopened = Store::open(
-        StoreConfig::new(dir.path())
-            .with_enable_checkpoint(false)
-            .with_enable_mmap_index(false),
-    )
-    .expect("reopen store");
-    let rebuilt = rebuild_register_from_store(&reopened, &register_coord()).expect("rebuild");
+    let reopened = Arc::new(
+        Store::open(
+            StoreConfig::new(dir.path())
+                .with_enable_checkpoint(false)
+                .with_enable_mmap_index(false),
+        )
+        .expect("reopen store"),
+    );
+    let rebuilt =
+        rebuild_register_from_store(reopened.as_ref(), &register_coord()).expect("rebuild");
 
     assert!(!rebuilt.contains_operation("alpha"));
-    assert_eq!(rebuilt.descriptor("bravo"), Some(&BRAVO));
-    reopened.close().expect("close reopened store");
+    assert_eq!(rebuilt.descriptor("bravo"), Some(&bravo()));
+    close_store(reopened);
 }
 
 #[test]
@@ -148,7 +161,7 @@ fn rebuild_filters_exact_coordinate_and_ignores_identical_duplicates() {
         .persist_operation(&ALPHA)
         .expect("persist duplicate alpha");
     let _ = other
-        .persist_operation(&BRAVO)
+        .persist_operation(&bravo())
         .expect("persist other bravo");
     let _ = other.delete_operation("bravo").expect("delete other bravo");
 
@@ -328,12 +341,12 @@ fn rebuild_applies_supersession_and_idempotent_duplicate() {
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
     let _ = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .expect("supersede alpha");
     let _ = store
         .append_typed(
             &register_coord(),
-            &RegisterOperationRowV1::supersede("alpha", &CHARLIE),
+            &RegisterOperationRowV1::supersede("alpha", &charlie()),
         )
         .expect("append duplicate supersede row");
 
@@ -341,7 +354,7 @@ fn rebuild_applies_supersession_and_idempotent_duplicate() {
 
     assert_eq!(rebuilt.len(), 1);
     assert!(!rebuilt.contains_operation("alpha"));
-    assert_eq!(rebuilt.descriptor("charlie"), Some(&CHARLIE));
+    assert_eq!(rebuilt.descriptor("charlie"), Some(&charlie()));
 
     drop(catalog);
     close_store(store);
@@ -353,7 +366,7 @@ fn delete_operation_rejects_after_supersession() {
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
     let _ = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .expect("supersede alpha");
     let err = catalog
         .delete_operation("alpha")
@@ -379,7 +392,7 @@ fn rebuild_rejects_supersession_from_missing_source() {
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
 
     let err = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .map(|_| ())
         .expect_err("expected missing-source conflict");
 
@@ -404,7 +417,7 @@ fn rebuild_rejects_supersession_after_delete_without_matching_replacement() {
     let _ = catalog.delete_operation("alpha").expect("delete alpha");
 
     let err = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .map(|_| ())
         .expect_err("expected supersede-after-delete conflict");
 
@@ -424,7 +437,7 @@ fn rebuild_rejects_supersession_after_delete_without_matching_replacement() {
 #[test]
 fn rebuild_rejects_supersede_row_missing_supersedes_name() {
     let (store, _dir) = test_store();
-    let mut row = RegisterOperationRowV1::from_descriptor(&CHARLIE);
+    let mut row = RegisterOperationRowV1::from_descriptor(&charlie());
     row.action = RegisterOperationActionV1::Supersede.as_str().to_owned();
     let _ = store
         .append_typed(&register_coord(), &row)
@@ -473,13 +486,13 @@ fn supersede_operation_rejects_tombstoned_replacement_name() {
     let (store, _dir) = test_store();
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog
-        .persist_operation(&CHARLIE)
+        .persist_operation(&charlie())
         .expect("persist charlie");
     let _ = catalog.delete_operation("charlie").expect("delete charlie");
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
 
     let err = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .map(|_| ())
         .expect_err("expected tombstoned replacement conflict");
 
@@ -502,11 +515,11 @@ fn supersede_operation_rejects_active_replacement_with_different_fields() {
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
     let _ = catalog
-        .persist_operation(&CHARLIE)
+        .persist_operation(&charlie())
         .expect("persist charlie");
 
     let err = catalog
-        .supersede_operation("alpha", &CHARLIE_V2)
+        .supersede_operation("alpha", &charlie_v2())
         .map(|_| ())
         .expect_err("expected replacement conflict");
 
@@ -576,6 +589,7 @@ fn register_row_round_trips_descriptor_fields() {
         "schema.owned.alpha.output.v1",
         "receipt.owned.alpha.v1",
     )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.owned.alpha.v1"))
     .with_owned_title("Owned Alpha");
 
     let row = RegisterOperationRowV1::from_descriptor(&descriptor);
@@ -677,11 +691,11 @@ fn supersede_operation_rejects_idempotent_duplicate() {
     let catalog = StoreRegisterCatalog::new(Arc::clone(&store), register_coord());
     let _ = catalog.persist_operation(&ALPHA).expect("persist alpha");
     let _ = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .expect("supersede alpha");
 
     let err = catalog
-        .supersede_operation("alpha", &CHARLIE)
+        .supersede_operation("alpha", &charlie())
         .map(|_| ())
         .expect_err("expected duplicate supersede rejection");
 
