@@ -21,6 +21,14 @@ mod shared_checks {
         env!("CARGO_MANIFEST_DIR"),
         "/build_support/build_receipts.rs"
     ));
+    // The SHARED no-async-runtime dep-graph scanner (D10). The same source is
+    // compiled into the `batpak-integrity` binary, so the build.rs sentinel and
+    // the authoritative gate share ONE verdict, not two divergent greps. It runs
+    // `cargo metadata` and walks the RESOLVED production graph.
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/build_support/no_runtime_scanner.rs"
+    ));
 }
 
 /// Single documented failure path for build.rs. Every invariant violation
@@ -533,24 +541,45 @@ fn check_allow_justifications_inner() -> Result<shared_checks::LintCounts, Strin
     Ok(counts)
 }
 
+/// INV-STORE-SYNC-ONLY / Invariant 1 — the EARLY FAIL-CLOSED sentinel (D10).
+///
+/// Replaces the old `[dependencies]` STRING grep (which saw only a literal
+/// `tokio` in core's own manifest) with the SHARED resolved-dep-graph scanner.
+/// It runs `cargo metadata`, walks the PRODUCTION subgraph of every runtime
+/// crate, and FAILS THE BUILD (returns `Err`, which `?`-propagates to `main`'s
+/// `Result` — Cargo stops; this is NOT a downgradable `cargo:warning`) when an
+/// async runtime (tokio/async-std/smol/async-executor) is reachable, including
+/// renamed, optional, target-specific, workspace-inherited, or TRANSITIVE forms
+/// the grep could never catch. flume is runtime-neutral and never flagged.
+///
+/// `fail(..)` is called for its auditable `cargo:warning` SIDE EFFECT only; the
+/// returned `Err` is what stops the build. If `cargo metadata` itself cannot be
+/// resolved (e.g. a packaged crate with no workspace), the scan FAILS CLOSED
+/// with the error rather than passing silently.
 fn check_no_tokio_in_deps() -> Result<(), String> {
-    //Invariant 1: tokio must not appear in [dependencies].
-    //Only [dev-dependencies] is allowed.
-    let cargo = fs::read_to_string("Cargo.toml").expect("read Cargo.toml");
-
-    //Strategy: find the [dependencies] section, take text until the next
-    //section header (line starting with [), check for "tokio".
-    //This is deliberately simple string matching — no toml parser dep.
-    if let Some(deps_section) = cargo.split("[dependencies]").nth(1) {
-        let deps_only = deps_section.split("\n[").next().unwrap_or("");
-        if deps_only.contains("tokio") {
-            return Err(fail(
-                "INVARIANT 1 VIOLATED: tokio found in [dependencies].\n\
-                 tokio belongs in [dev-dependencies] only.\n\
-                 The library is runtime-agnostic. Fan-out uses Vec<flume::Sender>.\n\
-                 See: INVARIANTS.md.",
-            ));
-        }
+    let manifest_dir = core_root();
+    let hits = shared_checks::scan_workspace_for_runtimes(
+        &manifest_dir,
+        shared_checks::RUNTIME_CRATE_ROOTS,
+    )
+    .map_err(|err| {
+        fail(&format!(
+            "INVARIANT 1 (no async runtime) could not be proven: {err}.\n\
+             The resolved-dep-graph scan must succeed; refusing to pass vacuously."
+        ))
+    })?;
+    if let Some(hit) = hits.first() {
+        return Err(fail(&format!(
+            "INVARIANT 1 VIOLATED: async runtime `{}` is in the PRODUCTION dependency graph.\n\
+             Pulled via: {}.\n\
+             The library is runtime-agnostic. Fan-out uses Vec<flume::Sender>; flume is a\n\
+             runtime-NEUTRAL channel library and is allowed. Remove tokio/async-std/smol/\n\
+             async-executor (including renamed/optional/target-specific/transitive forms),\n\
+             or move the async integration into a downstream adapter crate.\n\
+             See: INVARIANTS.md, ADR-0001, INV-STORE-SYNC-ONLY.",
+            hit.package,
+            hit.pull_path.join(" -> "),
+        )));
     }
     Ok(())
 }

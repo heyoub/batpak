@@ -175,24 +175,39 @@ fn collect_domain_vocab_findings(repo_root: &Path, out: &mut Vec<Finding>) -> Re
 }
 
 fn collect_async_runtime_findings(repo_root: &Path, out: &mut Vec<Finding>) -> Result<()> {
-    for rel in ["Cargo.toml", "crates/core/Cargo.toml"] {
-        let path = repo_root.join(rel);
-        let content = fs::read_to_string(&path)?;
-        if content.lines().any(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("tokio")
-                || trimmed.starts_with("async-std")
-                || trimmed.starts_with("smol")
-        }) {
-            out.push(Finding {
-                id: "BATPAK-E-ASYNC-RUNTIME",
-                violates: "production batpak must not introduce async runtime dependencies",
-                why: format!("{rel} declares an async runtime dependency"),
-                fix: "Keep runtime APIs sync-only or put async integration in a downstream adapter crate.",
-                example: "ADR-0001 and INV-STORE-SYNC-ONLY",
-                warning_only: false,
-            });
+    // Upgraded from a `[dependencies]`-line `starts_with` grep to the SHARED
+    // resolved-dep-graph scanner (D10) — the same code the build.rs sentinel and
+    // the structural `no-runtime-dep-graph` gate use. It walks the production
+    // graph, catching renamed/optional/target-specific/transitive runtimes the
+    // grep could never see. flume is runtime-neutral and never flagged.
+    match crate::no_runtime_gate::scanner::scan_workspace_for_runtimes(
+        repo_root,
+        crate::no_runtime_gate::scanner::RUNTIME_CRATE_ROOTS,
+    ) {
+        Ok(hits) => {
+            for hit in hits {
+                out.push(Finding {
+                    id: "BATPAK-E-ASYNC-RUNTIME",
+                    violates: "production batpak must not introduce async runtime dependencies",
+                    why: format!(
+                        "async runtime `{}` is in the production dependency graph (via {})",
+                        hit.package,
+                        hit.pull_path.join(" -> ")
+                    ),
+                    fix: "Keep runtime APIs sync-only or put async integration in a downstream adapter crate.",
+                    example: "ADR-0001 and INV-STORE-SYNC-ONLY",
+                    warning_only: false,
+                });
+            }
         }
+        Err(err) => out.push(Finding {
+            id: "BATPAK-E-ASYNC-RUNTIME",
+            violates: "the no-async-runtime dep-graph scan must succeed (fail closed, never silent)",
+            why: format!("resolved-dep-graph scan failed: {err}"),
+            fix: "Ensure `cargo metadata` resolves in this checkout so the runtime-freedom gate can run.",
+            example: "ADR-0001 and INV-STORE-SYNC-ONLY",
+            warning_only: false,
+        }),
     }
     Ok(())
 }

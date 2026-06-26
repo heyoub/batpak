@@ -122,6 +122,32 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(1, 1, inputs))
     })?;
 
+    // no-runtime-dep-graph (D10): the PRODUCTION dependency graph of every runtime
+    // crate must contain NO async runtime (tokio/async-std/smol/async-executor),
+    // including renamed/optional/target-specific/transitive forms a Cargo.toml grep
+    // misses. The SAME shared scanner is the build.rs early sentinel. Input is the
+    // workspace manifest surface (the resolved graph cargo metadata reads).
+    crate::receipts::run_gate("no-runtime-dep-graph", || {
+        crate::no_runtime_gate::check(&repo_root)?;
+        let inputs = workspace_manifest_inputs(&repo_root);
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    // store-sync-only (D11): the STRUCTURAL (AST) half — no public async Store API,
+    // no impl-Future/boxed-Future return, no #[async_trait], no .await/async block
+    // in production store code — PLUS the dep-graph half (no async executor in the
+    // store's production graph). Replaces the old `async fn` substring grep.
+    crate::receipts::run_gate("store-sync-only", || {
+        crate::store_sync_gate::check(&repo_root, &mut source_cache)?;
+        crate::no_runtime_gate::check_store(&repo_root)?;
+        let inputs: BTreeSet<PathBuf> = crate::store_sync_gate::store_production_files(&repo_root)
+            .into_iter()
+            .collect();
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
     // capability-snapshot (GAUNT-CAPSNAP): the committed capability FLOOR must be
     // an exact mirror of every backend's `support_matrix()` best-case table + the
     // witnessed-invariant set. Drift => fail+regenerate; a downgrade diff is

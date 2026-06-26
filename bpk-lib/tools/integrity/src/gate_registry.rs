@@ -512,6 +512,39 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
         has_blocking_authority: true,
     },
+    // --- D10 no-runtime dep-graph gate (blocking, qualified GateNegativePath).
+    //     The shared scanner walks the RESOLVED Cargo production graph (cargo
+    //     metadata, not a Cargo.toml grep) of every runtime crate for an async
+    //     runtime (tokio/async-std/smol/async-executor), catching renamed/
+    //     optional/target-specific/transitive forms. The SAME scanner is the
+    //     build.rs early FAIL-CLOSED sentinel. The red fixture feeds synthetic
+    //     resolved graphs with a renamed, a transitive, AND a target-specific
+    //     planted runtime and asserts each is flagged (the gate Errs), proving it
+    //     catches the evasions the old grep missed. flume is never flagged.
+    Gate {
+        slug: "no-runtime-dep-graph",
+        red_fixture_test: Some(
+            "tools/integrity/src/no_runtime_gate.rs::planted_runtime_dep_is_rejected",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    // --- D11 STORE_SYNC_ONLY gate (blocking, qualified GateNegativePath). The
+    //     STRUCTURAL (AST) half flags a public async Store API, an impl-Future or
+    //     boxed-Future return, an #[async_trait] impl, and a stray .await/async
+    //     block in production store code — every shape the old `async fn`
+    //     substring grep missed — plus the dep-graph half (no async executor in
+    //     the store's production graph). The red fixture plants all six evasions
+    //     (4 AST + a renamed-tokio + a target-specific async runtime under store)
+    //     and asserts each bites. flume's recv_async() is a sync call, not flagged.
+    Gate {
+        slug: "store-sync-only",
+        red_fixture_test: Some(
+            "tools/integrity/src/store_sync_gate_tests.rs::every_async_store_evasion_is_rejected",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
 ];
 
 /// Gates that block a real run today but are recorded as `has_blocking_authority:
