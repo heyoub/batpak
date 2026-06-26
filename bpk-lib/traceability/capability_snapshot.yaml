@@ -79,7 +79,7 @@ witnesses:
   - { id: INV-BATCH-ATOMIC-VISIBILITY, witnessed: true }
   - { id: INV-BATCH-CRASH-RECOVERY, witnessed: true }
   - { id: INV-BIDIRECTIONAL-SUBSTRATE-LANE, witnessed: true }
-  - { id: INV-BUILD-FAIL-FAST, witnessed: false }
+  - { id: INV-BUILD-FAIL-FAST, witnessed: true }
   - { id: INV-CACHE-CAPABILITIES-EXPLICIT, witnessed: true }
   - { id: INV-CANONICAL-CONTAINER-CI, witnessed: false }
   - { id: INV-CANONICAL-PATCH-STABILITY, witnessed: true }
@@ -138,7 +138,7 @@ witnesses:
   - { id: INV-NETBAT-BOUNDARY-THIN, witnessed: true }
   - { id: INV-NETBAT-LINE-PROTOCOL-STABLE, witnessed: true }
   - { id: INV-NO-DEAD-CODE-SILENCERS, witnessed: true }
-  - { id: INV-NO-TOKIO-PROD, witnessed: false }
+  - { id: INV-NO-TOKIO-PROD, witnessed: true }
   - { id: INV-OBSERVABILITY-FAILURE-PATHS, witnessed: true }
   - { id: INV-ONDISK-FORWARD-COMPAT-CANONICAL, witnessed: true }
   - { id: INV-OPEN-REPORT-RECEIPT, witnessed: true }
@@ -162,7 +162,7 @@ witnesses:
   - { id: INV-STORE-ERROR-TAXONOMY, witnessed: true }
   - { id: INV-STORE-ISOMORPHISM-LAWS, witnessed: true }
   - { id: INV-STORE-LIFECYCLE-HONESTY, witnessed: true }
-  - { id: INV-STORE-SYNC-ONLY, witnessed: false }
+  - { id: INV-STORE-SYNC-ONLY, witnessed: true }
   - { id: INV-SUBSCRIPTION-STATE-MACHINE, witnessed: true }
   - { id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL, witnessed: true }
   - { id: INV-SYNCBAT-DISPATCH-RECEIPTS, witnessed: true }
