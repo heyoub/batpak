@@ -176,108 +176,163 @@ impl HostError {
 impl std::fmt::Display for HostError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::DuplicateModuleId { id } => {
-                write!(f, "module id {id:?} is already mounted")
-            }
-            Self::DuplicateOperation { operation, module } => {
-                write!(
-                    f,
-                    "operation {operation:?} re-declared by module {module:?} is already mounted"
-                )
-            }
-            Self::EffectConflict { operation, module } => {
-                write!(
-                    f,
-                    "operation {operation:?} re-declared by module {module:?} has conflicting effect authority"
-                )
-            }
-            Self::DuplicateReceiptNamespace { namespace, module } => {
-                write!(
-                    f,
-                    "receipt namespace {namespace:?} re-claimed by module {module:?} is already mounted"
-                )
-            }
-            Self::DuplicateJobKind { kind, module } => {
-                write!(
-                    f,
-                    "supervised-job kind {kind:?} re-declared by module {module:?} is already mounted"
-                )
-            }
-            Self::ModuleHashMismatch { module } => {
-                write!(
-                    f,
-                    "module {module:?} manifest hash does not match its declared parts"
-                )
-            }
-            Self::ModuleCoherence { module, detail } => {
-                write!(f, "module {module:?} is incoherent: {detail}")
-            }
-            Self::CanonicalEncoding { detail } => {
-                write!(f, "canonical encoding failed: {detail}")
-            }
-            Self::SchemaInvalid { schema, detail } => {
-                write!(f, "schema {schema:?} is invalid: {detail}")
-            }
-            Self::SchemaCollision(collision) => {
-                let SchemaCollision {
-                    schema,
-                    version,
-                    role,
-                    first_module,
-                    first_encoding,
-                    second_module,
-                    second_encoding,
-                } = collision.as_ref();
-                write!(
-                    f,
-                    "schema {schema:?} v{version} ({role}) declared with conflicting encodings: \
-                     module {first_module:?} => {first_encoding}, \
-                    module {second_module:?} => {second_encoding}"
-                )
-            }
-            Self::SchemaReferenceMissing {
-                module,
-                operation,
-                reference,
-                role,
-            } => {
-                write!(
-                    f,
-                    "module {module:?} references missing schema {reference:?} for role {role}"
-                )?;
-                if let Some(operation) = operation {
-                    write!(f, " on operation {operation:?}")?;
-                }
-                Ok(())
-            }
-            Self::SchemaReferenceAmbiguous {
-                module,
-                operation,
-                reference,
-                role,
-                versions,
-            } => {
-                write!(
-                    f,
-                    "module {module:?} references ambiguous schema {reference:?} for role {role}; versions: {versions:?}"
-                )?;
-                if let Some(operation) = operation {
-                    write!(f, " on operation {operation:?}")?;
-                }
-                Ok(())
-            }
-            Self::SchemaValidation {
-                schema,
-                role,
-                detail,
-            } => write!(
-                f,
-                "schema validation failed for {schema:?} ({role}): {detail}"
-            ),
-            Self::EmptyHost => write!(f, "cannot build a host with no mounted modules"),
-            Self::Build(error) => write!(f, "lowering into the syncbat runtime failed: {error}"),
+            Self::DuplicateModuleId { .. }
+            | Self::DuplicateOperation { .. }
+            | Self::EffectConflict { .. }
+            | Self::DuplicateReceiptNamespace { .. }
+            | Self::DuplicateJobKind { .. }
+            | Self::ModuleHashMismatch { .. }
+            | Self::ModuleCoherence { .. }
+            | Self::EmptyHost
+            | Self::Build(_) => fmt_host_wiring_error(self, f),
+            Self::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
+            Self::SchemaInvalid { .. }
+            | Self::SchemaCollision(_)
+            | Self::SchemaReferenceMissing { .. }
+            | Self::SchemaReferenceAmbiguous { .. }
+            | Self::SchemaValidation { .. } => fmt_schema_error(self, f),
         }
     }
+}
+
+fn fmt_host_wiring_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match error {
+        HostError::DuplicateModuleId { id } => write!(f, "module id {id:?} is already mounted"),
+        HostError::DuplicateOperation { operation, module } => write!(
+            f,
+            "operation {operation:?} re-declared by module {module:?} is already mounted"
+        ),
+        HostError::EffectConflict { operation, module } => write!(
+            f,
+            "operation {operation:?} re-declared by module {module:?} has conflicting effect authority"
+        ),
+        HostError::DuplicateReceiptNamespace { namespace, module } => write!(
+            f,
+            "receipt namespace {namespace:?} re-claimed by module {module:?} is already mounted"
+        ),
+        HostError::DuplicateJobKind { kind, module } => write!(
+            f,
+            "supervised-job kind {kind:?} re-declared by module {module:?} is already mounted"
+        ),
+        HostError::ModuleHashMismatch { module } => write!(
+            f,
+            "module {module:?} manifest hash does not match its declared parts"
+        ),
+        HostError::ModuleCoherence { module, detail } => {
+            write!(f, "module {module:?} is incoherent: {detail}")
+        }
+        HostError::EmptyHost => write!(f, "cannot build a host with no mounted modules"),
+        HostError::Build(error) => write!(f, "lowering into the syncbat runtime failed: {error}"),
+        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
+        HostError::SchemaInvalid { .. }
+        | HostError::SchemaCollision(_)
+        | HostError::SchemaReferenceMissing { .. }
+        | HostError::SchemaReferenceAmbiguous { .. }
+        | HostError::SchemaValidation { .. } => fmt_schema_error(error, f),
+    }
+}
+
+fn fmt_schema_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match error {
+        HostError::SchemaInvalid { schema, detail } => {
+            write!(f, "schema {schema:?} is invalid: {detail}")
+        }
+        HostError::SchemaCollision(collision) => fmt_schema_collision(collision, f),
+        HostError::SchemaReferenceMissing {
+            module,
+            operation,
+            reference,
+            role,
+        } => fmt_schema_reference_missing(module, operation.as_deref(), reference, role, f),
+        HostError::SchemaReferenceAmbiguous {
+            module,
+            operation,
+            reference,
+            role,
+            versions,
+        } => fmt_schema_reference_ambiguous(
+            module,
+            operation.as_deref(),
+            reference,
+            role,
+            versions,
+            f,
+        ),
+        HostError::SchemaValidation {
+            schema,
+            role,
+            detail,
+        } => write!(
+            f,
+            "schema validation failed for {schema:?} ({role}): {detail}"
+        ),
+        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
+        HostError::DuplicateModuleId { .. }
+        | HostError::DuplicateOperation { .. }
+        | HostError::EffectConflict { .. }
+        | HostError::DuplicateReceiptNamespace { .. }
+        | HostError::DuplicateJobKind { .. }
+        | HostError::ModuleHashMismatch { .. }
+        | HostError::ModuleCoherence { .. }
+        | HostError::EmptyHost
+        | HostError::Build(_) => fmt_host_wiring_error(error, f),
+    }
+}
+
+fn fmt_schema_collision(
+    collision: &SchemaCollision,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    let SchemaCollision {
+        schema,
+        version,
+        role,
+        first_module,
+        first_encoding,
+        second_module,
+        second_encoding,
+    } = collision;
+    write!(
+        f,
+        "schema {schema:?} v{version} ({role}) declared with conflicting encodings: \
+         module {first_module:?} => {first_encoding}, \
+        module {second_module:?} => {second_encoding}"
+    )
+}
+
+fn fmt_schema_reference_missing(
+    module: &str,
+    operation: Option<&str>,
+    reference: &str,
+    role: &str,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    write!(
+        f,
+        "module {module:?} references missing schema {reference:?} for role {role}"
+    )?;
+    if let Some(operation) = operation {
+        write!(f, " on operation {operation:?}")?;
+    }
+    Ok(())
+}
+
+fn fmt_schema_reference_ambiguous(
+    module: &str,
+    operation: Option<&str>,
+    reference: &str,
+    role: &str,
+    versions: &[u32],
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    write!(
+        f,
+        "module {module:?} references ambiguous schema {reference:?} for role {role}; versions: {versions:?}"
+    )?;
+    if let Some(operation) = operation {
+        write!(f, " on operation {operation:?}")?;
+    }
+    Ok(())
 }
 
 impl std::error::Error for HostError {

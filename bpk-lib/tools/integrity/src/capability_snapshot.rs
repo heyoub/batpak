@@ -72,9 +72,9 @@ pub(crate) const SNAPSHOT_REL: &str = "traceability/capability_snapshot.yaml";
 /// excluded: it is not a platform contract a consumer reads.
 const BACKENDS: &[&str] = &["linux", "wasm", "windows", "macos"];
 
-/// One advertised capability cell: a `(backend, kind)` best-case verdict.
+/// One advertised capability floor cell: a `(backend, kind)` best-case verdict.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct CeilingRow {
+pub(crate) struct AspirationFloorRow {
     pub(crate) backend: String,
     pub(crate) kind: String,
     pub(crate) enforcement: String,
@@ -95,13 +95,13 @@ pub(crate) struct WitnessRow {
 /// line-stable (each cell is exactly one diff-able line).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct Snapshot {
-    pub(crate) ceilings: Vec<CeilingRow>,
+    pub(crate) aspiration_floor: Vec<AspirationFloorRow>,
     pub(crate) witnesses: Vec<WitnessRow>,
 }
 
 impl Snapshot {
     fn sorted(mut self) -> Self {
-        self.ceilings.sort();
+        self.aspiration_floor.sort();
         self.witnesses.sort();
         self
     }
@@ -134,14 +134,14 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     if std::fs::read_to_string(&path).ok().as_deref() != Some(rendered.as_str()) {
         std::fs::write(&path, &rendered).with_context(|| format!("write {SNAPSHOT_REL}"))?;
         outln!(
-            "capability-snapshot: regenerated {SNAPSHOT_REL} ({} ceiling cell(s), {} witness cell(s))",
-            derived.ceilings.len(),
+            "capability-snapshot: regenerated {SNAPSHOT_REL} ({} aspiration-floor cell(s), {} witness cell(s))",
+            derived.aspiration_floor.len(),
             derived.witnesses.len()
         );
     } else {
         outln!(
-            "capability-snapshot: {SNAPSHOT_REL} already current ({} ceiling cell(s))",
-            derived.ceilings.len()
+            "capability-snapshot: {SNAPSHOT_REL} already current ({} aspiration-floor cell(s))",
+            derived.aspiration_floor.len()
         );
     }
     Ok(())
@@ -163,8 +163,8 @@ fn check_gate(repo_root: &Path, derived: &Snapshot) -> Result<()> {
     assert_mirror(&committed, derived)?;
     validate_downgrade_waiver_targets(repo_root, derived)?;
     outln!(
-        "capability-snapshot: ok ({} ceiling cell(s), {} witness cell(s), mirror current)",
-        derived.ceilings.len(),
+        "capability-snapshot: ok ({} aspiration-floor cell(s), {} witness cell(s), mirror current)",
+        derived.aspiration_floor.len(),
         derived.witnesses.len()
     );
     Ok(())
@@ -188,7 +188,7 @@ fn validate_downgrade_waiver_targets(repo_root: &Path, derived: &Snapshot) -> Re
             )
         })?;
         let exists = derived
-            .ceilings
+            .aspiration_floor
             .iter()
             .any(|c| c.backend == backend && c.kind == kind);
         ensure(
@@ -231,13 +231,15 @@ pub(crate) fn assert_mirror(committed_text: &str, derived: &Snapshot) -> Result<
 /// witnessed-invariant set from the docs catalog.
 pub(crate) fn derive_snapshot(repo_root: &Path) -> Result<Snapshot> {
     let mut cache = SourceCache::new(repo_root);
-    let mut ceilings = Vec::new();
+    let mut aspiration_floor = Vec::new();
     for backend in BACKENDS {
-        ceilings.extend(derive_backend_ceilings(repo_root, backend, &mut cache)?);
+        aspiration_floor.extend(derive_backend_aspiration_floor(
+            repo_root, backend, &mut cache,
+        )?);
     }
     let witnesses = derive_witnesses(repo_root)?;
     Ok(Snapshot {
-        ceilings,
+        aspiration_floor,
         witnesses,
     })
 }
@@ -246,17 +248,17 @@ pub(crate) fn derive_snapshot(repo_root: &Path) -> Result<Snapshot> {
 /// HARDENING: an existing `support_matrix()` that yields zero cells is RED — a
 /// refactor that moved the inserts behind a helper/loop, or a parse failure,
 /// would silently empty the floor and defeat the whole gate.
-fn derive_backend_ceilings(
+fn derive_backend_aspiration_floor(
     repo_root: &Path,
     backend: &str,
     cache: &mut SourceCache,
-) -> Result<Vec<CeilingRow>> {
+) -> Result<Vec<AspirationFloorRow>> {
     let rel = format!("crates/bvisor/src/backend/{backend}/mod.rs");
     let abs = repo_root.join(&rel);
     let file = cache
         .parse_rust(&abs)
         .with_context(|| format!("parse backend support matrix {rel}"))?;
-    extract_ceilings(backend, &file)
+    extract_aspiration_floor(backend, &file)
 }
 
 /// Pure extractor: walk a parsed backend file's `support_matrix()` for its
@@ -264,7 +266,7 @@ fn derive_backend_ceilings(
 /// — a refactor that moved the inserts behind a helper/loop (or a parse that lost
 /// them) would silently empty the floor and defeat the whole gate. Split from IO
 /// so the empty-guard is directly testable.
-fn extract_ceilings(backend: &str, file: &syn::File) -> Result<Vec<CeilingRow>> {
+fn extract_aspiration_floor(backend: &str, file: &syn::File) -> Result<Vec<AspirationFloorRow>> {
     let mut visitor = SupportMatrixVisitor {
         in_support_matrix: false,
         cells: Vec::new(),
@@ -288,7 +290,7 @@ fn extract_ceilings(backend: &str, file: &syn::File) -> Result<Vec<CeilingRow>> 
         .map(|(kind, enforcement, mut evidence)| {
             evidence.sort();
             evidence.dedup();
-            CeilingRow {
+            AspirationFloorRow {
                 backend: backend.to_string(),
                 kind,
                 enforcement,
@@ -425,8 +427,8 @@ pub(crate) fn render(snapshot: &Snapshot) -> String {
          # un-proved) is a CAPABILITY DOWNGRADE the meta-gate blocks without two-person approval\n\
          # or a typed CapabilityDowngrade waiver.\n",
     );
-    out.push_str("ceilings:\n");
-    for cell in &snapshot.ceilings {
+    out.push_str("aspiration_floor:\n");
+    for cell in &snapshot.aspiration_floor {
         let evidence = cell.evidence.join(", ");
         out.push_str(&format!(
             "  - {{ backend: {}, kind: {}, enforcement: {}, evidence: [{}] }}\n",
@@ -454,8 +456,8 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if line == "ceilings:" {
-            section = Section::Ceilings;
+        if line == "aspiration_floor:" {
+            section = Section::AspirationFloor;
             continue;
         }
         if line == "witnesses:" {
@@ -469,7 +471,9 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
             .map(str::trim)
             .with_context(|| format!("capability-snapshot: malformed row `{line}`"))?;
         match section {
-            Section::Ceilings => snapshot.ceilings.push(parse_ceiling(body)?),
+            Section::AspirationFloor => snapshot
+                .aspiration_floor
+                .push(parse_aspiration_floor(body)?),
             Section::Witnesses => snapshot.witnesses.push(parse_witness(body)?),
             Section::None => bail!("capability-snapshot: row before any section header: `{line}`"),
         }
@@ -479,11 +483,11 @@ pub(crate) fn parse(text: &str) -> Result<Snapshot> {
 
 enum Section {
     None,
-    Ceilings,
+    AspirationFloor,
     Witnesses,
 }
 
-fn parse_ceiling(body: &str) -> Result<CeilingRow> {
+fn parse_aspiration_floor(body: &str) -> Result<AspirationFloorRow> {
     let fields = parse_fields(body);
     let evidence_raw = field(&fields, "evidence", body)?;
     let evidence: Vec<String> = evidence_raw
@@ -494,7 +498,7 @@ fn parse_ceiling(body: &str) -> Result<CeilingRow> {
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .collect();
-    Ok(CeilingRow {
+    Ok(AspirationFloorRow {
         backend: field(&fields, "backend", body)?,
         kind: field(&fields, "kind", body)?,
         enforcement: field(&fields, "enforcement", body)?,

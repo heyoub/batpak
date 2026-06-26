@@ -14,7 +14,7 @@
 //! the mirror — the mirror is the integrity-side single source for "which
 //! globs are critical seams".
 
-use crate::repo_surface::{core_src_root, load_yaml, production_rust_roots, relative, rust_files};
+use crate::repo_surface::{load_yaml, production_rust_roots, relative, rust_files};
 use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -410,9 +410,9 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
 /// Advisory (non-blocking): list production `.rs` files matched by no glob in
 /// the manifest (i.e. files resolving to the default `L1`). Wired to print, not
 /// fail — earns blocking authority later.
-pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Vec<String> {
-    let mut paths = rust_files(&core_src_root(repo_root));
-    for root in production_rust_roots(repo_root) {
+pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for root in production_rust_roots(repo_root)? {
         paths.extend(rust_files(&root));
     }
     let mut unleveled: Vec<String> = paths
@@ -422,7 +422,7 @@ pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> V
         .collect();
     unleveled.sort();
     unleveled.dedup();
-    unleveled
+    Ok(unleveled)
 }
 
 /// Loads the manifest, runs the lockstep gate, and prints an advisory line for
@@ -433,7 +433,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
     let seam_registry = load_seam_registry(repo_root)?;
     check_seam_registry_lockstep(&seam_registry)?;
 
-    let unleveled = unleveled_files(repo_root, &entries);
+    let unleveled = unleveled_files(repo_root, &entries)?;
     if unleveled.is_empty() {
         outln!("assurance-level-check: ok (every production file resolves to a declared AL)");
     } else {

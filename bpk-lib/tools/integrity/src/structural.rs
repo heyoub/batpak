@@ -1,6 +1,6 @@
 use crate::repo_surface::{
-    core_benches_root, core_examples_root, core_src_root, core_tests_root, ensure,
-    production_rust_roots, relative, repo_root, rust_files, tracked_repo_files,
+    core_benches_root, core_examples_root, core_tests_root, ensure, production_rust_roots,
+    relative, repo_root, rust_files, tracked_repo_files,
 };
 use crate::shared_checks::{collect_dead_code_silencer_sites, load_dead_code_silencer_allowlist};
 use crate::source_cache::SourceCache;
@@ -44,7 +44,7 @@ pub(crate) fn run() -> Result<()> {
     // The structural source lints share one receipt: they all walk the
     // production-Rust surface and each file is the unit of work + the assertion.
     let started = crate::receipts::iso8601_now();
-    let source_files = production_rust_files(&repo_root);
+    let source_files = production_rust_files(&repo_root)?;
     check_no_dead_code_silencers(&repo_root, &mut source_cache)?;
     check_no_placeholder_runtime_macros(&repo_root, &mut source_cache)?;
     check_canonical_encoding_boundary(&repo_root, &mut source_cache)?;
@@ -107,7 +107,8 @@ pub(crate) fn run() -> Result<()> {
     crate::receipts::run_gate("assurance-level-check", || {
         crate::assurance::check(&repo_root)?;
         let manifest = crate::assurance::manifest_path(&repo_root);
-        let mut inputs: BTreeSet<PathBuf> = production_rust_files(&repo_root).into_iter().collect();
+        let mut inputs: BTreeSet<PathBuf> =
+            production_rust_files(&repo_root)?.into_iter().collect();
         inputs.insert(manifest);
         let files = inputs.len();
         Ok(crate::receipts::GateWork::new(files, files, inputs))
@@ -220,7 +221,7 @@ fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
 const DEFAULT_LINE_BUDGET: usize = 850;
 
 fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    check_rust_file_size_pressure_over(repo_root, &production_rust_files(repo_root), source_cache)
+    check_rust_file_size_pressure_over(repo_root, &production_rust_files(repo_root)?, source_cache)
 }
 
 /// Testable core of [`check_rust_file_size_pressure`]: assert every file in
@@ -258,7 +259,7 @@ fn check_inline_test_island_pressure(
 ) -> Result<()> {
     check_inline_test_island_pressure_over(
         repo_root,
-        &production_rust_files(repo_root),
+        &production_rust_files(repo_root)?,
         source_cache,
     )
 }
@@ -338,7 +339,7 @@ fn check_event_payload_frozen_fixtures(
     let payloads_dir = core_tests_root(repo_root).join("golden").join("payloads");
 
     let mut discovered: Vec<(String, Option<(u8, u16)>)> = Vec::new();
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         let file = source_cache
             .parse_rust(&path)
@@ -512,7 +513,7 @@ fn check_no_placeholder_runtime_macros(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.push(repo_root.join("crates/core/build.rs"));
@@ -547,7 +548,7 @@ fn check_no_placeholder_runtime_macros(
 }
 
 fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
@@ -592,7 +593,7 @@ fn check_no_dead_code_silencers_over(
 }
 
 fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
@@ -640,7 +641,7 @@ fn check_canonical_encoding_boundary(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if rel == "crates/core/src/encoding.rs" {
             continue;
@@ -667,7 +668,7 @@ fn check_no_store_read_dir_entry_error_swallowing(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if !rel.starts_with("crates/core/src/store/") {
             continue;
@@ -691,7 +692,7 @@ fn check_store_segment_classification_boundary(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if !rel.starts_with("crates/core/src/store/")
             || rel == "crates/core/src/store/file_classification.rs"
@@ -807,12 +808,12 @@ fn nonblank_line_count_in_range(lines: &[&str], start_line: usize, end_line: usi
         .count()
 }
 
-pub(crate) fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
-    let mut paths = rust_files(&core_src_root(repo_root));
-    for root in production_rust_roots(repo_root) {
+pub(crate) fn production_rust_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = BTreeSet::new();
+    for root in production_rust_roots(repo_root)? {
         paths.extend(rust_files(&root));
     }
-    paths
+    Ok(paths.into_iter().collect())
 }
 
 /// True when `attrs` carries `#[cfg(test)]`. Shared with the complexity gate so

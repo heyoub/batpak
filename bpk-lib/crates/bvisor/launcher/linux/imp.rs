@@ -2,16 +2,21 @@
 //! the control-fd transcript live here; every `unsafe` syscall is delegated to the
 //! [`crate::sys`] basement. See `main.rs` for the topology + honesty contract.
 
-use crate::sys::{self, ChildExecPlan, LandlockRoot, ObservedShape, UsernsSyncPipe};
+#[path = "imp/support.rs"]
+mod support;
+
+use crate::sys::{self, ChildExecPlan, LandlockRoot, UsernsSyncPipe};
 use bvisor::linux::protocol::{
     confinement_installed, phase_resolution_consistent, ready_to_exec, validate_table,
-    DescriptorKind, DescriptorRole, DescriptorSlotV1, LauncherState, LinuxLaunchBodyV1,
-    LinuxLaunchPlanV1, LoweringWireEntryV1, PhaseResult, RefusalReason, SetupPhase,
+    DescriptorRole, LauncherState, LinuxLaunchBodyV1, LinuxLaunchPlanV1, LoweringWireEntryV1,
+    PhaseResult, RefusalReason, SetupPhase,
 };
 use std::collections::BTreeSet;
-use std::fs::File;
-use std::io::{Read, Write};
 use std::os::fd::RawFd;
+use support::{
+    boot_fault, build_seccomp_filter, user_namespace_rendezvous, verify_handles, wait_for_child,
+    ChildOutcome, Transcript,
+};
 
 // ── Frozen primitive ids + phase codes the skeleton serves ────────────────────
 
@@ -157,168 +162,256 @@ pub(crate) fn run() -> std::process::ExitCode {
 
 /// Drive the full coordinator sequence over an established control channel.
 fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
-    // 1. LauncherStarted + single-thread check.
     control.emit(LauncherState::LauncherStarted);
-    let tasks = count_self_tasks()?;
-    if tasks != 1 {
-        return Err(BootError::NotSingleThreaded { observed: tasks });
-    }
+    ensure_single_threaded()?;
 
-    // 2. Read + decode the plan from the plan fd.
+    let inputs = match read_launch_inputs(control)? {
+        DriveStep::Continue(inputs) => inputs,
+        DriveStep::Done(verdict) => return Ok(verdict),
+    };
+    let body = &inputs.plan.body;
+
+    let verified = match verify_launch_plan(control, body)? {
+        DriveStep::Continue(verified) => verified,
+        DriveStep::Done(verdict) => return Ok(verdict),
+    };
+
+    let mechanisms = match prepare_mechanisms(control, body, &verified)? {
+        DriveStep::Continue(mechanisms) => mechanisms,
+        DriveStep::Done(verdict) => return Ok(verdict),
+    };
+
+    let PreparedMechanisms {
+        confinement,
+        seccomp_program,
+        seccomp_built,
+        phases,
+    } = mechanisms;
+    let child_pid = match spawn_child(
+        control,
+        body,
+        inputs.error_fd,
+        confinement,
+        seccomp_program.as_ref(),
+        seccomp_built,
+    )? {
+        DriveStep::Continue(child_pid) => child_pid,
+        DriveStep::Done(verdict) => return Ok(verdict),
+    };
+
+    finish_child(
+        control,
+        inputs.error_fd,
+        inputs.error_read_fd,
+        child_pid,
+        &verified.schedule,
+        &phases,
+    )
+}
+
+enum DriveStep<T> {
+    Continue(T),
+    Done(Verdict),
+}
+
+struct LaunchInputs {
+    plan: LinuxLaunchPlanV1,
+    error_fd: RawFd,
+    error_read_fd: RawFd,
+}
+
+struct VerifiedPlan {
+    observed_digest: [u8; 32],
+    schedule: ClassifiedSchedule,
+}
+
+struct PreparedMechanisms {
+    confinement: Option<BuiltConfinement>,
+    seccomp_program: Option<sys::BpfProgram>,
+    seccomp_built: bool,
+    phases: Phases,
+}
+
+fn ensure_single_threaded() -> Result<(), BootError> {
+    let tasks = count_self_tasks()?;
+    if tasks == 1 {
+        Ok(())
+    } else {
+        Err(BootError::NotSingleThreaded { observed: tasks })
+    }
+}
+
+fn read_launch_inputs(control: &mut Transcript) -> Result<DriveStep<LaunchInputs>, BootError> {
     let plan_fd = fd_from_env(ENV_PLAN_FD)?;
     let error_fd = fd_from_env(ENV_ERROR_FD)?;
     let error_read_fd = fd_from_env(ENV_ERROR_READ_FD)?;
     let plan_bytes = sys::read_fd_to_vec(plan_fd)?;
     let plan = match LinuxLaunchPlanV1::decode(&plan_bytes) {
-        Ok(p) => p,
-        Err(_) => {
-            // A bad/tampered/bad-magic plan is a fail-closed REFUSAL (PlanInvalid):
-            // structurally unusable, but the launcher itself did not fault.
-            return Ok(refuse(control, RefusalReason::PlanInvalid));
-        }
+        Ok(plan) => plan,
+        Err(_) => return Ok(DriveStep::Done(refuse(control, RefusalReason::PlanInvalid))),
     };
-    let body = &plan.body;
+    Ok(DriveStep::Continue(LaunchInputs {
+        plan,
+        error_fd,
+        error_read_fd,
+    }))
+}
 
-    // 3. IdentityVerified — schedule-digest binding ONLY (see module note).
+fn verify_launch_plan(
+    control: &mut Transcript,
+    body: &LinuxLaunchBodyV1,
+) -> Result<DriveStep<VerifiedPlan>, BootError> {
     let observed_digest = schedule_digest(body);
     if observed_digest != body.h_l {
-        return Ok(refuse(control, RefusalReason::IdentityMismatch));
+        return Ok(DriveStep::Done(refuse(
+            control,
+            RefusalReason::IdentityMismatch,
+        )));
     }
     control.emit(LauncherState::IdentityVerified);
 
-    // 4. PlanVerified — table structure + the schedule bucketing (the launcher serves
-    //    scrub@AmbientAuthority + landlock-apply@Confinement + exec; anything else ⇒
-    //    MissingPrimitive).
     if validate_table(&body.descriptor_table).is_err() {
-        return Ok(refuse(control, RefusalReason::PlanInvalid));
+        return Ok(DriveStep::Done(refuse(control, RefusalReason::PlanInvalid)));
     }
     let schedule = match classify_schedule(body) {
         Ok(schedule) => schedule,
-        Err(reason) => return Ok(refuse(control, reason)),
+        Err(reason) => return Ok(DriveStep::Done(refuse(control, reason))),
     };
     control.emit(LauncherState::PlanVerified);
 
-    // 5. HandlesVerified — fstat each declared slot against its declared SHAPE (kind +
-    //    writability). A shape mismatch (e.g. a dir fd where a `Regular` is declared) ⇒
-    //    `HandleMismatch`. The coordinator does NOT enumerate the open-fd table and
-    //    refuse on an undeclared inherited fd: the child-side scrub (step 8) closes
-    //    every non-allowlisted fd before `fexecve`, so G6 (no-fd-escape) is enforced by
-    //    the scrub, not a coordinator refusal. (The landlock roots are validated HERE,
-    //    before the ruleset is built from their inherited fds.)
-    let known = KnownFds { error: error_fd };
     if verify_handles(body)?.is_err() {
-        return Ok(refuse(control, RefusalReason::HandleMismatch));
+        return Ok(DriveStep::Done(refuse(
+            control,
+            RefusalReason::HandleMismatch,
+        )));
     }
     control.emit(LauncherState::HandlesVerified);
 
-    // 6. CONFINEMENT: if a landlock-apply action is scheduled, BUILD the ruleset in the
-    //    PARENT now (all allocation + add_rule syscalls, async-signal-safety) from the
-    //    just-validated root fds. `None` ⇒ no landlock action (Confinement stays
-    //    NotRequired). A build failure fails CLOSED to a refusal — the launcher never
-    //    advertises a confinement it cannot install. The ruleset fd(s) are diffed
-    //    against the PRE-build fd snapshot so they can be scrub-exempted + CLOEXEC'd.
-    let open_before = open_fd_set()?;
-    let confinement = if schedule.confine.is_empty() {
-        None
-    } else {
-        match build_confinement(body, &open_before) {
-            Ok(built) => Some(built),
-            Err(ConfineRefusal::AbiBelowFloor) => {
-                return Ok(refuse(control, RefusalReason::MissingPrimitive));
-            }
-            Err(ConfineRefusal::NoUsableRoot) => {
-                return Ok(refuse(control, RefusalReason::HandleMismatch));
-            }
-        }
+    Ok(DriveStep::Continue(VerifiedPlan {
+        observed_digest,
+        schedule,
+    }))
+}
+
+fn prepare_mechanisms(
+    control: &mut Transcript,
+    body: &LinuxLaunchBodyV1,
+    verified: &VerifiedPlan,
+) -> Result<DriveStep<PreparedMechanisms>, BootError> {
+    let confinement = match build_landlock_if_scheduled(control, body, &verified.schedule)? {
+        DriveStep::Continue(confinement) => confinement,
+        DriveStep::Done(verdict) => return Ok(DriveStep::Done(verdict)),
     };
     let confine_built = confinement.is_some();
-
-    // 6b. SECCOMP (S10): when a `linux.seccomp.apply.v1` action is scheduled, the plan's
-    //     `target.seccomp` request drives a default-allow DENYLIST the coordinator COMPILES
-    //     NOW, in the PARENT (the bvisor seccomp model's compile()), so the child window
-    //     install is allocation-free. A scheduled seccomp action WITHOUT a request, an
-    //     empty (no-op) request, or a compile failure fails CLOSED to a refusal — the
-    //     launcher never advertises a filter it cannot install. The BpfProgram is owned here
-    //     and passed by reference into clone3; the child installs it LAST, before fexecve.
-    let seccomp_program: Option<sys::BpfProgram> = if schedule.seccomp.is_empty() {
-        None
-    } else {
-        match build_seccomp_filter(body) {
-            Ok(program) => Some(program),
-            Err(()) => return Ok(refuse(control, RefusalReason::MissingPrimitive)),
-        }
+    let seccomp_program = match build_seccomp_if_scheduled(control, body, &verified.schedule) {
+        DriveStep::Continue(program) => program,
+        DriveStep::Done(verdict) => return Ok(DriveStep::Done(verdict)),
     };
     let seccomp_built = seccomp_program.is_some();
-
-    // 7. Compute the four phase results and hold the ReadyToExec gate BEFORE any child is
-    //    created. Confinement (landlock + seccomp) is `Applied` IFF at least one Confinement
-    //    action was scheduled AND every scheduled one was built (the child WILL apply them).
-    let confinement_built = confinement_actions_built(&schedule, confine_built, seccomp_built);
-    let phases = compute_phases(&schedule, confinement_built);
-    // Phase-honesty self-check (anti over/under-claim) before we trust the results.
-    if !phases_are_honest(&schedule, &phases) {
-        return Ok(Verdict::Faulted);
+    let confinement_built =
+        confinement_actions_built(&verified.schedule, confine_built, seccomp_built);
+    let phases = compute_phases(&verified.schedule, confinement_built);
+    if !phases_are_honest(&verified.schedule, &phases) {
+        return Ok(DriveStep::Done(Verdict::Faulted));
     }
+    if !ready_to_launch(
+        &verified.schedule,
+        &phases,
+        confinement_built,
+        verified,
+        body,
+    ) {
+        return Ok(DriveStep::Done(refuse(control, RefusalReason::PlanInvalid)));
+    }
+    Ok(DriveStep::Continue(PreparedMechanisms {
+        confinement,
+        seccomp_program,
+        seccomp_built,
+        phases,
+    }))
+}
+
+fn build_landlock_if_scheduled(
+    control: &mut Transcript,
+    body: &LinuxLaunchBodyV1,
+    schedule: &ClassifiedSchedule,
+) -> Result<DriveStep<Option<BuiltConfinement>>, BootError> {
+    if schedule.confine.is_empty() {
+        return Ok(DriveStep::Continue(None));
+    }
+    let open_before = open_fd_set()?;
+    match build_confinement(body, &open_before) {
+        Ok(built) => Ok(DriveStep::Continue(Some(built))),
+        Err(ConfineRefusal::AbiBelowFloor) => Ok(DriveStep::Done(refuse(
+            control,
+            RefusalReason::MissingPrimitive,
+        ))),
+        Err(ConfineRefusal::NoUsableRoot) => Ok(DriveStep::Done(refuse(
+            control,
+            RefusalReason::HandleMismatch,
+        ))),
+    }
+}
+
+fn build_seccomp_if_scheduled(
+    control: &mut Transcript,
+    body: &LinuxLaunchBodyV1,
+    schedule: &ClassifiedSchedule,
+) -> DriveStep<Option<sys::BpfProgram>> {
+    if schedule.seccomp.is_empty() {
+        return DriveStep::Continue(None);
+    }
+    match build_seccomp_filter(body) {
+        Ok(program) => DriveStep::Continue(Some(program)),
+        Err(()) => DriveStep::Done(refuse(control, RefusalReason::MissingPrimitive)),
+    }
+}
+
+fn ready_to_launch(
+    schedule: &ClassifiedSchedule,
+    phases: &Phases,
+    confinement_built: bool,
+    verified: &VerifiedPlan,
+    body: &LinuxLaunchBodyV1,
+) -> bool {
     let phase_results = [
         (SetupPhase::Identity, phases.identity),
         (SetupPhase::Visibility, phases.visibility),
         (SetupPhase::AmbientAuthority, phases.ambient),
         (SetupPhase::Confinement, phases.confinement),
     ];
-    // confinement_installed is REAL evidence: true IFF a Confinement action (landlock OR
-    // seccomp) was SCHEDULED and every scheduled one was built+applied. With NONE scheduled it
-    // MUST be false (no over-claim — `confinement_built` is vacuously true when nothing is
-    // scheduled, so we AND it with "at least one scheduled"); with one built+applied it MUST be
-    // true.
     let confinement_scheduled = !schedule.confinement_actions().is_empty();
     debug_assert_eq!(
         confinement_installed(schedule.confinement_actions().len(), phases.confinement),
         confinement_scheduled && confinement_built
     );
-    if !ready_to_exec(true, phase_results, observed_digest, body.h_l) {
-        // The decision is fail-closed: refuse NOW, no child.
-        return Ok(refuse(control, RefusalReason::PlanInvalid));
-    }
+    ready_to_exec(true, phase_results, verified.observed_digest, body.h_l)
+}
 
-    // 8. Build EVERYTHING ELSE the child needs BEFORE clone3 (async-signal-safety).
-    //    The ruleset fd(s) join the allowlist so the scrub leaves them open for
-    //    restrict_self (they CLOEXEC-close on the workload's fexecve — no leak).
+fn spawn_child(
+    control: &mut Transcript,
+    body: &LinuxLaunchBodyV1,
+    error_fd: RawFd,
+    confinement: Option<BuiltConfinement>,
+    seccomp_program: Option<&sys::BpfProgram>,
+    seccomp_built: bool,
+) -> Result<DriveStep<libc::pid_t>, BootError> {
     let exe_fd = exe_slot_fd(body)?;
-    let ruleset_fds: &[RawFd] = match &confinement {
-        Some(built) => &built.ruleset_fds,
-        None => &[],
-    };
-    // OPT-IN user-namespace rendezvous (S8): when the plan requests a userns, create the
-    // parent→child sync pipe NOW (single-threaded, pre-clone3). The READ end is packed
-    // into the child plan + allowlisted (so the child blocks on it post-clone3, inside
-    // its new userns, BEFORE the scrub); the WRITE end stays with the parent to release
-    // the child after the uid/gid maps are written. With NO userns request this is `None`
-    // and the no-userns path is byte-for-byte unchanged. A pipe-create failure fails
-    // CLOSED to a fault (no child is created).
+    let ruleset_fds = confinement
+        .as_ref()
+        .map_or(&[][..], |built| built.ruleset_fds.as_slice());
+    let known = KnownFds { error: error_fd };
     let userns_requested = body.target.user_namespace.is_some();
-    // OPT-IN empty network namespace = NetworkDenyAll (S9 / D3): when the plan requests a
-    // netns, the launcher births the child in a NEW, EMPTY netns (CLONE_NEWNET). Unprivileged
-    // CLONE_NEWNET REQUIRES the child to be root-in-userns, so a netns request WITHOUT a
-    // userns request is a malformed plan — fail CLOSED (no child is created) rather than
-    // attempt an unprivileged CLONE_NEWNET that would EPERM.
     let netns_requested = body.target.network_namespace.is_some();
     if netns_requested && !userns_requested {
         let _ = control.note("network_namespace=requested_without_userns fail_closed");
-        return Ok(Verdict::Faulted);
+        return Ok(DriveStep::Done(Verdict::Faulted));
     }
-    let sync_pipe = if userns_requested {
-        match sys::make_sync_pipe() {
-            Ok(pipe) => Some(pipe),
-            Err(_) => return Ok(Verdict::Faulted),
-        }
-    } else {
-        None
+    let sync_pipe = match make_optional_sync_pipe(userns_requested) {
+        Ok(sync_pipe) => sync_pipe,
+        Err(()) => return Ok(DriveStep::Done(Verdict::Faulted)),
     };
     let child_sync = sync_pipe.map(|(read, write)| UsernsSyncPipe { read, write });
-    // The sync READ end is allowlisted (the child reads it before the scrub); the sync
-    // WRITE end is NOT (the parent owns it). The child closes its inherited write-end copy
-    // explicitly in its window BEFORE the read (so the fail-closed EOF is honest); the
-    // write end therefore also lands in the scrub close-list as a redundant safety.
     let allow = allowlist(&known, exe_fd, ruleset_fds, child_sync.map(|p| p.read));
     let close_fds = scrub_close_list(&allow)?;
     let child_plan = match ChildExecPlan::build(
@@ -330,25 +423,16 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         &body.target.envp,
         close_fds,
     ) {
-        Ok(p) => p,
-        Err(_) => return Ok(Verdict::Faulted),
+        Ok(plan) => plan,
+        Err(_) => return Ok(DriveStep::Done(Verdict::Faulted)),
     };
 
-    // 9. Re-check single-thread, then clone3 (carrying the parent-built ruleset, which
-    //    the child applies via restrict_self after scrub, before fexecve).
-    let tasks = count_self_tasks()?;
-    if tasks != 1 {
-        return Err(BootError::NotSingleThreaded { observed: tasks });
-    }
-    // Resolve the optional cgroup leaf fd: when present, clone3 births the child
-    // INSIDE the prepared leaf (CLONE_INTO_CGROUP), so the workload is resource-confined
-    // the instant it exists — no post-fork migration race. The fd was fstat-validated as
-    // a directory in step 5; the kernel consumes it during the syscall.
+    ensure_single_threaded()?;
     let cgroup_fd = cgroup_slot_fd(body);
     let child_pid = sys::clone3_child(
         &child_plan,
         confinement.map(|c| c.ruleset),
-        seccomp_program.as_ref(),
+        seccomp_program,
         cgroup_fd,
         userns_requested,
         netns_requested,
@@ -361,63 +445,61 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         let _ = control.note("cgroup_placement=clone_into_cgroup");
     }
     if seccomp_built {
-        // The child installs the parent-built seccomp DENYLIST LAST, before fexecve (a
-        // default-allow filter denying the task-creation family and/or socket as DiD). The
-        // HOST independently confirms the install by reading /proc/<pid>/status (Seccomp: 2,
-        // filter mode) — the §4 oracle; this note is the honest mechanism attestation.
         let _ = control.note("seccomp=denylist_installed mode=filter");
     }
 
-    // USER-NAMESPACE RENDEZVOUS (S8): when a userns was requested, the child is now born
-    // in a NEW userns and BLOCKED on the sync pipe (unmapped/overflow uid). The PARENT
-    // (heap fine — NOT the child window) writes the uid/gid maps in the LOAD-BEARING
-    // order (uid_map, setgroups=deny, gid_map), then RELEASES the child. If ANY map-write
-    // fails we FAIL CLOSED: the child is NOT released (its sync read gets EOF when the
-    // write end drops → it `_exit`s), it is reaped, and the target never runs.
-    if let Some((_read, write)) = sync_pipe {
-        match user_namespace_rendezvous(child_pid, write) {
-            Ok(()) => {
-                let _ = control.note("user_namespace=mapped child_uid0_egid0");
-                if netns_requested {
-                    // The child was born into a NEW, EMPTY netns at clone3 time (CLONE_NEWNET):
-                    // only `lo` (no address, no routes => unreachable), no external interface —
-                    // NetworkDenyAll is structural.
-                    // The HOST independently confirms this by reading the child's
-                    // /proc/<pid>/net/dev (the §4 oracle); this note is the honest attestation.
-                    let _ = control.note("network_namespace=empty_netns child_isolated");
-                }
-            }
-            Err(()) => {
-                // The write end was already closed by the rendezvous on failure, so the
-                // child's blocking read saw EOF and `_exit`s; reap it and fault. The
-                // target NEVER ran.
-                sys::reap_child(child_pid);
-                let _ = control.note("user_namespace=map_write_failed fail_closed");
-                control.emit(LauncherState::SetupFaulted);
-                return Ok(Verdict::Faulted);
-            }
-        }
+    if rendezvous_user_namespace(control, child_pid, sync_pipe, netns_requested).is_err() {
+        return Ok(DriveStep::Done(Verdict::Faulted));
     }
 
-    // Close the COORDINATOR's own copy of the error-pipe WRITE end so only the child
-    // holds a write end — then the read end gets EOF the instant the child's
-    // successful execve CLOEXEC-closes its copy. A raw best-effort close (the child
-    // shares the fd post-clone3; closing the parent's copy must not abort).
-    sys::close_fd(error_fd);
+    Ok(DriveStep::Continue(child_pid))
+}
 
-    // 9. Wait: read the error pipe (read end), then reap the child.
+fn make_optional_sync_pipe(userns_requested: bool) -> Result<Option<(RawFd, RawFd)>, ()> {
+    if userns_requested {
+        sys::make_sync_pipe().map(Some).map_err(|_| ())
+    } else {
+        Ok(None)
+    }
+}
+
+fn rendezvous_user_namespace(
+    control: &mut Transcript,
+    child_pid: libc::pid_t,
+    sync_pipe: Option<(RawFd, RawFd)>,
+    netns_requested: bool,
+) -> Result<(), ()> {
+    let Some((_read, write)) = sync_pipe else {
+        return Ok(());
+    };
+    if user_namespace_rendezvous(child_pid, write).is_ok() {
+        let _ = control.note("user_namespace=mapped child_uid0_egid0");
+        if netns_requested {
+            let _ = control.note("network_namespace=empty_netns child_isolated");
+        }
+        return Ok(());
+    }
+    sys::reap_child(child_pid);
+    let _ = control.note("user_namespace=map_write_failed fail_closed");
+    control.emit(LauncherState::SetupFaulted);
+    Err(())
+}
+
+fn finish_child(
+    control: &mut Transcript,
+    error_fd: RawFd,
+    error_read_fd: RawFd,
+    child_pid: libc::pid_t,
+    schedule: &ClassifiedSchedule,
+    phases: &Phases,
+) -> Result<Verdict, BootError> {
+    sys::close_fd(error_fd);
     let child_outcome = wait_for_child(error_read_fd, child_pid)?;
     match child_outcome {
         ChildOutcome::ExecedToEof => {
-            // The deterministic no-branch child sequence ran to exec (scrub → maybe
-            // restrict_self → fexecve): resolve the four phases honestly, then
-            // ReadyToExec → ExecSucceeded. The error pipe gave EOF, so restrict_self
-            // (if scheduled) did NOT fail-close — it applied before the workload ran.
             control.emit(LauncherState::IdentityPhaseResolved);
             control.emit(LauncherState::VisibilityPhaseResolved);
             control.emit(LauncherState::AmbientAuthorityPhaseResolved);
-            // Note the HONEST confinement result: Applied (real landlock and/or seccomp
-            // install) only when a Confinement action was scheduled + built+applied.
             let installed =
                 confinement_installed(schedule.confinement_actions().len(), phases.confinement);
             let _ = control.note(&format!(
@@ -430,7 +512,6 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
             Ok(Verdict::ExecSucceeded)
         }
         ChildOutcome::Errno(errno) => {
-            // Scrub or fexecve failed: the child never ran the target.
             let _ = control.note(&format!("child errno={errno}"));
             control.emit(LauncherState::SetupFaulted);
             Ok(Verdict::Faulted)
@@ -704,137 +785,13 @@ fn landlock_roots(body: &LinuxLaunchBodyV1) -> Vec<LandlockRoot> {
         .collect()
 }
 
-// ── Seccomp (S10): compile the parent-built denylist BPF ───────────────────────
-
-/// Compile the default-allow seccomp DENYLIST the child installs, from the plan's
-/// `target.seccomp` request, IN THE PARENT (so the child-window install is allocation-free).
-/// The request composes into ONE denylist: `deny_new_tasks` denies the
-/// `clone`/`clone3`/`fork`/`vfork` family (`ChildSpawn::DenyNewTasks`), `deny_inet_sockets`
-/// denies `socket(2)` (the NetworkDenyAll DiD). The deny terminal is `Errno(EPERM)` so the
-/// workload's `fork()` / `socket()` FAILS OBSERVABLY (the §4 oracle reads the failure) rather
-/// than the harder SIGSYS kill — the filter ALWAYS allows execve/execveat/write/exit_group so
-/// the following fexecve + error reporting survive (seccomp's compile() enforces that).
-///
-/// Returns `Err(())` (⇒ the launcher refuses, the target never runs) when: a seccomp action
-/// was scheduled but the plan carries NO `target.seccomp` request, the request denies nothing
-/// (a no-op), or the seccomp model rejects the policy / the compile fails. A denylist is ONE
-/// composed layer — the broad confinement is landlock/cgroup/netns/fd-scrub.
-fn build_seccomp_filter(body: &LinuxLaunchBodyV1) -> Result<sys::BpfProgram, ()> {
-    use bvisor::linux::seccomp::{DefaultAction, SeccompPolicy};
-    let Some(request) = body.target.seccomp else {
-        // A seccomp action was scheduled but no request describes it ⇒ fail closed.
-        return Err(());
-    };
-    if !request.denies_anything() {
-        // An all-false request would compile a no-op (empty) denylist ⇒ fail closed.
-        return Err(());
-    }
-    // Compose the deny set from the request flags (EPERM so the deny is OBSERVABLE).
-    let mut deny = Vec::new();
-    if request.deny_new_tasks {
-        deny.extend(SeccompPolicy::task_creation_syscalls());
-    }
-    if request.deny_inet_sockets {
-        deny.push(SeccompPolicy::socket_syscall());
-    }
-    let policy = SeccompPolicy::denylist(DefaultAction::Errno(eperm()), deny);
-    // Compile for the launcher's OWN arch (the install is always same-arch).
-    let compiled = policy.compile(current_seccomp_arch()).map_err(|_| ())?;
-    Ok(compiled.program().clone())
-}
-
-/// `EPERM` as the seccomp deny errno (so the denied syscall fails with a standard,
-/// observable error rather than a SIGSYS kill). Cast through `u32` for the errno field.
-fn eperm() -> u32 {
-    u32::try_from(libc::EPERM).unwrap_or(1)
-}
-
-/// The launcher's OWN seccomp target arch (the install is always same-arch). The seccomp
-/// model supports LE x86_64/aarch64/riscv64; on any OTHER build arch the launcher cannot
-/// assemble a correct filter, so a seccomp-bearing plan would have failed to compile a
-/// usable filter — we map the three supported arches and fall through to x86_64 only as a
-/// compile-time impossibility guard (the binary is built for exactly one arch).
-fn current_seccomp_arch() -> bvisor::SeccompArch {
-    use bvisor::SeccompArch;
-    #[cfg(target_arch = "x86_64")]
-    {
-        SeccompArch::X86_64
-    }
-    #[cfg(target_arch = "aarch64")]
-    {
-        SeccompArch::Aarch64
-    }
-    #[cfg(target_arch = "riscv64")]
-    {
-        SeccompArch::Riscv64
-    }
-    #[cfg(not(any(
-        target_arch = "x86_64",
-        target_arch = "aarch64",
-        target_arch = "riscv64"
-    )))]
-    {
-        SeccompArch::X86_64
-    }
-}
-
-// ── Handle verification ────────────────────────────────────────────────────────
+// ── Handle plumbing ────────────────────────────────────────────────────────────
 
 /// The launcher's own well-known fds the scrub allowlist is built from.
 struct KnownFds {
     /// The child-facing error-pipe WRITE end (kept across the scrub so the child can
     /// report a scrub/fexecve failure; CLOEXEC-closed by a successful `fexecve`).
     error: RawFd,
-}
-
-/// `fstat` each declared slot and check its kind + writability against its declaration
-/// — the deterministic declared-slot SHAPE verification (a dir fd where a `Regular` is
-/// declared ⇒ `HandleMismatch`). This is the ONLY handle check the coordinator runs.
-///
-/// It does NOT enumerate the open-fd table and REFUSE on an undeclared inherited fd.
-/// The no-fd-escape guarantee (G6) is enforced child-side by the scrub — the child
-/// closes EVERY non-allowlisted fd (raw `SYS_close`) before `fexecve`, so an unexpected
-/// fd the launcher inherited from its forking host is defensively CLOSED in the child,
-/// never seen by the workload, and never a launch-abort. Refusing here would be both
-/// redundant with that scrub and timing-flaky (a sibling thread's transient
-/// non-CLOEXEC fd, captured at fork, is not an escape — it is scrubbed).
-fn verify_handles(body: &LinuxLaunchBodyV1) -> Result<Result<(), ()>, BootError> {
-    for slot in &body.descriptor_table {
-        let observed = sys::fstat_shape(raw(slot.slot_index))?;
-        if !shape_matches(slot, &observed) {
-            return Ok(Err(()));
-        }
-    }
-    Ok(Ok(()))
-}
-
-/// Whether an observed `fstat` shape matches a declared slot (kind + writability).
-/// `DescriptorKind` is `#[non_exhaustive]`, so an unknown FUTURE kind the skeleton
-/// does not model fails the match (fail closed — never silently accept).
-fn shape_matches(slot: &DescriptorSlotV1, observed: &ObservedShape) -> bool {
-    // (expected file-type bits in the platform `mode_t`, whether writability is
-    // meaningful for this kind). Compared directly against the observed `mode_t`.
-    let expected = match slot.expected.kind {
-        DescriptorKind::Directory => Some((libc::S_IFDIR, true)),
-        DescriptorKind::Regular => Some((libc::S_IFREG, true)),
-        DescriptorKind::Socket => Some((libc::S_IFSOCK, false)),
-        DescriptorKind::Pipe => Some((libc::S_IFIFO, false)),
-        // An unknown future kind the skeleton does not model ⇒ fail closed.
-        _ => None,
-    };
-    let Some((file_type, writability_meaningful)) = expected else {
-        return false;
-    };
-    if observed.file_type != file_type {
-        return false;
-    }
-    // Writability is meaningful only for directories/regular files (the protocol
-    // says the launcher ignores it for sockets/pipes).
-    if writability_meaningful {
-        observed.writable == slot.expected.writable
-    } else {
-        true
-    }
 }
 
 // ── fd plumbing (SAFE: std::fs / std::env only) ────────────────────────────────
@@ -899,77 +856,6 @@ fn allowlist(
     allow
 }
 
-/// Run the unprivileged user-namespace RENDEZVOUS in the PARENT (heap is fine here — this
-/// is NOT the async-signal-safe child window). The child (`child_pid`) was born in a new
-/// userns and is BLOCKED on the sync pipe; `sync_write_fd` is the parent's write end.
-///
-/// Writes, in the LOAD-BEARING order the unprivileged-userns recipe requires:
-///   1. `/proc/<pid>/uid_map`   = `0 <euid> 1`  (child uid 0 → the launcher's euid),
-///   2. `/proc/<pid>/setgroups` = `deny`        (MANDATORY and MUST precede gid_map for
-///      an unprivileged writer — the kernel rejects gid_map otherwise),
-///   3. `/proc/<pid>/gid_map`   = `0 <egid> 1`  (child gid 0 → the launcher's egid),
-///
-/// then RELEASES the child by writing 1 byte to the sync pipe. The `/proc` writes are
-/// ordinary `std::fs::write` (SAFE — NOT unsafe).
-///
-/// FAIL-CLOSED: on ANY map-write failure the child is NOT released — the write end is
-/// closed (dropping it gives the child's blocking read EOF, so it `_exit`s) and `Err(())`
-/// is returned so the caller reaps the child and faults. The target never runs unmapped.
-fn user_namespace_rendezvous(child_pid: libc::pid_t, sync_write_fd: RawFd) -> Result<(), ()> {
-    let (euid, egid) = sys::effective_ids();
-    let uid_map = format!("0 {euid} 1\n");
-    let gid_map = format!("0 {egid} 1\n");
-    let base = format!("/proc/{child_pid}");
-    // The leaf each map write targets. A `dangerous-test-hooks` build may redirect the
-    // FIRST write (uid_map) to a non-existent `/proc/<pid>/` attribute so the write FAILS
-    // deterministically on ANY host — exercising the fail-closed reap-and-fault branch
-    // even where unprivileged userns IS supported (so the teeth do not merely SKIP). The
-    // hook is compiled out of every non-test build, so production NEVER reads the env.
-    let uid_map_leaf = forced_map_fail_leaf().unwrap_or("uid_map");
-    let write_step = |leaf: &str, contents: &str| -> Result<(), ()> {
-        std::fs::write(format!("{base}/{leaf}"), contents).map_err(|_| ())
-    };
-    // Order is load-bearing: uid_map, THEN setgroups=deny, THEN gid_map.
-    let mapped = write_step(uid_map_leaf, &uid_map)
-        .and_then(|()| write_step("setgroups", "deny"))
-        .and_then(|()| write_step("gid_map", &gid_map));
-    if mapped.is_err() {
-        // FAIL CLOSED: do NOT release. Close the write end so the child's blocking read
-        // sees EOF and exits; the caller reaps it.
-        sys::close_fd(sync_write_fd);
-        return Err(());
-    }
-    // RELEASE: one byte unblocks the child's `read()`. A failed write is treated as a
-    // fail-closed rendezvous failure (the child would block forever otherwise).
-    let mut writer = sys::adopt_fd(sync_write_fd);
-    if writer.write_all(&[1u8]).is_err() {
-        return Err(());
-    }
-    // `writer` drops here, closing the parent's write end (the child has already been
-    // released by the byte above; the EOF that the drop produces is harmless).
-    Ok(())
-}
-
-/// `dangerous-test-hooks` fault injection: when `BVISOR_TEST_FORCE_USERNS_MAP_FAIL=1`,
-/// return a `/proc/<pid>/` leaf that does NOT exist, so the FIRST userns map write fails
-/// deterministically and the coordinator's fail-closed reap-and-fault branch runs. In
-/// every non-test build this fn is compiled to a constant `None` — production never reads
-/// the environment, so the injection cannot affect a real launch.
-#[cfg(feature = "dangerous-test-hooks")]
-fn forced_map_fail_leaf() -> Option<&'static str> {
-    match std::env::var("BVISOR_TEST_FORCE_USERNS_MAP_FAIL") {
-        Ok(v) if v.trim() == "1" => Some("bvisor_nonexistent_map_attr"),
-        _ => None,
-    }
-}
-
-/// Production stub: the userns map-fail injection hook is ABSENT without the
-/// `dangerous-test-hooks` feature, so the launcher always writes the real `uid_map` leaf.
-#[cfg(not(feature = "dangerous-test-hooks"))]
-fn forced_map_fail_leaf() -> Option<&'static str> {
-    None
-}
-
 /// The scrub close-list: every currently-open fd NOT in the allowlist. Computed in
 /// the single-threaded coordinator, BEFORE clone3 (the child only closes this list).
 fn scrub_close_list(allow: &BTreeSet<RawFd>) -> Result<Vec<libc::c_int>, BootError> {
@@ -1022,84 +908,4 @@ fn count_self_tasks() -> Result<usize, BootError> {
         n += 1;
     }
     Ok(n)
-}
-
-// ── Child wait ─────────────────────────────────────────────────────────────────
-
-/// What the child reported.
-enum ChildOutcome {
-    /// The error pipe gave EOF (write end CLOEXEC-closed by a successful execve) ⇒
-    /// the child's deterministic scrub→fexecve ran to exec.
-    ExecedToEof,
-    /// The error pipe yielded errno bytes ⇒ scrub or fexecve failed; the target
-    /// never ran.
-    Errno(i32),
-}
-
-/// Read the error pipe to EOF or an errno, then reap the child. EOF ⇒ exec success;
-/// any bytes ⇒ the reported errno.
-fn wait_for_child(error_read_fd: RawFd, child_pid: libc::pid_t) -> Result<ChildOutcome, BootError> {
-    let mut pipe = sys::adopt_fd(error_read_fd);
-    let mut buf = Vec::new();
-    pipe.read_to_end(&mut buf)?;
-    // Reap the child (best-effort: the outcome is decided by the pipe, not the code).
-    reap(child_pid);
-    if buf.len() >= 4 {
-        let errno = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]);
-        Ok(ChildOutcome::Errno(errno))
-    } else if buf.is_empty() {
-        Ok(ChildOutcome::ExecedToEof)
-    } else {
-        // A short, non-empty write is still a failure signal (the child only writes
-        // on the failure path); treat any bytes as a fault.
-        Ok(ChildOutcome::Errno(-1))
-    }
-}
-
-/// Reap a child pid through the SAFE std waiting surface is unavailable (we did not
-/// create the child via `Command`), so we delegate the single `waitid` to the
-/// basement. Best-effort: a failed reap does not change the pipe-derived outcome.
-fn reap(child_pid: libc::pid_t) {
-    sys::reap_child(child_pid);
-}
-
-// ── Transcript (control-fd writer) ─────────────────────────────────────────────
-
-/// The control-fd transcript: newline-delimited launcher-state names + free-form
-/// notes. Writes bytes through an owned `File` (never the denied print macros). A
-/// failed write is swallowed — the transcript is best-effort observability, and the
-/// EXIT CODE is the authoritative result.
-struct Transcript {
-    sink: File,
-}
-
-impl Transcript {
-    fn new(sink: File) -> Self {
-        Self { sink }
-    }
-
-    /// Emit one launcher state as a line (e.g. `LauncherStarted`).
-    fn emit(&mut self, state: LauncherState) {
-        let _ = writeln!(self.sink, "{state:?}");
-        let _ = self.sink.flush();
-    }
-
-    /// Emit a free-form note line, prefixed `# ` so a reader can separate notes from
-    /// state lines.
-    fn note(&mut self, text: &str) -> std::io::Result<()> {
-        writeln!(self.sink, "# {text}")?;
-        self.sink.flush()
-    }
-}
-
-/// Report a boot fault that happened BEFORE a control channel existed: write a typed
-/// line to stderr (via `Write`, not the denied `eprintln!`) and exit non-zero. This is
-/// the SOLE path on which the launcher writes to its own stderr — and only because no
-/// control fd exists yet to carry the diagnostic AND no workload runs in this case, so
-/// the write cannot contaminate the host's workload-stream capture (see the run()
-/// stdio-silence contract).
-fn boot_fault(err: &BootError) -> std::process::ExitCode {
-    let mut sink = std::io::stderr();
-    let _ = writeln!(sink, "bvisor-linux-launcher: {err}");
-    std::process::ExitCode::from(4)
 }

@@ -5,7 +5,7 @@
 # A weakening diff here (enforcement lowered, a row/evidence claim removed, a witness
 # un-proved) is a CAPABILITY DOWNGRADE the meta-gate blocks without two-person approval
 # or a typed CapabilityDowngrade waiver.
-ceilings:
+aspiration_floor:
   - { backend: linux, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
   - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }
   - { backend: linux, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }

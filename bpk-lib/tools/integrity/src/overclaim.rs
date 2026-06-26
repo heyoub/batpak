@@ -15,8 +15,7 @@ use crate::gate_registry;
 use crate::invariant_bridge::TESTED_CRATES;
 use crate::receipts::GateWork;
 use crate::repo_surface::{
-    core_src_root, core_tests_root, ensure, production_rust_roots, relative,
-    resolve_repo_or_core_path, rust_files,
+    core_tests_root, ensure, production_rust_roots, relative, resolve_repo_or_core_path, rust_files,
 };
 use crate::source_cache::SourceCache;
 use crate::triangulation::{Claim, ClaimSet, Disagreement, TriangulationEngine};
@@ -278,8 +277,8 @@ pub(crate) fn aspirational_pub_fn_subjects(
     cache: &mut SourceCache,
 ) -> Result<Vec<String>> {
     let mut subjects = BTreeSet::new();
-    let mut paths = rust_files(&core_src_root(repo_root));
-    for root in production_rust_roots(repo_root) {
+    let mut paths = Vec::new();
+    for root in production_rust_roots(repo_root)? {
         paths.extend(rust_files(&root));
     }
     for path in paths {

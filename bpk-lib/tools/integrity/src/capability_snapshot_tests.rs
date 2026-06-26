@@ -36,21 +36,27 @@ fn render_parse_round_trips() {
 fn derived_floor_is_non_empty_and_covers_every_backend() {
     let snapshot = derived();
     assert!(
-        snapshot.ceilings.len() >= 40,
+        snapshot.aspiration_floor.len() >= 40,
         "four backends each advertise 17 RequirementKind cells; got {}",
-        snapshot.ceilings.len()
+        snapshot.aspiration_floor.len()
     );
     for backend in BACKENDS {
         assert!(
-            snapshot.ceilings.iter().any(|c| c.backend == *backend),
+            snapshot
+                .aspiration_floor
+                .iter()
+                .any(|c| c.backend == *backend),
             "backend `{backend}` missing from the derived floor"
         );
     }
     // The load-bearing honest fail-closed cell: linux NetworkAllowList Unsupported.
     assert!(
-        snapshot.ceilings.iter().any(|c| c.backend == "linux"
-            && c.kind == "NetworkAllowList"
-            && c.enforcement == "Unsupported"),
+        snapshot
+            .aspiration_floor
+            .iter()
+            .any(|c| c.backend == "linux"
+                && c.kind == "NetworkAllowList"
+                && c.enforcement == "Unsupported"),
         "linux NetworkAllowList must be captured as Unsupported (v1, no broker)"
     );
 }
@@ -81,7 +87,7 @@ pub fn support_matrix() -> SupportMatrix {
 #[test]
 fn empty_support_matrix_extraction_is_red() {
     let file = syn::parse_file(SUPPORT_MATRIX_NO_INSERTS).expect("parse synthetic source");
-    let err = extract_ceilings("synthetic", &file)
+    let err = extract_aspiration_floor("synthetic", &file)
         .expect_err("a support_matrix() with zero inserts must be RED, never silently empty");
     assert!(
         err.to_string().contains("ZERO best-case cells"),
@@ -92,7 +98,7 @@ fn empty_support_matrix_extraction_is_red() {
 #[test]
 fn extractor_reads_kind_enforcement_and_sorted_evidence() {
     let file = syn::parse_file(SUPPORT_MATRIX_ONE_INSERT).expect("parse synthetic source");
-    let cells = extract_ceilings("synthetic", &file).expect("one insert extracts one cell");
+    let cells = extract_aspiration_floor("synthetic", &file).expect("one insert extracts one cell");
     assert_eq!(cells.len(), 1);
     let cell = &cells[0];
     assert_eq!(cell.kind, "Filesystem");
@@ -110,7 +116,7 @@ fn downgrade_enforced_to_mediated_fails() {
     let snapshot = derived();
     let mut tampered = snapshot.clone();
     let cell = tampered
-        .ceilings
+        .aspiration_floor
         .iter_mut()
         .find(|c| c.enforcement == "Enforced")
         .expect("some Enforced cell exists to weaken");
@@ -128,7 +134,7 @@ fn removed_evidence_claim_fails() {
     let snapshot = derived();
     let mut tampered = snapshot.clone();
     let cell = tampered
-        .ceilings
+        .aspiration_floor
         .iter_mut()
         .find(|c| !c.evidence.is_empty())
         .expect("some cell carries evidence");
@@ -142,7 +148,7 @@ fn removed_evidence_claim_fails() {
 fn removed_row_fails() {
     let snapshot = derived();
     let mut tampered = snapshot.clone();
-    tampered.ceilings.pop();
+    tampered.aspiration_floor.pop();
     let err = assert_mirror(&render(&tampered), &snapshot)
         .expect_err("a removed (backend,kind) row must fail the mirror");
     assert!(err.to_string().contains("STALE"), "got: {err}");

@@ -85,7 +85,7 @@ impl RatchetEntry {
 /// Production entry: collect every production function's metrics and enforce the
 /// budgets against the live ratchet allowlist.
 pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let files = crate::structural::production_rust_files(repo_root);
+    let files = crate::structural::production_rust_files(repo_root)?;
     let allowlist = load_ratchet(repo_root)?;
     let measured = collect_functions(repo_root, &files, source_cache)?;
     enforce(&measured, &allowlist)
