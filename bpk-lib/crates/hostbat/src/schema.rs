@@ -206,6 +206,8 @@ pub enum SchemaRole {
     EventPayload,
     /// The payload shape of a receipt extension.
     ReceiptPayload,
+    /// The payload shape of a declared subscription stream (projection/status).
+    SubscriptionPayload,
 }
 
 impl SchemaRole {
@@ -217,6 +219,7 @@ impl SchemaRole {
             Self::OperationOutput => "operation-output",
             Self::EventPayload => "event-payload",
             Self::ReceiptPayload => "receipt-payload",
+            Self::SubscriptionPayload => "subscription-payload",
         }
     }
 }

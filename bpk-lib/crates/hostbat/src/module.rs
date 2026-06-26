@@ -16,6 +16,7 @@ use crate::descriptor::{GuardDescriptor, HookDescriptor, HookPhase, JobDescripto
 use crate::error::HostError;
 use crate::manifest::{HostModuleManifest, SealedParts};
 use crate::schema::SchemaDescriptor;
+use crate::subscription::SubscriptionDescriptor;
 
 type BoxedHandler = Box<dyn Handler + 'static>;
 type BoxedGuard = Box<dyn AdmissionGuard + 'static>;
@@ -123,6 +124,7 @@ pub struct HostModuleBuilder {
     hooks: Vec<(HookDescriptor, BoxedHook)>,
     jobs: BTreeMap<String, (JobDescriptor, BoxedJob)>,
     schemas: BTreeMap<(String, u32, crate::schema::SchemaRole), SchemaDescriptor>,
+    subscriptions: BTreeMap<String, SubscriptionDescriptor>,
 }
 
 impl HostModuleBuilder {
@@ -138,6 +140,7 @@ impl HostModuleBuilder {
             hooks: Vec::new(),
             jobs: BTreeMap::new(),
             schemas: BTreeMap::new(),
+            subscriptions: BTreeMap::new(),
         }
     }
 
@@ -228,6 +231,26 @@ impl HostModuleBuilder {
         Ok(self)
     }
 
+    /// Declare a client-visible subscription exported by this module.
+    ///
+    /// Subscription ids are globally unique across the composed host; this method
+    /// rejects duplicates within the module before mount-time cross-module checks.
+    ///
+    /// # Errors
+    /// [`HostError::SubscriptionDuplicateWithinModule`] if the id is declared twice
+    /// in this module.
+    pub fn subscription(mut self, descriptor: SubscriptionDescriptor) -> Result<Self, HostError> {
+        let id = descriptor.id().as_str().to_owned();
+        if self.subscriptions.contains_key(&id) {
+            return Err(HostError::SubscriptionDuplicateWithinModule {
+                module: self.id.clone(),
+                id,
+            });
+        }
+        self.subscriptions.insert(id, descriptor);
+        Ok(self)
+    }
+
     /// Register a lifecycle hook in `phase` with module-local `order`.
     pub fn hook<H>(mut self, phase: HookPhase, name: impl Into<String>, order: u32, hook: H) -> Self
     where
@@ -271,10 +294,11 @@ impl HostModuleBuilder {
             && self.jobs.is_empty()
             && self.guard.is_none()
             && self.schemas.is_empty()
+            && self.subscriptions.is_empty()
         {
             return Err(HostError::coherence(
                 &self.id,
-                "module declares no operations, hooks, jobs, guard, or schemas",
+                "module declares no operations, hooks, jobs, guard, schemas, or subscriptions",
             ));
         }
 
@@ -311,6 +335,7 @@ impl HostModuleBuilder {
 
         // The BTreeMap already holds schemas in canonical (id, version, role) order.
         let schemas: Vec<SchemaDescriptor> = self.schemas.into_values().collect();
+        let subscriptions: Vec<SubscriptionDescriptor> = self.subscriptions.into_values().collect();
 
         let manifest = HostModuleManifest::seal(SealedParts {
             id: self.id,
@@ -321,6 +346,7 @@ impl HostModuleBuilder {
             hooks: hook_descriptors,
             jobs: job_descriptors,
             schemas,
+            subscriptions,
         })?;
 
         Ok(HostModule {

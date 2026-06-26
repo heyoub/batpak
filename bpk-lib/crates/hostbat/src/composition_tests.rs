@@ -267,13 +267,18 @@ fn client_manifest_projects_live_host_contract() {
 
     let manifest = ClientManifest::from_host(&host);
 
-    assert_eq!(manifest.manifest_version, 1);
+    assert_eq!(manifest.manifest_version, 2);
     assert_eq!(manifest.netbat_version, "NETBAT/1");
+    assert_eq!(
+        manifest.subscription_wire_requires,
+        crate::subscription::SUBSCRIPTION_WIRE_REQUIRES
+    );
     assert_eq!(
         manifest.interface_fingerprint_hex,
         host.interface_fingerprint().to_hex()
     );
     assert_eq!(manifest.operations.len(), 1);
+    assert_eq!(manifest.subscriptions.len(), 0);
     assert_eq!(manifest.operations[0].name, "mod.a.echo");
     assert_eq!(manifest.operations[0].input_schema_ref, "schema.in.v1");
     assert_eq!(manifest.schemas.len(), 3);

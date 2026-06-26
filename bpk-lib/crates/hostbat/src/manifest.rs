@@ -20,6 +20,7 @@ use crate::descriptor::{GuardDescriptor, HookDescriptor, JobDescriptor};
 use crate::error::HostError;
 use crate::identity::{canonical_digest, ModuleDigest};
 use crate::schema::{SchemaDescriptor, SchemaManifestView};
+use crate::subscription::SubscriptionDescriptor;
 
 /// Domain separator for the module-manifest digest.
 const MODULE_DIGEST_DOMAIN: &str = "hostbat.module.v1";
@@ -39,6 +40,7 @@ pub struct HostModuleManifest {
     hooks: Vec<HookDescriptor>,
     jobs: Vec<JobDescriptor>,
     schemas: Vec<SchemaDescriptor>,
+    subscriptions: Vec<SubscriptionDescriptor>,
     digest: ModuleDigest,
 }
 
@@ -81,6 +83,7 @@ struct ManifestView<'a> {
     // Identity-bearing schema views only (id/version/role/encoding); the
     // diagnostic Rust type is excluded so renaming/dropping it changes no digest.
     schemas: Vec<SchemaManifestView<'a>>,
+    subscriptions: &'a [SubscriptionDescriptor],
 }
 
 /// Borrowed view of the canonically ordered parts a manifest digest is sealed
@@ -95,6 +98,7 @@ struct ManifestParts<'a> {
     hooks: &'a [HookDescriptor],
     jobs: &'a [JobDescriptor],
     schemas: &'a [SchemaDescriptor],
+    subscriptions: &'a [SubscriptionDescriptor],
 }
 
 fn compute_digest(parts: &ManifestParts<'_>) -> Result<ModuleDigest, HostError> {
@@ -112,6 +116,7 @@ fn compute_digest(parts: &ManifestParts<'_>) -> Result<ModuleDigest, HostError> 
             .iter()
             .map(SchemaDescriptor::manifest_view)
             .collect(),
+        subscriptions: parts.subscriptions,
     };
     canonical_digest(&view).map(ModuleDigest)
 }
@@ -126,6 +131,7 @@ pub(crate) struct SealedParts {
     pub(crate) hooks: Vec<HookDescriptor>,
     pub(crate) jobs: Vec<JobDescriptor>,
     pub(crate) schemas: Vec<SchemaDescriptor>,
+    pub(crate) subscriptions: Vec<SubscriptionDescriptor>,
 }
 
 impl HostModuleManifest {
@@ -145,6 +151,7 @@ impl HostModuleManifest {
             hooks,
             jobs,
             schemas,
+            subscriptions,
         } = parts;
         let digest = compute_digest(&ManifestParts {
             id: &id,
@@ -155,6 +162,7 @@ impl HostModuleManifest {
             hooks: &hooks,
             jobs: &jobs,
             schemas: &schemas,
+            subscriptions: &subscriptions,
         })?;
         Ok(Self {
             id,
@@ -165,6 +173,7 @@ impl HostModuleManifest {
             hooks,
             jobs,
             schemas,
+            subscriptions,
             digest,
         })
     }
@@ -184,6 +193,7 @@ impl HostModuleManifest {
             hooks: &self.hooks,
             jobs: &self.jobs,
             schemas: &self.schemas,
+            subscriptions: &self.subscriptions,
         })?;
         Ok(recomputed == self.digest)
     }
@@ -237,6 +247,11 @@ impl HostModuleManifest {
     /// composition aggregates and S12's TypeScript codegen consumes.
     pub fn schemas(&self) -> impl Iterator<Item = &SchemaDescriptor> {
         self.schemas.iter()
+    }
+
+    /// Subscription descriptors this module exports, in canonical (id) order.
+    pub fn subscriptions(&self) -> impl Iterator<Item = &SubscriptionDescriptor> {
+        self.subscriptions.iter()
     }
 
     /// Replace the sealed digest with a corrupt value. **Test-only**, behind the

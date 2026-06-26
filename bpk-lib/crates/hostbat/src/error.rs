@@ -148,6 +148,51 @@ pub enum HostError {
     EmptyHost,
     /// Lowering the mounted modules into a `syncbat` runtime failed.
     Build(syncbat::BuildError),
+    /// A subscription id failed grammar or length validation.
+    SubscriptionInvalidId {
+        /// Attempted subscription id.
+        id: String,
+        /// Stable detail describing the violation.
+        detail: String,
+    },
+    /// A projection id failed grammar or length validation.
+    SubscriptionInvalidProjectionId {
+        /// Attempted projection id.
+        id: String,
+        /// Stable detail describing the violation.
+        detail: String,
+    },
+    /// Two subscriptions in one module declare the same globally unique id.
+    SubscriptionDuplicateWithinModule {
+        /// The offending module id.
+        module: String,
+        /// The duplicated subscription id.
+        id: String,
+    },
+    /// Two mounted modules declare the same globally unique subscription id.
+    DuplicateSubscriptionId {
+        /// The duplicated subscription id.
+        id: String,
+        /// The module that re-declared it.
+        module: String,
+    },
+    /// An exported subscription source uses a reserved or out-of-range category.
+    SubscriptionReservedCategory {
+        /// Rejected category value.
+        category: u8,
+    },
+    /// A subscription references a payload schema id missing from the composition
+    /// for the source-required role.
+    SubscriptionPayloadSchemaMissing {
+        /// Module containing the subscription.
+        module: String,
+        /// Subscription id.
+        subscription: String,
+        /// Referenced schema id.
+        reference: String,
+        /// Required schema role.
+        role: String,
+    },
 }
 
 impl HostError {
@@ -181,6 +226,7 @@ impl std::fmt::Display for HostError {
             | Self::EffectConflict { .. }
             | Self::DuplicateReceiptNamespace { .. }
             | Self::DuplicateJobKind { .. }
+            | Self::DuplicateSubscriptionId { .. }
             | Self::ModuleHashMismatch { .. }
             | Self::ModuleCoherence { .. }
             | Self::EmptyHost
@@ -190,7 +236,12 @@ impl std::fmt::Display for HostError {
             | Self::SchemaCollision(_)
             | Self::SchemaReferenceMissing { .. }
             | Self::SchemaReferenceAmbiguous { .. }
-            | Self::SchemaValidation { .. } => fmt_schema_error(self, f),
+            | Self::SchemaValidation { .. }
+            | Self::SubscriptionInvalidId { .. }
+            | Self::SubscriptionInvalidProjectionId { .. }
+            | Self::SubscriptionDuplicateWithinModule { .. }
+            | Self::SubscriptionReservedCategory { .. }
+            | Self::SubscriptionPayloadSchemaMissing { .. } => fmt_schema_error(self, f),
         }
     }
 }
@@ -214,6 +265,10 @@ fn fmt_host_wiring_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> 
             f,
             "supervised-job kind {kind:?} re-declared by module {module:?} is already mounted"
         ),
+        HostError::DuplicateSubscriptionId { id, module } => write!(
+            f,
+            "subscription id {id:?} re-declared by module {module:?} is already mounted"
+        ),
         HostError::ModuleHashMismatch { module } => write!(
             f,
             "module {module:?} manifest hash does not match its declared parts"
@@ -223,12 +278,17 @@ fn fmt_host_wiring_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> 
         }
         HostError::EmptyHost => write!(f, "cannot build a host with no mounted modules"),
         HostError::Build(error) => write!(f, "lowering into the syncbat runtime failed: {error}"),
-        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
-        HostError::SchemaInvalid { .. }
+        HostError::SubscriptionInvalidId { .. }
+        | HostError::SubscriptionInvalidProjectionId { .. }
+        | HostError::SubscriptionDuplicateWithinModule { .. }
+        | HostError::SubscriptionReservedCategory { .. }
+        | HostError::SubscriptionPayloadSchemaMissing { .. }
+        | HostError::SchemaInvalid { .. }
         | HostError::SchemaCollision(_)
         | HostError::SchemaReferenceMissing { .. }
         | HostError::SchemaReferenceAmbiguous { .. }
         | HostError::SchemaValidation { .. } => fmt_schema_error(error, f),
+        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
     }
 }
 
@@ -265,6 +325,33 @@ fn fmt_schema_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::
         } => write!(
             f,
             "schema validation failed for {schema:?} ({role}): {detail}"
+        ),
+        HostError::SubscriptionInvalidId { id, detail } => {
+            write!(f, "subscription id {id:?} is invalid: {detail}")
+        }
+        HostError::SubscriptionInvalidProjectionId { id, detail } => {
+            write!(f, "projection id {id:?} is invalid: {detail}")
+        }
+        HostError::SubscriptionDuplicateWithinModule { module, id } => write!(
+            f,
+            "module {module:?} declares subscription id {id:?} twice"
+        ),
+        HostError::DuplicateSubscriptionId { id, module } => write!(
+            f,
+            "subscription id {id:?} re-declared by module {module:?} is already mounted"
+        ),
+        HostError::SubscriptionReservedCategory { category } => write!(
+            f,
+            "subscription event category 0x{category:02x} is reserved or out of range"
+        ),
+        HostError::SubscriptionPayloadSchemaMissing {
+            module,
+            subscription,
+            reference,
+            role,
+        } => write!(
+            f,
+            "module {module:?} subscription {subscription:?} references missing schema {reference:?} for role {role}"
         ),
         HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
         HostError::DuplicateModuleId { .. }
@@ -344,6 +431,7 @@ impl std::error::Error for HostError {
             | Self::EffectConflict { .. }
             | Self::DuplicateReceiptNamespace { .. }
             | Self::DuplicateJobKind { .. }
+            | Self::DuplicateSubscriptionId { .. }
             | Self::ModuleHashMismatch { .. }
             | Self::ModuleCoherence { .. }
             | Self::CanonicalEncoding { .. }
@@ -352,6 +440,11 @@ impl std::error::Error for HostError {
             | Self::SchemaReferenceMissing { .. }
             | Self::SchemaReferenceAmbiguous { .. }
             | Self::SchemaValidation { .. }
+            | Self::SubscriptionInvalidId { .. }
+            | Self::SubscriptionInvalidProjectionId { .. }
+            | Self::SubscriptionDuplicateWithinModule { .. }
+            | Self::SubscriptionReservedCategory { .. }
+            | Self::SubscriptionPayloadSchemaMissing { .. }
             | Self::EmptyHost => None,
         }
     }

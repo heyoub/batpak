@@ -147,23 +147,34 @@ rows:
     witness_tests:
       - tools/integrity/src/release_status_tests.rs::committed_release_ledger_passes_structural_validation
 
-  # ── S12 hostbat / subscriptions / schema (not started) ─────────────────────
+  # ── S12 hostbat / subscriptions / schema ────────────────────────────────────
 
   - id: S12-P1-SUBSCRIPTION-DESCRIPTORS
     title: hostbat subscription descriptor types + module registration
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: hostbat
-    blocked_by:
-      - Packet A not started
+    witness_tests:
+      - crates/hostbat/src/subscription_tests.rs::red_duplicate_subscription_id_within_module_fails_exact_variant
+      - crates/hostbat/src/subscription_tests.rs::subscription_id_rejects_bad_grammar
+      - crates/hostbat/src/subscription_tests.rs::reserved_event_categories_are_rejected
+      - crates/hostbat/src/subscription_tests.rs::red_missing_payload_schema_fails_exact_variant
+    proof_commands:
+      - just cargo test -p hostbat subscription
 
   - id: S12-P1-H-INTERFACE-SUBSCRIPTIONS
     title: Subscriptions folded into H_interface / client manifest
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: hostbat
-    blocked_by:
-      - depends on S12-P1-SUBSCRIPTION-DESCRIPTORS
+    witness_tests:
+      - crates/hostbat/src/subscription_tests.rs::adding_subscription_flips_h_interface
+      - crates/hostbat/src/subscription_tests.rs::changing_subscription_source_flips_h_interface
+      - crates/hostbat/src/subscription_tests.rs::hook_change_does_not_flip_h_interface
+      - crates/hostbat/src/subscription_tests.rs::client_manifest_includes_subscriptions_and_matches_h_interface
+      - crates/hostbat/src/subscription_tests.rs::runtime_does_not_claim_netbat2_serving
+    proof_commands:
+      - just cargo test -p hostbat subscription
 
   - id: S12-P3C-STRUCTURAL-SCHEMA
     title: Language-neutral structural schema validation descriptors

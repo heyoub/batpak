@@ -19,6 +19,7 @@ use crate::error::{HookFailure, HostRuntimeError};
 use crate::identity::{HostFingerprint, InterfaceFingerprint};
 use crate::module::{BoxedHook, BoxedJob};
 use crate::schema::SchemaRegistry;
+use crate::subscription::SubscriptionDescriptor;
 use crate::supervisor::Supervisor;
 
 /// One lifecycle hook bound to the module that owns it, ready to run in the
@@ -69,6 +70,7 @@ pub struct Host {
     fingerprint: HostFingerprint,
     interface_fingerprint: InterfaceFingerprint,
     operations: Vec<OperationDescriptor>,
+    subscriptions: Vec<(String, SubscriptionDescriptor)>,
     composition_schemas: HostCompositionManifest,
     schema_registry: SchemaRegistry,
     startup: Vec<HostHook>,
@@ -85,6 +87,7 @@ pub(crate) struct HostParts {
     pub(crate) fingerprint: HostFingerprint,
     pub(crate) interface_fingerprint: InterfaceFingerprint,
     pub(crate) operations: Vec<OperationDescriptor>,
+    pub(crate) subscriptions: Vec<(String, SubscriptionDescriptor)>,
     pub(crate) composition_schemas: HostCompositionManifest,
     pub(crate) schema_registry: SchemaRegistry,
     pub(crate) startup: Vec<HostHook>,
@@ -100,6 +103,7 @@ impl Host {
             fingerprint,
             interface_fingerprint,
             operations,
+            subscriptions,
             composition_schemas,
             schema_registry,
             startup,
@@ -112,6 +116,7 @@ impl Host {
             fingerprint,
             interface_fingerprint,
             operations,
+            subscriptions,
             composition_schemas,
             schema_registry,
             startup,
@@ -136,6 +141,13 @@ impl Host {
     /// Operation descriptors in canonical operation-name order.
     pub fn operations(&self) -> impl Iterator<Item = &OperationDescriptor> {
         self.operations.iter()
+    }
+
+    /// Subscription descriptors in canonical `(module-id, subscription-id)` order.
+    pub fn subscriptions(&self) -> impl Iterator<Item = (&str, &SubscriptionDescriptor)> {
+        self.subscriptions
+            .iter()
+            .map(|(module, descriptor)| (module.as_str(), descriptor))
     }
 
     /// The content-addressed composition schema manifest aggregating every
