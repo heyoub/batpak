@@ -58,21 +58,25 @@ fn profile_samples() -> Vec<ProfileFacts> {
             landlock_abi: 0,
             has_cgroup_kill: false,
             has_pids_peak: false,
+            has_unprivileged_userns: false,
         },
         ProfileFacts {
             landlock_abi: 1,
             has_cgroup_kill: false,
             has_pids_peak: false,
+            has_unprivileged_userns: false,
         },
         ProfileFacts {
             landlock_abi: 4,
             has_cgroup_kill: true,
             has_pids_peak: false,
+            has_unprivileged_userns: true,
         },
         ProfileFacts {
             landlock_abi: 6,
             has_cgroup_kill: true,
             has_pids_peak: true,
+            has_unprivileged_userns: true,
         },
     ]
 }
@@ -81,6 +85,7 @@ fn dominates(strong: &ProfileFacts, weak: &ProfileFacts) -> bool {
     strong.landlock_abi >= weak.landlock_abi
         && (strong.has_cgroup_kill || !weak.has_cgroup_kill)
         && (strong.has_pids_peak || !weak.has_pids_peak)
+        && (strong.has_unprivileged_userns || !weak.has_unprivileged_userns)
 }
 
 /// THE §3 LAW: a floor EARNED at some profile is satisfied by every profile
@@ -95,6 +100,7 @@ fn floor_earned_at_a_profile_is_satisfied_by_any_stronger_profile() {
             landlock_abi_min: u8::try_from(earned_at.landlock_abi).ok(),
             requires_cgroup_kill: earned_at.has_cgroup_kill,
             requires_pids_peak: earned_at.has_pids_peak,
+            requires_unprivileged_userns: earned_at.has_unprivileged_userns,
         };
         for prod in &profile_samples() {
             if dominates(prod, earned_at) {
@@ -120,11 +126,13 @@ fn floor_is_not_satisfied_by_a_weaker_profile() {
         landlock_abi_min: None,
         requires_cgroup_kill: true,
         requires_pids_peak: false,
+        requires_unprivileged_userns: false,
     };
     let no_cgroup = ProfileFacts {
         landlock_abi: 6,
         has_cgroup_kill: false,
         has_pids_peak: false,
+        has_unprivileged_userns: true,
     };
     assert!(!kill_floor.satisfied_by(&no_cgroup));
     // The Filesystem floor (ABI ≥ 1) is NOT satisfied below the floor.
@@ -132,13 +140,27 @@ fn floor_is_not_satisfied_by_a_weaker_profile() {
         landlock_abi_min: Some(1),
         requires_cgroup_kill: false,
         requires_pids_peak: false,
+        requires_unprivileged_userns: false,
     };
     let no_landlock = ProfileFacts {
         landlock_abi: 0,
         has_cgroup_kill: true,
         has_pids_peak: true,
+        has_unprivileged_userns: true,
     };
     assert!(!fs_floor.satisfied_by(&no_landlock));
+    // The NetworkDenyAll floor (unprivileged userns+netns) is NOT satisfied without it.
+    let netns_floor = ProfileFloor::unprivileged_userns_netns();
+    let no_userns = ProfileFacts {
+        landlock_abi: 6,
+        has_cgroup_kill: true,
+        has_pids_peak: true,
+        has_unprivileged_userns: false,
+    };
+    assert!(
+        !netns_floor.satisfied_by(&no_userns),
+        "the empty-netns floor must NOT be satisfied without unprivileged userns+netns"
+    );
 }
 
 // ── The committed ledger ──
@@ -302,9 +324,17 @@ fn ledger_lookup_finds_proven_and_nonproven_keys() {
             .status,
         QualificationStatus::Proven
     );
+    // NetworkDenyAll is Proven (S9: empty netns + the §4 dual-channel oracle).
     assert_eq!(
         linux_ledger_row(RequirementKind::NetworkDenyAll)
             .expect("NetworkDenyAll row present")
+            .status,
+        QualificationStatus::Proven
+    );
+    // NetworkAllowList STAYS FailClosed (no broker in v1).
+    assert_eq!(
+        linux_ledger_row(RequirementKind::NetworkAllowList)
+            .expect("NetworkAllowList row present")
             .status,
         QualificationStatus::FailClosed
     );

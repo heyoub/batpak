@@ -103,6 +103,8 @@ fn plan(user_namespace: Option<UserNsRequest>) -> LinuxLaunchPlanV1 {
                 envp: vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
                 exe_slot: EXE_SLOT,
                 user_namespace,
+                // S8 infra test: no netns (that is the S9 oracle's concern).
+                network_namespace: None,
             },
         },
     }

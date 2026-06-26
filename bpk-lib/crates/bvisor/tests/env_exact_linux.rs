@@ -182,6 +182,7 @@ fn exec_only_plan(argv: Vec<String>, envp: Vec<(String, String)>) -> LinuxLaunch
             envp,
             exe_slot: u32::try_from(SLOT_EXE).expect("fd fits u32"),
             user_namespace: None,
+            network_namespace: None,
         },
     };
     LinuxLaunchPlanV1 { body }

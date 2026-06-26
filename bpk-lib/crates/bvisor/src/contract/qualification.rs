@@ -125,6 +125,12 @@ pub struct ProfileFloor {
     pub requires_cgroup_kill: bool,
     /// The mechanism requires the `pids.peak` usage witness (cgroup v2 ≥ 6.1).
     pub requires_pids_peak: bool,
+    /// The mechanism requires UNPRIVILEGED user + network namespace creation (the
+    /// `NetworkDenyAll` empty-netns floor, S9 / D3): an unprivileged process may create a
+    /// new netns ONLY when it is also root in a new userns (the S8 rendezvous). A kernel
+    /// that forbids unprivileged userns cannot realize the empty netns, so the cell is
+    /// FAIL_CLOSED there — never a silent pass.
+    pub requires_unprivileged_userns: bool,
 }
 
 impl ProfileFloor {
@@ -136,6 +142,20 @@ impl ProfileFloor {
             landlock_abi_min: None,
             requires_cgroup_kill: false,
             requires_pids_peak: false,
+            requires_unprivileged_userns: false,
+        }
+    }
+
+    /// The empty-netns `NetworkDenyAll` floor (S9 / D3): requires unprivileged
+    /// user + network namespace creation, no landlock / cgroup minimum. Structural
+    /// otherwise (the empty netns holds on any kernel that permits unprivileged userns).
+    #[must_use]
+    pub const fn unprivileged_userns_netns() -> Self {
+        Self {
+            landlock_abi_min: None,
+            requires_cgroup_kill: false,
+            requires_pids_peak: false,
+            requires_unprivileged_userns: true,
         }
     }
 
@@ -155,6 +175,9 @@ impl ProfileFloor {
             return false;
         }
         if self.requires_pids_peak && !facts.has_pids_peak {
+            return false;
+        }
+        if self.requires_unprivileged_userns && !facts.has_unprivileged_userns {
             return false;
         }
         true
@@ -177,6 +200,10 @@ pub struct ProfileFacts {
     pub has_cgroup_kill: bool,
     /// Whether the probed cgroup base exposes the `pids.peak` usage witness.
     pub has_pids_peak: bool,
+    /// Whether the host permits UNPRIVILEGED user + network namespace creation (the
+    /// `NetworkDenyAll` empty-netns floor, S9 / D3). Probed once at construction
+    /// (`unprivileged_userns_available`); `false` ⇒ the empty-netns cell fails closed.
+    pub has_unprivileged_userns: bool,
 }
 
 /// One committed row of the qualification LEDGER (§1 `Qualification(p,k)` joined to
@@ -265,11 +292,22 @@ pub fn linux_mechanism(primitive: &str, enforcement: Enforcement) -> String {
 /// (scrubbed), with the fail-closed branches (an undeclared fd is scrubbed before the
 /// workload; an unrealized fd policy ⇒ the target never runs) proven by the oracle.
 ///
+/// `NetworkDenyAll` (empty netns, S9 / D3) — the admitted `NetPolicy::DenyAll` engages a
+/// NEW, EMPTY network namespace (`CLONE_NEWNET`, alongside the S8 userns rendezvous it
+/// requires); the netns has NO external interface, witnessed HOST-SIDE (the host reads the
+/// CHILD's `/proc/<pid>/net/dev` and sees ONLY `lo`) AND by the workload's own self-report
+/// (it cannot reach the network), with the launcher's own control channel still working
+/// through the netns (HostControl carve-out — fd-passed sockets are unaffected). Fail-closed
+/// branches: a kernel without unprivileged userns+netns ⇒ the cell SKIPs LOUD (floor not
+/// met), and an unrealized `AllowList` ⇒ the target never runs. `NetworkAllowList` STAYS
+/// `FailClosed` (no broker in v1).
+///
 /// NON-PROVEN cells are stated explicitly (the coupling test asserts they are NOT
 /// advertised `Enforced` in production): `InheritedFdsOnly` is `Incomplete` (the scrub
 /// realizes only `None`; the selective-keep allowlist has no lowering + no oracle); every
-/// other capability — including all THREE `ChildSpawn` child-task keys (proof-spine
-/// §2 split + the S6 3-variant freeze) — is `FailClosed`.
+/// other capability — including `NetworkAllowList` (no broker in v1) and all THREE
+/// `ChildSpawn` child-task keys (proof-spine §2 split + the S6 3-variant freeze) — is
+/// `FailClosed`.
 pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
@@ -280,6 +318,7 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
             landlock_abi_min: Some(1),
             requires_cgroup_kill: false,
             requires_pids_peak: false,
+            requires_unprivileged_userns: false,
         },
         mechanism: "linux:landlock:Enforced",
         status: QualificationStatus::Proven,
@@ -322,6 +361,7 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
             landlock_abi_min: None,
             requires_cgroup_kill: true,
             requires_pids_peak: false,
+            requires_unprivileged_userns: false,
         },
         mechanism: "linux:cgroup_kill:Enforced",
         status: QualificationStatus::Proven,
@@ -402,10 +442,33 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
         key: RequirementKind::NetworkDenyAll,
-        profile_floor: ProfileFloor::structural(),
-        mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
-        status: QualificationStatus::FailClosed,
-        proof_receipts: &[],
+        // The empty-netns floor (S9 / D3): requires UNPRIVILEGED user + network namespace
+        // creation (the S8 rendezvous makes the child root-in-userns; CLONE_NEWNET then
+        // births it into an empty netns). No landlock/cgroup minimum — the empty netns is
+        // structural above that floor, so the proof transfers to any kernel that permits
+        // unprivileged userns. Below the floor the cell drops from the ceiling (fail-closed).
+        profile_floor: ProfileFloor::unprivileged_userns_netns(),
+        mechanism: "linux:empty_netns:Enforced",
+        status: QualificationStatus::Proven,
+        // §4 BOTH branches, DUAL channel (host-side kernel-state strongest, per §4):
+        //  - guarantee-holds (A) HOST-SIDE: the host reads the CHILD's netns interface list
+        //    from /proc/<child_pid>/net/dev and asserts it contains ONLY `lo` — NO external
+        //    interface (the independent "zero external interfaces" witness, kernel state the
+        //    launcher cannot forge); (B) WORKLOAD self-report: the workload enumerates its
+        //    own interfaces + routing table and OBSERVES it has ZERO routes (only `lo`, which
+        //    has no address ⇒ no reachable destination). NO-LEAK: no inherited routable socket
+        //    survives (the S5 scrub).
+        //    HOSTCONTROL: the launcher's own control channel still works through the netns
+        //    (the workload runs to a verdict);
+        //  - fail-closed: a kernel without unprivileged userns+netns ⇒ the cell SKIPs LOUD
+        //    (never a silent pass), and a contract-level setup failure ⇒ the target never runs
+        //    (the empty netns engages on the full execute()/BoundaryRunner path).
+        proof_receipts: &[
+            "crates/bvisor/tests/network_deny_all_linux.rs::host_sees_only_loopback_in_the_child_netns_no_external_interface_or_skip",
+            "crates/bvisor/tests/network_deny_all_linux.rs::workload_cannot_reach_the_network_from_the_empty_netns_or_skip",
+            "crates/bvisor/tests/network_deny_all_linux.rs::a_deny_all_spec_runs_through_the_execute_path_or_skip",
+            "crates/bvisor/tests/network_deny_all_linux.rs::network_allow_list_fails_closed_at_admission_the_target_never_runs",
+        ],
     },
     QualificationRow {
         backend: "linux",

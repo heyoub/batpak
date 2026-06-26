@@ -34,11 +34,14 @@
 //!     the ceiling entirely (fail-closed), so the gate demands NO Filesystem row.
 //!
 //! RED FIXTURE (`--cfg gauntlet_red_fixture`, ProductionFlip): plants an `Enforced`
-//! ceiling cell (`NetworkDenyAll`) that has NO `Proven` ledger row and asserts the
-//! coupling check REDs. The real ceiling never advertises it, so this can only
-//! happen by flipping production — and a biting gate catches it, so the red half
-//! FAILS, proving the gate is anti-vacuous. Registered as the blocking
-//! ProductionFlip gate `bvisor-qualification-coupling` in `gate_registry.rs`.
+//! ceiling cell (`NetworkAllowList`) that has NO `Proven` ledger row (it is
+//! `FailClosed` — no broker in v1) and asserts the coupling check REDs. The real
+//! ceiling never advertises it, so this can only happen by flipping production — and
+//! a biting gate catches it, so the red half FAILS, proving the gate is anti-vacuous.
+//! (Before S9, `NetworkDenyAll` was the planted cell; S9 made it a real Enforced+Proven
+//! cell, so the fixture moved to `NetworkAllowList`, the next still-FailClosed network
+//! cell.) Registered as the blocking ProductionFlip gate
+//! `bvisor-qualification-coupling` in `gate_registry.rs`.
 
 use bvisor::{
     BackendProfile, Enforcement, LinuxBackend, MechanismDigest, ProfileFacts, QualificationStatus,
@@ -131,9 +134,12 @@ fn cgroup_profile_couples_every_enforced_cell_to_a_proven_row() {
         enforced.contains(&RequirementKind::Filesystem)
             && enforced.contains(&RequirementKind::Kill)
             && enforced.contains(&RequirementKind::LaunchWorkload)
-            && enforced.contains(&RequirementKind::CaptureStreams),
-        "the cgroup profile must advertise the Filesystem/Kill/Launch/Capture cells \
-         the gate then qualifies; got {enforced:?}"
+            && enforced.contains(&RequirementKind::CaptureStreams)
+            // S9: the production-shaped proof profile (unprivileged userns+netns) also
+            // advertises NetworkDenyAll=Enforced, which the gate must couple to its Proven row.
+            && enforced.contains(&RequirementKind::NetworkDenyAll),
+        "the cgroup profile must advertise the Filesystem/Kill/Launch/Capture/NetworkDenyAll \
+         cells the gate then qualifies; got {enforced:?}"
     );
     let result = coupling_for(&backend);
     assert!(
@@ -231,22 +237,23 @@ fn a_swapped_mechanism_is_rejected_by_the_digest_match() {
     );
 }
 
-/// RED FIXTURE (ProductionFlip): plant an `Enforced` cell (`NetworkDenyAll`) that
-/// has NO `Proven` ledger row (it is `FailClosed`), and assert the coupling check
-/// PASSES — which is FALSE, because a biting gate returns `NotProven`. So the red
-/// half FAILS, proving the gate is anti-vacuous. Under correct production the
-/// ceiling never advertises NetworkDenyAll, so this scenario only arises by a
-/// production flip.
+/// RED FIXTURE (ProductionFlip): plant an `Enforced` cell (`NetworkAllowList`) that
+/// has NO `Proven` ledger row (it is `FailClosed` — no broker in v1), and assert the
+/// coupling check PASSES — which is FALSE, because a biting gate returns `NotProven`.
+/// So the red half FAILS, proving the gate is anti-vacuous. Under correct production
+/// the ceiling never advertises NetworkAllowList, so this scenario only arises by a
+/// production flip. (Pre-S9 this fixture used NetworkDenyAll; S9 made that a real
+/// Enforced+Proven cell, so the fixture moved to the still-FailClosed AllowList.)
 #[cfg(gauntlet_red_fixture)]
 #[test]
 fn coupling_red_fixture_enforced_without_proven_row_must_fail() {
     let backend = LinuxBackend::with_cgroup_for_proof(true);
-    // The PLANTED over-claim: NetworkDenyAll advertised Enforced, but its ledger row
+    // The PLANTED over-claim: NetworkAllowList advertised Enforced, but its ledger row
     // is FailClosed (no Proven, no oracle) — exactly the over-claim the gate catches.
     let mut enforced = backend.proof_ceiling().enforced_kinds();
-    enforced.push(RequirementKind::NetworkDenyAll);
+    enforced.push(RequirementKind::NetworkAllowList);
     let result = check_coupling(&enforced, &backend.proof_facts(), &live_digest_fn(&backend));
-    // A biting gate returns Err(NotProven(NetworkDenyAll, FailClosed)); asserting the
+    // A biting gate returns Err(NotProven(NetworkAllowList, FailClosed)); asserting the
     // check PASSED is therefore FALSE — the red half FAILS, proving anti-vacuity.
     assert!(
         result.is_ok(),

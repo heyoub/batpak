@@ -64,6 +64,17 @@ const CLONE_INTO_CGROUP: u64 = 0x2_0000_0000;
 /// the parent writes its uid/gid maps and releases it (then it is uid 0 in the userns).
 const CLONE_NEWUSER: u64 = 0x1000_0000;
 
+/// `CLONE_NEWNET` (uapi `linux/sched.h`): a `clone3`/`clone` flag asking the kernel to
+/// create the child in a NEW, EMPTY network namespace (proof-spine S9 / D3 — the
+/// `NetworkDenyAll` mechanism). Named here as an explicit `u64` (its value `0x4000_0000`
+/// fits `i32`, but `clone_args.flags` is `c_ulonglong`, so we keep it wide to OR it into
+/// `flags` without a lossy cast). Set ONLY when the plan opts into the empty netns — and
+/// ONLY ALONGSIDE `CLONE_NEWUSER` (an unprivileged process may create a new netns only when
+/// it is also root in a new userns; the caller enforces the pairing). The child is born into
+/// an empty netns (only `lo`, with no address + no routes => unreachable, no external interface)
+/// so it is structurally unable to reach any network. This is just a FLAG BIT — it adds NO new syscall.
+const CLONE_NEWNET: u64 = 0x4000_0000;
+
 /// One declared confinement root the launcher restricts FS access TO: a pre-opened,
 /// fstat-validated descriptor (NEVER a path — exec/landlock rides the inherited fd,
 /// avoiding the CVE-2019-5736 reopen race) and whether the workload may write beneath
@@ -404,6 +415,7 @@ pub(crate) fn clone3_child(
     confinement: Option<RulesetCreated>,
     cgroup_fd: Option<RawFd>,
     userns: bool,
+    netns: bool,
 ) -> io::Result<libc::pid_t> {
     // Build the clone3 argument IN THE PARENT. exit_signal = SIGCHLD so the parent can
     // `waitid` the child normally; the MECHANISM is clone3 (NEVER Command::spawn).
@@ -417,6 +429,15 @@ pub(crate) fn clone3_child(
     // PROVEN oracles run through an unchanged environment.
     if userns {
         args.flags |= CLONE_NEWUSER;
+    }
+    // OPT-IN empty network namespace = NetworkDenyAll (S9 / D3): add CLONE_NEWNET ONLY
+    // when the plan requested it — and the caller guarantees `netns ⇒ userns` (unprivileged
+    // CLONE_NEWNET needs the child root-in-userns). The child is born into an EMPTY netns
+    // (only `lo`, no address + no routes => unreachable, no external interface) at clone3 time, BEFORE the userns rendezvous
+    // releases it. This adds NO new syscall — only a flag bit. When off this OR is never
+    // reached, so the no-netns flags are unchanged.
+    if netns {
+        args.flags |= CLONE_NEWNET;
     }
     // Optional cgroup placement: if the coordinator resolved a CgroupDir slot, ask the
     // kernel to birth the child INSIDE that leaf (no migration race). A fd that does not
@@ -432,15 +453,19 @@ pub(crate) fn clone3_child(
 
     // SAFETY (LEDGER:linux-launcher-clone3-child): `clone3` is invoked with a
     // properly sized `clone_args` (exit_signal=SIGCHLD, and flags drawn from {0,
-    // CLONE_INTO_CGROUP, CLONE_NEWUSER} — CLONE_INTO_CGROUP with `cgroup` set to the
-    // inherited, fstat-validated CgroupDir directory fd, and CLONE_NEWUSER ONLY when the
-    // plan opted into the userns rendezvous) built in the single-threaded parent. The
+    // CLONE_INTO_CGROUP, CLONE_NEWUSER, CLONE_NEWNET} — CLONE_INTO_CGROUP with `cgroup` set
+    // to the inherited, fstat-validated CgroupDir directory fd, CLONE_NEWUSER ONLY when the
+    // plan opted into the userns rendezvous, and CLONE_NEWNET ONLY alongside CLONE_NEWUSER
+    // when it opted into the empty netns — a plain flag bit, no new syscall) built in the
+    // single-threaded parent. The
     // kernel consumes the cgroup fd DURING this syscall in the parent (placing the child
     // into the leaf at birth); an invalid fd only makes clone3 fail with errno (handled
     // below — no child runs). CLONE_NEWUSER births the child in a NEW user namespace
     // initially UNMAPPED (overflow uid); the child then BLOCKS in its window on the sync
     // pipe until the parent writes the uid/gid maps and releases it — no extra memory or
-    // unsafe is needed for the flag itself. The PARENT branch (rc>0) only returns the pid. The
+    // unsafe is needed for the flag itself. CLONE_NEWNET (only alongside CLONE_NEWUSER)
+    // likewise births the child into a NEW, EMPTY network namespace at the same syscall —
+    // again just a flag bit, no extra memory/unsafe. The PARENT branch (rc>0) only returns the pid. The
     // CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
     // PRE-BUILT `plan` (argv/envp pointer arrays, close-list, fds — all allocated
     // by `ChildExecPlan::build` BEFORE this call) by INDEXING already-mapped

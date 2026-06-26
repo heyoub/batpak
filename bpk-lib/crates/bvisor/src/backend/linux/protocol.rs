@@ -322,6 +322,50 @@ impl UserNsRequest {
     }
 }
 
+/// An OPT-IN request that the launcher birth the workload child in a NEW, EMPTY network
+/// namespace (`CLONE_NEWNET`) — the structural realization of `NetworkDenyAll` (proof-spine
+/// S9 / D3). An empty netns has NO external interface: only a loopback `lo` (which the kernel
+/// reports `IFF_UP`, like every loopback, but with NO address assigned and NO routes, so it is
+/// unreachable — `127.0.0.1` included — unless separately admitted), so the workload is
+/// STRUCTURALLY unable to reach any IP/packet network — no externally-routable socket op can succeed and
+/// no inherited routable socket exists (the S5 fd-scrub already closed any inherited socket).
+///
+/// REQUIRES the userns rendezvous: an UNPRIVILEGED process may create a new netns ONLY when
+/// it is also root inside a new user namespace, so a plan that requests this MUST also
+/// request [`TargetSpecV1::user_namespace`] (the S8 rendezvous makes the child uid 0 in its
+/// userns). The launcher ORs `CLONE_NEWNET` into the `clone3` flags ALONGSIDE `CLONE_NEWUSER`
+/// (the child is born into the empty netns at clone3 time, before the rendezvous releases it);
+/// `CLONE_NEWNET` adds NO new syscall — only a flag bit.
+///
+/// HOSTCONTROL CARVE-OUT (D3): netns isolation does NOT affect already-OPEN fd-passed
+/// sockets. The launcher's own declared private control channels (the protocol Unix-socket /
+/// error-pipe / sync-pipe fds it inherits to the child) are HostControl, NOT workload network
+/// authority — they keep working through the empty netns, so the launcher protocol still runs
+/// the workload to a verdict. "Deny network" is therefore about UNDECLARED network authority,
+/// never the launcher's own declared control plumbing.
+///
+/// It is a struct (not a bare bool) so future work can add fields (e.g. admit `lo` UP, a veth
+/// pair to a broker) without a wire break. With NO fields today it canonical-encodes to an
+/// empty map (`0x80`) when present.
+///
+/// CRITICAL OFF-PATH INVARIANT: [`TargetSpecV1::network_namespace`] is
+/// `#[serde(default, skip_serializing_if = "Option::is_none")]`, so a plan that does NOT
+/// deny network omits the field ENTIRELY from the canonical bytes — the no-netns wire form
+/// (and every PROVEN oracle that runs through it) is byte-for-byte unchanged. `CLONE_NEWNET`
+/// is added to the `clone3` flags ONLY when this is `Some`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct NetworkNsRequest {}
+
+impl NetworkNsRequest {
+    /// The default request: birth the child in a new, empty network namespace (only `lo`,
+    /// with no address + no routes ⇒ unreachable; no external interface, no inherited routable socket).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
 /// The exact process image to launch. Environment is EXPLICIT — nothing is
 /// inherited — and the executable rides a descriptor (`exe_slot`), never a path.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,6 +383,16 @@ pub struct TargetSpecV1 {
     /// userns and uid/gid-mapped to 0 via the parent rendezvous before it execs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_namespace: Option<UserNsRequest>,
+    /// OPT-IN empty network namespace = `NetworkDenyAll` (S9 / D3). `None` (the default) ⇒
+    /// the child shares the launcher's netns and `CLONE_NEWNET` is NOT set — the EXISTING
+    /// no-netns path is byte-for-byte unchanged (the field is omitted from the canonical
+    /// encoding, see [`NetworkNsRequest`]). `Some` ⇒ the child is born in a NEW, EMPTY
+    /// netns (only `lo`, no address + no routes ⇒ unreachable; no external interface) so it is
+    /// structurally unable to reach any network. REQUIRES [`Self::user_namespace`] to also be `Some` (unprivileged
+    /// `CLONE_NEWNET` needs the child to be root-in-userns); the launcher refuses a netns
+    /// request without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_namespace: Option<NetworkNsRequest>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

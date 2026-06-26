@@ -29,6 +29,9 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: Some(std::path::PathBuf::from("/sys/fs/cgroup/proof-placeholder")),
             cgroup_pids_peak: pids_peak,
+            // The production-shaped proof profile permits unprivileged userns+netns, so its
+            // ceiling backs NetworkDenyAll=Enforced and the coupling gate qualifies it.
+            netns_available: true,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -44,6 +47,10 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: None,
             cgroup_pids_peak: false,
+            // The ABI-focused proof profiles isolate the Filesystem floor; force netns OFF
+            // so NetworkDenyAll does not enter the ceiling and the FS/Kill coupling tests
+            // stay focused on exactly their cells.
+            netns_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -64,6 +71,7 @@ impl LinuxBackend {
             landlock_abi: self.landlock_abi,
             has_cgroup_kill: self.cgroup_base.is_some(),
             has_pids_peak: self.cgroup_pids_peak,
+            has_unprivileged_userns: self.netns_available,
         }
     }
 

@@ -163,6 +163,7 @@ fn body_with(
             envp: vec![("PATH".to_owned(), "/usr/bin:/bin".to_owned())],
             exe_slot: u32::try_from(SLOT_EXE).expect("fd fits u32"),
             user_namespace: None,
+            network_namespace: None,
         },
     }
 }

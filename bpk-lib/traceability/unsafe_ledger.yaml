@@ -209,7 +209,7 @@ entries:
     syscall: clone3 (raw syscall) + the async-signal-safe child branch (optional userns-rendezvous SYS_read/sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
     safety_invariant: >-
       clone3 is invoked with a correctly sized clone_args (exit_signal=SIGCHLD, and
-      flags drawn from {0, CLONE_INTO_CGROUP, CLONE_NEWUSER}) BUILT IN THE
+      flags drawn from {0, CLONE_INTO_CGROUP, CLONE_NEWUSER, CLONE_NEWNET}) BUILT IN THE
       SINGLE-THREADED PARENT. When the coordinator resolved a DescriptorRole::CgroupDir
       slot it sets flags|=CLONE_INTO_CGROUP and clone_args.cgroup = that inherited,
       fstat-validated DIRECTORY fd, so the kernel places the child into the prepared cgroup
@@ -225,6 +225,14 @@ entries:
       its uid/gid maps and releases it; the flag itself needs no extra memory or unsafe,
       and with no userns request the OR is never reached so the flags are EXACTLY the
       pre-S8 set (the no-userns PROVEN oracles run through an unchanged environment).
+      When the plan ALSO OPTED INTO the empty network namespace (S9 / D3) the coordinator
+      additionally sets flags|=CLONE_NEWNET — and ONLY alongside CLONE_NEWUSER (unprivileged
+      CLONE_NEWNET needs the child root-in-userns; the coordinator faults a netns-without-
+      userns plan before reaching here), so the child is born into a NEW, EMPTY net
+      namespace (only lo, with no address + no routes => unreachable, no external interface =
+      NetworkDenyAll) at the SAME syscall;
+      this too is just a flag bit needing no extra memory/unsafe/syscall, and with no netns
+      request the OR is never reached so the no-netns flags are unchanged.
       The PARENT branch (rc>0) only
       returns the child pid (and drops its copy of the optional ruleset fd — the child
       holds its own inherited copy, so the parent drop does not affect confinement).

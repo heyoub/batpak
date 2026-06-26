@@ -269,6 +269,16 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     // and the no-userns path is byte-for-byte unchanged. A pipe-create failure fails
     // CLOSED to a fault (no child is created).
     let userns_requested = body.target.user_namespace.is_some();
+    // OPT-IN empty network namespace = NetworkDenyAll (S9 / D3): when the plan requests a
+    // netns, the launcher births the child in a NEW, EMPTY netns (CLONE_NEWNET). Unprivileged
+    // CLONE_NEWNET REQUIRES the child to be root-in-userns, so a netns request WITHOUT a
+    // userns request is a malformed plan — fail CLOSED (no child is created) rather than
+    // attempt an unprivileged CLONE_NEWNET that would EPERM.
+    let netns_requested = body.target.network_namespace.is_some();
+    if netns_requested && !userns_requested {
+        let _ = control.note("network_namespace=requested_without_userns fail_closed");
+        return Ok(Verdict::Faulted);
+    }
     let sync_pipe = if userns_requested {
         match sys::make_sync_pipe() {
             Ok(pipe) => Some(pipe),
@@ -313,6 +323,7 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         confinement.map(|c| c.ruleset),
         cgroup_fd,
         userns_requested,
+        netns_requested,
     )?;
     control.emit(LauncherState::ChildCreated);
     let _ = control.note(&format!("mechanism=clone3 child_pid={child_pid}"));
@@ -332,6 +343,14 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         match user_namespace_rendezvous(child_pid, write) {
             Ok(()) => {
                 let _ = control.note("user_namespace=mapped child_uid0_egid0");
+                if netns_requested {
+                    // The child was born into a NEW, EMPTY netns at clone3 time (CLONE_NEWNET):
+                    // only `lo` (no address, no routes => unreachable), no external interface —
+                    // NetworkDenyAll is structural.
+                    // The HOST independently confirms this by reading the child's
+                    // /proc/<pid>/net/dev (the §4 oracle); this note is the honest attestation.
+                    let _ = control.note("network_namespace=empty_netns child_isolated");
+                }
             }
             Err(()) => {
                 // The write end was already closed by the rendezvous on failure, so the

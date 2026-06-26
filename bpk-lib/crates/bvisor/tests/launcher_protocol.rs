@@ -67,6 +67,7 @@ fn sample_body() -> LinuxLaunchBodyV1 {
             envp: vec![("K".to_owned(), "V".to_owned())],
             exe_slot: 0,
             user_namespace: None,
+            network_namespace: None,
         },
     }
 }

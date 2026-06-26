@@ -12,7 +12,8 @@
 use crate::backend::linux::launch::AuthorityFd;
 use crate::backend::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
-    LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1,
+    LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, NetworkNsRequest, TargetSpecV1,
+    UserNsRequest,
 };
 use crate::contract::capability::{FsAccess, PathSet};
 use crate::contract::ids::{
@@ -95,6 +96,7 @@ pub(super) fn prepare_launch(
     fs: Option<&(FsAccess, PathSet)>,
     cgroup_dir_fd: Option<OwnedFd>,
     envp: Vec<(String, String)>,
+    deny_network: bool,
 ) -> Result<Prepared, String> {
     let mut table: Vec<DescriptorSlotV1> = Vec::new();
     let mut authority: Vec<AuthorityFd> = Vec::new();
@@ -176,7 +178,7 @@ pub(super) fn prepare_launch(
     entries.push(entry(ID_EXEC, PHASE_CODE_EXEC));
     let lowering = LoweringWireV1 { entries };
 
-    let body = build_body(plan, lowering, table, exe, args, envp)?;
+    let body = build_body(plan, lowering, table, exe, args, envp, deny_network)?;
     Ok(Prepared {
         launch_plan: LinuxLaunchPlanV1 { body },
         authority,
@@ -268,6 +270,7 @@ fn build_body(
     exe: &str,
     args: &[String],
     envp: Vec<(String, String)>,
+    deny_network: bool,
 ) -> Result<LinuxLaunchBodyV1, String> {
     let lowering_bytes = batpak::canonical::to_bytes(&lowering)
         .map_err(|e| format!("cannot canonically encode the lowering schedule: {e}"))?;
@@ -298,10 +301,13 @@ fn build_body(
             // platform-generated entries must be explicit, never invisible).
             envp,
             exe_slot: slot_u32(SLOT_EXE),
-            // The production plan-build path does NOT request a user namespace (S8 is
-            // opt-in infrastructure; the netns wiring that uses it is S9). `None` keeps
-            // the canonical bytes byte-for-byte identical to the pre-S8 wire form.
-            user_namespace: None,
+            // S9 / D3: an admitted NetworkDenyAll engages the empty network namespace —
+            // which requires the S8 userns rendezvous (unprivileged CLONE_NEWNET needs the
+            // child to be root-in-userns). So `deny_network` drives BOTH fields ON together;
+            // OFF, BOTH stay `None` and the canonical bytes are byte-for-byte identical to
+            // the pre-S8/S9 wire form (both fields are omitted from the encoding).
+            user_namespace: deny_network.then(UserNsRequest::new),
+            network_namespace: deny_network.then(NetworkNsRequest::new),
         },
     })
 }

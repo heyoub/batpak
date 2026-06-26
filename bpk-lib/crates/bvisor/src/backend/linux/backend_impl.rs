@@ -50,19 +50,13 @@
 //! (ExecSucceeded→Completed, SetupRefused→Unsupported, SetupFaulted→SupervisorFault).
 
 use crate::backend::linux::cgroup_run::{cgroup_for_run, finish};
-use crate::backend::linux::launch::{self, LaunchObservation};
+use crate::backend::linux::launch;
 use crate::backend::linux::{cgroup, plan_build, sys};
 use crate::contract::backend::Backend;
-use crate::contract::budget_witness::BudgetWitnesses;
-use crate::contract::capability::{
-    Capability, Enforcement, EvidenceClaim, FsAccess, PathSet, SupportVerdict,
-};
+use crate::contract::capability::{Enforcement, EvidenceClaim, FsAccess, PathSet, SupportVerdict};
 use crate::contract::ids::BackendId;
 use crate::contract::plan::{BoundaryPlan, BoundaryRequirement, Workload};
-use crate::contract::report::{
-    BoundaryReportBody, CaptureRefs, ExitStatus, ObservedFact, Outcome,
-    BOUNDARY_REPORT_SCHEMA_VERSION,
-};
+use crate::contract::report::{BoundaryReportBody, ObservedFact, Outcome};
 use crate::contract::secret::{MapSecretResolver, SecretResolver};
 use crate::contract::support::{
     BackendProfile, BackendProfileSnapshot, RequirementKind, SupportMatrix,
@@ -109,6 +103,14 @@ pub struct LinuxBackend {
     /// true, so a plan requiring that evidence never admits on a kernel that cannot
     /// witness it. Always `false` when `cgroup_base` is `None`.
     cgroup_pids_peak: bool,
+    /// Whether this host permits UNPRIVILEGED user + network namespace creation (the
+    /// `NetworkDenyAll` empty-netns floor, S9 / D3), PROBED ONCE at construction via
+    /// [`launch::unprivileged_userns_available`]. `true` ⇒ `execute()` engages an empty
+    /// netns for an admitted `NetworkDenyAll`, so the ceiling backs
+    /// `NetworkDenyAll=Enforced`. `false` ⇒ the cell is absent from the ceiling ⇒
+    /// Unsupported ⇒ `plan()` fails closed (no unbacked netns guarantee — the FAIL_CLOSED
+    /// floor branch).
+    netns_available: bool,
     /// The host's secret-lease resolver (proof-spine §5 D2). `execute()` resolves
     /// every [`crate::EnvSource::SecretLease`] in the admitted `Environment::Exact`
     /// table through this, in the PARENT, immediately before launch — the resolved
@@ -160,6 +162,7 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base,
             cgroup_pids_peak,
+            netns_available: launch::unprivileged_userns_available(),
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -190,6 +193,7 @@ impl LinuxBackend {
             launcher_path: Some(launcher_path),
             cgroup_base,
             cgroup_pids_peak,
+            netns_available: launch::unprivileged_userns_available(),
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -206,6 +210,9 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: None,
             cgroup_pids_peak: false,
+            // FS-focused tests force netns OFF so NetworkDenyAll stays Unsupported in the
+            // ceiling (the `unimplemented_kinds_fail_closed` test asserts exactly this).
+            netns_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -225,6 +232,9 @@ impl LinuxBackend {
             launcher_path: None,
             cgroup_base: Some(std::path::PathBuf::from("/sys/fs/cgroup/test-placeholder")),
             cgroup_pids_peak: pids_peak,
+            // The cgroup-focused tests do not exercise the netns cell; keep it OFF so they
+            // assert exactly the Kill/process_count ceiling without a NetworkDenyAll cell.
+            netns_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -232,6 +242,14 @@ impl LinuxBackend {
     /// Whether the live ABI meets the floor required to enforce FS confinement.
     fn filesystem_enforced(&self) -> bool {
         self.landlock_abi >= LANDLOCK_ABI_FLOOR
+    }
+
+    /// Whether this host can structurally enforce `NetworkDenyAll` via an empty network
+    /// namespace (S9 / D3): it permits UNPRIVILEGED user + network namespace creation
+    /// (the S8 rendezvous makes the child root-in-userns; `CLONE_NEWNET` then births it
+    /// into an empty netns). `false` ⇒ the cell is absent from the ceiling (FAIL_CLOSED).
+    fn network_deny_all_enforced(&self) -> bool {
+        self.netns_available
     }
 
     /// The honest machine ceiling: `Filesystem` Enforced ONLY when the ABI floor
@@ -305,6 +323,32 @@ impl LinuxBackend {
                 [EvidenceClaim::MechanismAttestation].into_iter().collect(),
             ),
         );
+        // NetworkDenyAll is ENFORCED (proof-spine S9 / D3) ONLY when this host permits
+        // UNPRIVILEGED user + network namespace creation: the admitted NetPolicy::DenyAll
+        // engages a NEW, EMPTY network namespace (CLONE_NEWNET, alongside the S8 userns
+        // rendezvous) — no external interface, so the workload is STRUCTURALLY unable to
+        // reach any network (the S5 fd-scrub already closed any inherited routable socket).
+        // Proven end-to-end by the dual-channel + fail-closed oracle
+        // (`tests/network_deny_all_linux.rs`: host reads the child's /proc/<pid>/net/dev and
+        // sees ONLY `lo` + the workload self-reports it cannot reach the network) and coupled
+        // to the Proven ledger row; the mechanism is `linux:empty_netns:Enforced`. Without
+        // unprivileged userns+netns the cell is ABSENT (Unsupported ⇒ plan() fails closed —
+        // the FAIL_CLOSED floor branch, never a silent pass). NetworkAllowList STAYS absent
+        // (no broker in v1).
+        if self.network_deny_all_enforced() {
+            ceiling.insert(
+                RequirementKind::NetworkDenyAll,
+                SupportVerdict::new(
+                    Enforcement::Enforced,
+                    [
+                        EvidenceClaim::DeniedAttempts,
+                        EvidenceClaim::MechanismAttestation,
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            );
+        }
         // Kill{RunTree,Atomic} is Enforced ONLY when a cgroup confinement base with
         // atomic `cgroup.kill` was probed: the workload runs in a cgroup leaf (placed
         // at birth by the launcher's CLONE_INTO_CGROUP), so the host can SIGKILL the
@@ -339,6 +383,13 @@ use env_lowering::lower_environment;
 #[path = "backend_impl_fds.rs"]
 mod fds_lowering;
 use fds_lowering::lower_inherited_fds;
+
+// The NetworkDenyAll lowering gate (admitted NetPolicy → the launcher empty-netns
+// engagement), split out to hold this file under the size cap. SAFE std; the netns +
+// userns rendezvous are the launcher's.
+#[path = "backend_impl_net.rs"]
+mod net_lowering;
+use net_lowering::{lower_network, NetLowering};
 
 // The honest budget profile derivation, split out to hold this file under the size cap.
 #[path = "backend_impl_budget.rs"]
@@ -412,8 +463,12 @@ impl Backend for LinuxBackend {
             // FdPolicy::None drives the scrub close-list (every undeclared inherited fd
             // is closed before fexecve). InheritedFds::Only is NOT realized (below).
             RequirementKind::InheritedFdsNone => "fd_scrub",
-            RequirementKind::NetworkDenyAll
-            | RequirementKind::NetworkAllowList
+            // NetworkDenyAll rides an EMPTY network namespace (CLONE_NEWNET + the userns
+            // rendezvous): no external interface, so the workload is structurally unable to
+            // reach any network. Backed ONLY when the host permits unprivileged userns+netns
+            // (the ceiling gates the actual claim; this names the mechanism).
+            RequirementKind::NetworkDenyAll => "empty_netns",
+            RequirementKind::NetworkAllowList
             | RequirementKind::ChildSpawnDenyNewTasks
             | RequirementKind::ChildSpawnAllowThreads
             | RequirementKind::ChildSpawnAllowDescendants
@@ -492,7 +547,31 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
         Err(facts) => return fail_closed(backend, plan, Outcome::Unsupported, facts),
     };
 
-    run_prepared(backend, plan, &exe, &args, fs.as_ref(), envp, observed)
+    // LOWER the admitted Network policy onto the launcher's empty-netns engagement
+    // (proof-spine S9 / D3). NetPolicy::DenyAll ⇒ deny_network (the launcher births the
+    // child in a NEW, EMPTY netns + the userns rendezvous it requires). FAIL CLOSED on a
+    // policy this backend does not realize (AllowList — no broker in v1): the workload
+    // never runs under an unrealized network guarantee.
+    let deny_network = match lower_network(backend, plan, observed) {
+        Ok(NetLowering {
+            deny_network,
+            observed: facts,
+        }) => {
+            observed = facts;
+            deny_network
+        }
+        Err(facts) => return fail_closed(backend, plan, Outcome::Unsupported, facts),
+    };
+
+    run_prepared(
+        backend,
+        plan,
+        &exe,
+        &args,
+        fs.as_ref(),
+        LoweredLaunch { envp, deny_network },
+        observed,
+    )
 }
 
 /// The per-run cgroup leaf + launcher build + launcher run, factored out of
@@ -501,15 +580,27 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
 /// builds the launcher plan over the lowered `envp` + authority handles, resolves +
 /// attests the launcher binary, runs it, and ALWAYS tears the leaf down via `finish`.
 /// Every fault path resolves to an honest fail-closed [`BoundaryReportBody`].
+/// The lowered launch inputs `execute_confined` hands to `run_prepared`: the concrete
+/// `envp` (lowered Environment::Exact) + whether to engage the empty netns (lowered
+/// NetworkDenyAll). Bundled so `run_prepared` stays within the argument budget (zero
+/// `#[allow]` doctrine — no `too_many_arguments` lint).
+struct LoweredLaunch {
+    /// The explicit environment served to the workload (literals + resolved leases).
+    envp: Vec<(String, String)>,
+    /// Whether the admitted NetworkDenyAll engages the empty network namespace (S9 / D3).
+    deny_network: bool,
+}
+
 fn run_prepared(
     backend: &LinuxBackend,
     plan: &BoundaryPlan,
     exe: &str,
     args: &[String],
     fs: Option<&(FsAccess, PathSet)>,
-    envp: Vec<(String, String)>,
+    lowered: LoweredLaunch,
     observed: Vec<ObservedFact>,
 ) -> BoundaryReportBody {
+    let LoweredLaunch { envp, deny_network } = lowered;
     // Prepare the per-run cgroup leaf; FAIL CLOSED if the plan admitted cgroup-backed
     // guarantees but the leaf cannot be created (see `cgroup_for_run`). The launcher births
     // the child INTO the leaf via CLONE_INTO_CGROUP; `finish` tears it down after the run.
@@ -522,19 +613,20 @@ fn run_prepared(
     // including the optional CgroupDir slot). A host wiring fault (a root/exe that
     // cannot be opened, a slot that does not fit) fails closed — the workload never
     // runs, and the leaf is torn down via `finish`.
-    let prepared = match plan_build::prepare_launch(exe, args, plan, fs, cgroup_dir_fd, envp) {
-        Ok(prepared) => prepared,
-        Err(detail) => {
-            observed.push(ObservedFact {
-                kind: "launch_plan_construction_failed".to_string(),
-                detail,
-            });
-            return finish(
-                cgroup_leaf,
-                fail_closed(backend, plan, Outcome::SupervisorFault, observed),
-            );
-        }
-    };
+    let prepared =
+        match plan_build::prepare_launch(exe, args, plan, fs, cgroup_dir_fd, envp, deny_network) {
+            Ok(prepared) => prepared,
+            Err(detail) => {
+                observed.push(ObservedFact {
+                    kind: "launch_plan_construction_failed".to_string(),
+                    detail,
+                });
+                return finish(
+                    cgroup_leaf,
+                    fail_closed(backend, plan, Outcome::SupervisorFault, observed),
+                );
+            }
+        };
     let plan_build::Prepared {
         launch_plan,
         authority,
@@ -681,192 +773,12 @@ fn resolve_launcher(backend: &LinuxBackend) -> Result<std::path::PathBuf, String
     ))
 }
 
-/// Map the launcher's honest [`LaunchObservation`] onto the report body, preserving
-/// the report/evidence contract downstream (seal/persist 0xE) consumes.
-///
-/// HONESTY: the launcher reports its setup transcript (the terminal, the phase
-/// resolutions, and `confinement_installed`) AND the host captures the WORKLOAD's
-/// stdout/stderr through the launcher's inherited piped stdio (the launcher's clone3
-/// child inherits the launcher's fd 0/1/2, and the launcher is stdio-silent on every
-/// workload-running path, so the launcher process's piped stdout/stderr carry exactly
-/// the workload's output). Those captured bytes back `CaptureStreams=Enforced`'s
-/// `CapturedStreams` evidence claim — the body records the captured stream references
-/// alongside a `stream_captured` byte-count fact. A landlock denial is STILL proven by
-/// the INDEPENDENT on-disk oracle (the G-grid), and the honest confinement evidence is the
-/// launcher's `confinement_installed` mechanism attestation. The terminal maps via the
-/// protocol's `outcome_class` (ExecSucceeded becomes Completed, SetupRefused becomes
-/// Unsupported as a fail-closed deny, and SetupFaulted becomes SupervisorFault), and a
-/// missing terminal becomes SupervisorFault (the launcher died before resolving, so the
-/// workload never ran).
-fn map_observation(
-    backend: &LinuxBackend,
-    plan: &BoundaryPlan,
-    exe: &str,
-    confined: bool,
-    obs: &LaunchObservation,
-    mut observed: Vec<ObservedFact>,
-    process_peak: Option<u64>,
-) -> BoundaryReportBody {
-    observed.push(ObservedFact {
-        kind: "workload_launched".to_string(),
-        detail: format!("launcher exec {exe} (confined={confined})"),
-    });
-    observed.push(ObservedFact {
-        kind: "launcher_terminal".to_string(),
-        detail: format!(
-            "terminal={:?} confinement_installed={} launcher_exit={:?}",
-            obs.terminal, obs.confinement_installed, obs.launcher_exit
-        ),
-    });
-    // Surface the launcher's own mechanism notes (its honest attestation: the clone3
-    // child pid, the confinement result/install). These are the mechanism evidence
-    // the report carries now that the launcher (not the backend) confines.
-    for note in &obs.notes {
-        observed.push(ObservedFact {
-            kind: "launcher_note".to_string(),
-            detail: note.clone(),
-        });
-    }
-    // A confined plan whose launcher reports NO install is an honesty fault, not a
-    // silent pass: record it (the Outcome below still reflects the terminal).
-    if confined && !obs.confinement_installed {
-        observed.push(ObservedFact {
-            kind: "confinement_not_installed".to_string(),
-            detail: "a Filesystem-scoped plan ran but the launcher reported no \
-                     landlock install"
-                .to_string(),
-        });
-    }
-
-    // The host captured the workload's stdout/stderr through the launcher's inherited
-    // piped stdio (the launcher is stdio-silent on every workload-running path). Record
-    // the honest byte-count fact + the stream references — this backs the
-    // `CaptureStreams=Enforced` ceiling's `CapturedStreams` evidence claim. The bytes
-    // are referenced (not inlined) to keep the report body bounded; the byte counts are
-    // the audit evidence that capture actually flowed.
-    observed.push(ObservedFact {
-        kind: "stream_captured".to_string(),
-        detail: format!(
-            "captured {} stdout byte(s), {} stderr byte(s) via the launcher's \
-             inherited piped stdio",
-            obs.captured_stdout.len(),
-            obs.captured_stderr.len()
-        ),
-    });
-    let captured = CaptureRefs {
-        stdout: Some(format!("inline:{}b", obs.captured_stdout.len())),
-        stderr: Some(format!("inline:{}b", obs.captured_stderr.len())),
-    };
-
-    // The process_count budget witness: a REAL `pids.peak` measurement when a cgroup cap
-    // was installed (admitted Enforced) AND the kernel exposed `pids.peak`; otherwise the
-    // unwitnessed echo (Hard guarantee from the admitted Enforced, ObservationUnavailable
-    // — never a fabricated peak). Surface the measured peak as honest evidence too.
-    let process_enforced = plan.budgets.process_count.selected_guarantee == Enforcement::Enforced;
-    let budget = match process_peak {
-        Some(peak) if process_enforced => {
-            observed.push(ObservedFact {
-                kind: "process_count_witnessed".to_string(),
-                detail: format!(
-                    "cgroup pids.peak={peak} against pids.max={} (cgroup_v2_pids: Hard cap)",
-                    plan.budgets.process_count.effective_limit
-                ),
-            });
-            BudgetWitnesses::with_process_count(&plan.budgets, peak)
-        }
-        _ => BudgetWitnesses::unwitnessed(&plan.budgets),
-    };
-
-    let outcome = obs.outcome().unwrap_or(Outcome::SupervisorFault);
-    // The launcher does not surface the workload's own exit code (it reports its
-    // setup terminal); ExecSucceeded means the workload image began executing under
-    // confinement. No portable workload ExitStatus is available through this path.
-    let exit = exec_exit(outcome);
-    body(backend, plan, outcome, exit, captured, observed, budget)
-}
-
-/// The portable workload exit the launcher path can honestly report. The launcher
-/// surfaces ONLY its own setup terminal, not the workload's exit code: a `Completed`
-/// outcome means the workload exec'd under confinement (a clean image start), which
-/// we report as `ExitStatus::Code(0)`; every non-Completed terminal carries no
-/// workload exit (the workload never ran, or the launcher itself faulted).
-fn exec_exit(outcome: Outcome) -> Option<ExitStatus> {
-    match outcome {
-        Outcome::Completed => Some(ExitStatus::Code(0)),
-        Outcome::Denied
-        | Outcome::Failed
-        | Outcome::Timeout
-        | Outcome::Killed
-        | Outcome::Unsupported
-        | Outcome::SupervisorFault => None,
-    }
-}
-
-/// Extract the admitted Filesystem capability's access + scope, if one was
-/// admitted into the plan.
-fn filesystem_capability(plan: &BoundaryPlan) -> Option<(FsAccess, PathSet)> {
-    plan.admitted.iter().find_map(|a| match &a.requirement {
-        BoundaryRequirement::Capability(Capability::Filesystem { access, scope, .. }) => {
-            Some((*access, scope.clone()))
-        }
-        BoundaryRequirement::Capability(_) | BoundaryRequirement::HostControl(_) => None,
-    })
-}
-
-/// Assemble a fail-closed report body (the workload never ran / ran-but-faulted
-/// honestly): the given non-Completed [`Outcome`], no exit, no captured streams, no
-/// denials. The accumulated `observed` facts carry WHY it failed closed.
-fn fail_closed(
-    backend: &LinuxBackend,
-    plan: &BoundaryPlan,
-    outcome: Outcome,
-    observed: Vec<ObservedFact>,
-) -> BoundaryReportBody {
-    // A fail-closed path: the workload never ran (or faulted), so no dimension is
-    // witnessed — the unwitnessed echo preserves the admitted contract honestly.
-    body(
-        backend,
-        plan,
-        outcome,
-        None,
-        CaptureRefs::default(),
-        observed,
-        BudgetWitnesses::unwitnessed(&plan.budgets),
-    )
-}
-
-/// Assemble the honest report body. `budget` is the per-dimension witness set the
-/// caller computed (the process_count dimension is genuinely witnessed from `pids.peak`
-/// when a cgroup cap was installed; every other path passes the unwitnessed echo).
-///
-/// `denied` is always empty through the launcher path: a confinement DENIAL is proven by
-/// the INDEPENDENT on-disk oracle (the G-grid), NOT self-reported here (the workload
-/// inherits the launcher's stdio, so there is no stderr-derived denial to surface).
-fn body(
-    backend: &LinuxBackend,
-    plan: &BoundaryPlan,
-    outcome: Outcome,
-    exit: Option<ExitStatus>,
-    captured: CaptureRefs,
-    observed: Vec<ObservedFact>,
-    budget: BudgetWitnesses,
-) -> BoundaryReportBody {
-    BoundaryReportBody {
-        schema_version: BOUNDARY_REPORT_SCHEMA_VERSION,
-        plan_id: plan.plan_id,
-        backend: backend.id.clone(),
-        profile: backend.probe(),
-        outcome,
-        admitted: plan.admitted.clone(),
-        observed,
-        denied: Vec::new(),
-        exit,
-        captured,
-        budget,
-        artifacts: Vec::new(),
-        findings: Vec::new(),
-    }
-}
+// The launcher-observation → report-body mapping (map_observation/exec_exit/body +
+// the fail_closed + filesystem_capability helpers), split out to hold this file under
+// the non-overridable size cap. SAFE std; it only shapes the honest observation.
+#[path = "backend_impl_report.rs"]
+mod report_mapping;
+use report_mapping::{fail_closed, filesystem_capability, map_observation};
 
 #[cfg(test)]
 #[path = "backend_impl_tests.rs"]
