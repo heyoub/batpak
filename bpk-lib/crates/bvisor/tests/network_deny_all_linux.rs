@@ -188,6 +188,7 @@ fn plan(argv: Vec<String>, deny_network: bool) -> LinuxLaunchPlanV1 {
                 // engages BOTH together (off ⇒ both None ⇒ the no-netns path is unchanged).
                 user_namespace: deny_network.then(UserNsRequest::new),
                 network_namespace: deny_network.then(NetworkNsRequest::new),
+                seccomp: None,
             },
         },
     }

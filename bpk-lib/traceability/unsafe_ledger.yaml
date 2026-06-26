@@ -348,3 +348,53 @@ entries:
       process's effective uid/gid, used to build the userns uid/gid maps (0 <euid> 1 /
       0 <egid> 1). Sound for any caller state.
     requirement: NetworkDenyAll
+
+  # ── S10: the CHILD-WINDOW seccomp INSTALL basement (proof-spine S10). Two new
+  # child-window (async-signal-safe) blocks: the STANDALONE NO_NEW_PRIVS prctl (extracted
+  # from landlock's restrict_self so the filter can install without/before landlock and in
+  # the right order) and the seccomp(SECCOMP_SET_MODE_FILTER) install of the PARENT-built
+  # BPF (the bvisor seccomp model's compile() assembled the program in the parent; the child
+  # only reads it). They install a default-allow DENYLIST (ChildSpawn::DenyNewTasks denies
+  # clone/clone3/fork/vfork; NetworkDenyAll DiD denies socket) as ONE composed layer — the
+  # broad confinement is landlock/cgroup/netns/fd-scrub. The filter allows
+  # execve/execveat/write/exit_group so the immediately-following fexecve + error reporting
+  # survive. Ordering is load-bearing: NNP, then the filter LAST (after the scrub + landlock,
+  # immediately before fexecve). Both are allocation/lock-free; both fail closed so the
+  # target never runs without NNP / without the filter.
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-no-new-privs
+    syscall: prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) — standalone NO_NEW_PRIVS for the seccomp install
+    safety_invariant: >-
+      Child-window (post-clone3, async-signal-safe). prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+      takes the documented ignored-zero trailing args; it reads NO user memory and
+      dereferences NO pointer — it only sets the calling thread's no_new_privs bit, the
+      precondition an UNPRIVILEGED seccomp filter install requires (the kernel refuses
+      SECCOMP_SET_MODE_FILTER from an unprivileged caller without it) and a hardening
+      guarantee (no exec can gain privilege thereafter). It allocates nothing and takes no
+      lock, so it is sound in the post-fork child window. EXTRACTED from landlock's own
+      restrict_self (which also sets NNP) so seccomp can install without/before landlock; it
+      is idempotent with that. Run ONLY when a seccomp filter is scheduled (a no-seccomp plan
+      leaves the window unchanged). A non-zero return (failure) is surfaced to the caller,
+      which child_fails BEFORE the filter install so the target never runs without NNP.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-seccomp-install
+    syscall: seccomp(SECCOMP_SET_MODE_FILTER, 0, &sock_fprog) — install the parent-built BPF denylist
+    safety_invariant: >-
+      Child-window (post-clone3, async-signal-safe), reached LAST — after the fd scrub +
+      landlock restrict_self, IMMEDIATELY before fexecve. The sock_fprog is a FIXED stack
+      { len, filter } pair built HERE (no heap) over the PARENT-built BpfProgram slice
+      (assembled ENTIRELY in the parent by the bvisor seccomp model's compile(); the child
+      only READS that already-mapped slice). `len` is the bounded instruction count
+      (try_from-guarded; an empty program is refused before the syscall). The kernel
+      copy_from_user's the BPF program DURING the syscall and leaves the memory untouched, so
+      the borrowed pointer needs no ownership and is sound for the call's duration. NNP is
+      already set (set_no_new_privs ran first), so the unprivileged install is permitted. The
+      installed filter is a default-ALLOW DENYLIST (ChildSpawn::DenyNewTasks denies
+      clone/clone3/fork/vfork by syscall number; the NetworkDenyAll DiD denies socket) that
+      ALWAYS allows execve/execveat/write/exit_group, so the following fexecve + any error
+      report survive — ONE composed layer, never a standalone sandbox (landlock/cgroup/netns/
+      fd-scrub are the broad confinement). It allocates nothing and takes no lock. A non-zero
+      return (failure) is surfaced so the caller child_fails — the target NEVER runs
+      un-filtered (a DenyNewTasks workload must not run able to fork).
+    requirement: ChildSpawn

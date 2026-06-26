@@ -101,6 +101,7 @@ fn cgroup_plan() -> LinuxLaunchPlanV1 {
                 exe_slot: EXE_SLOT,
                 user_namespace: None,
                 network_namespace: None,
+                seccomp: None,
             },
         },
     }

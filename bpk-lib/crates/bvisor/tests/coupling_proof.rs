@@ -137,9 +137,16 @@ fn cgroup_profile_couples_every_enforced_cell_to_a_proven_row() {
             && enforced.contains(&RequirementKind::CaptureStreams)
             // S9: the production-shaped proof profile (unprivileged userns+netns) also
             // advertises NetworkDenyAll=Enforced, which the gate must couple to its Proven row.
-            && enforced.contains(&RequirementKind::NetworkDenyAll),
-        "the cgroup profile must advertise the Filesystem/Kill/Launch/Capture/NetworkDenyAll \
-         cells the gate then qualifies; got {enforced:?}"
+            && enforced.contains(&RequirementKind::NetworkDenyAll)
+            // S10: it ALSO advertises the two ChildSpawn cells the gate must couple — DenyNewTasks
+            // (seccomp denylist) + AllowDescendants (cgroup boundary). AllowThreads STAYS absent
+            // (the open clone3/classic-BPF problem — FailClosed, never advertised).
+            && enforced.contains(&RequirementKind::ChildSpawnDenyNewTasks)
+            && enforced.contains(&RequirementKind::ChildSpawnAllowDescendants)
+            && !enforced.contains(&RequirementKind::ChildSpawnAllowThreads),
+        "the cgroup profile must advertise the Filesystem/Kill/Launch/Capture/NetworkDenyAll/\
+         ChildSpawn(DenyNewTasks,AllowDescendants) cells the gate then qualifies, and NOT \
+         ChildSpawnAllowThreads; got {enforced:?}"
     );
     let result = coupling_for(&backend);
     assert!(

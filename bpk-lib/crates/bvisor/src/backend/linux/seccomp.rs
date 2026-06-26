@@ -17,7 +17,36 @@
 //! the declared syscalls. The model exposes the deny floor as [`DefaultAction`] and
 //! the allowlist as a sorted set of [`Syscall`]s; the policy can never advertise a
 //! default of `Allow` (a permit-all filter is not a confinement) — that is rejected
-//! at build.
+//! at build for the ALLOWLIST mode.
+//!
+//! ## The S10 extension: a TARGETED DENYLIST mode (default-ALLOW, deny specific)
+//! S7's allowlist is the right shape for "this launcher may call exactly these
+//! syscalls". But the S10 child-task taxonomy needs the OPPOSITE shape for a GENERAL
+//! workload: `ChildSpawn::DenyNewTasks` must DENY `clone`/`clone3`/`fork`/`vfork`
+//! while letting the rest of an arbitrary workload run, and `NetworkDenyAll` wants a
+//! defense-in-depth DENY of externally-routable `socket(2)` families. A default-deny
+//! allowlist cannot express that (it would have to enumerate every syscall a general
+//! workload might make — impossible + brittle). So [`SeccompPolicy`] gains a SECOND,
+//! clearly-named mode: [`SeccompPolicy::denylist`] — default-ALLOW, deny exactly the
+//! named syscalls.
+//!
+//! A DENYLIST FILTER IS **NOT** A STANDALONE SANDBOX (the load-bearing caveat): a
+//! default-allow filter permits everything it does not explicitly deny, so it can
+//! never be the whole confinement. It is ONE LAYER of a COMPOSED mechanism — the
+//! broad confinement is the landlock ruleset (FS), the empty netns (network), the
+//! cgroup boundary (descendants), and the fd-scrub (ambient authority); the denylist
+//! filter's job is the SPECIFIC, syscall-number-level deny those structural layers
+//! cannot express (deny task-creation syscalls; deny routable-socket creation as
+//! DiD). This mirrors S7's deliberate ban — "permit-all is not a confinement" — by
+//! NEVER claiming the denylist alone confines: it is only ever admitted ALONGSIDE the
+//! structural layers (the §8 Swiss-cheese model).
+//!
+//! BOTH modes preserve S7's invariants: deterministic compile, the bound
+//! [`SeccompEvidence`] (policy + BPF digests, arch, version, action profile), and the
+//! mandatory base — a denylist must NEVER deny `execve`/`execveat`/`write`/`exit_group`
+//! (the immediately-following `fexecve` + error reporting must survive), which
+//! [`SeccompPolicy::denylist`] enforces by REJECTING any deny set that names a base
+//! syscall (the fail-closed-on-deny-execve law, restated for the denylist).
 //!
 //! ## The mandatory base (D6, non-negotiable)
 //! A launcher filter MUST always permit `execve` / `execveat` / `write` /
@@ -132,6 +161,16 @@ pub enum SeccompCompileError {
     /// The canonical policy bytes could not be encoded for the policy digest
     /// (effectively unreachable for the frozen wire shape).
     CanonicalEncoding(String),
+    /// A DENYLIST policy named a mandatory base syscall in its deny set — building it
+    /// would trap the launcher's own `fexecve`/error-reporting (the fail-closed-on-
+    /// deny-execve law, restated for the denylist). The offending base name is named.
+    DenylistDeniesMandatoryBase {
+        /// The base syscall the deny set illegally named.
+        syscall: &'static str,
+    },
+    /// A DENYLIST policy has an EMPTY deny set — a default-allow filter that denies
+    /// nothing is a permit-all no-op, not a confinement layer. Rejected at build.
+    EmptyDenylist,
 }
 
 impl std::fmt::Display for SeccompCompileError {
@@ -152,19 +191,56 @@ impl std::fmt::Display for SeccompCompileError {
             Self::CanonicalEncoding(e) => {
                 write!(f, "could not canonically encode the seccomp policy: {e}")
             }
+            Self::DenylistDeniesMandatoryBase { syscall } => write!(
+                f,
+                "seccomp denylist names mandatory base syscall {syscall} in its deny set: a \
+                 launcher filter must NEVER deny execve/execveat/write/exit_group"
+            ),
+            Self::EmptyDenylist => write!(
+                f,
+                "seccomp denylist has an empty deny set (a default-allow filter that denies \
+                 nothing is a permit-all no-op, not a confinement layer)"
+            ),
         }
     }
 }
 
 impl std::error::Error for SeccompCompileError {}
 
-/// A launcher seccomp POLICY: a deny floor + a sorted allowlist of permitted
-/// syscalls (proof-spine §5 D6). The Rust model, not JSON. Constructing one is cheap
-/// and pure; [`Self::compile`] assembles it to BPF and binds its evidence.
+/// The MODE of a launcher seccomp policy (proof-spine §5 D6 + the S10 extension). The
+/// two are duals; the policy is exactly one of them and [`SeccompPolicy::compile`]
+/// assembles each via seccompiler with the matching default + per-syscall terminals.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Mode {
+    /// DEFAULT-DENY ALLOWLIST (S7): the deny floor + the sorted set of PERMITTED
+    /// syscalls. The launcher's own filter shape — deny everything, allow exactly the
+    /// declared. Rejected at build if the allowlist omits a mandatory base.
+    Allowlist {
+        /// The deny floor every non-allowed syscall falls through to.
+        default_action: DefaultAction,
+        /// The sorted set of permitted syscalls (always includes the mandatory base).
+        allow: BTreeSet<Syscall>,
+    },
+    /// DEFAULT-ALLOW DENYLIST (S10): a deny floor + the sorted set of DENIED syscalls;
+    /// everything else is permitted. The child-task / network-DiD shape — deny exactly
+    /// the named task-creation / routable-socket syscalls, let a general workload run.
+    /// NOT a standalone sandbox (one composed layer); rejected at build if the deny set
+    /// names a mandatory base (it must never trap the launcher's own `fexecve`).
+    Denylist {
+        /// The terminal action each DENIED syscall resolves to (errno / kill-process).
+        deny_action: DefaultAction,
+        /// The sorted set of denied syscalls (must NOT include any mandatory base).
+        deny: BTreeSet<Syscall>,
+    },
+}
+
+/// A launcher seccomp POLICY: either a default-deny ALLOWLIST (S7) or a default-allow
+/// DENYLIST (S10), distinguished by [`Mode`] (proof-spine §5 D6). The Rust model, not
+/// JSON. Constructing one is cheap and pure; [`Self::compile`] assembles it to BPF and
+/// binds its evidence. A denylist is ONE composed layer, never a standalone sandbox.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeccompPolicy {
-    default_action: DefaultAction,
-    allow: BTreeSet<Syscall>,
+    mode: Mode,
 }
 
 impl SeccompPolicy {
@@ -181,29 +257,109 @@ impl SeccompPolicy {
         ]
     }
 
-    /// The minimal launcher policy: the mandatory base allowlist over a chosen deny
-    /// floor. This is the non-negotiable starting point every launcher filter
-    /// extends; it always compiles (the base is present by construction).
+    /// The task-creation syscalls a [`Self::deny_new_tasks`] denylist refuses at the
+    /// SYSCALL-NUMBER level (proof-spine S6: no `clone3` arg-deref needed — denying the
+    /// whole `clone`/`clone3`/`fork`/`vfork` family by number is exact). `fork`/`vfork`
+    /// are arch-optional (aarch64/riscv64 have no `SYS_fork`); the per-arch resolver
+    /// includes only those the build target defines.
+    #[must_use]
+    pub fn task_creation_syscalls() -> Vec<Syscall> {
+        let mut v = vec![
+            Syscall::new("clone", libc::SYS_clone),
+            Syscall::new("clone3", libc::SYS_clone3),
+        ];
+        #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+        {
+            v.push(Syscall::new("fork", libc::SYS_fork));
+            v.push(Syscall::new("vfork", libc::SYS_vfork));
+        }
+        v
+    }
+
+    /// The `socket(2)` syscall a [`Self::network_deny_did`] denylist refuses, as the
+    /// NetworkDenyAll defense-in-depth (proof-spine §5 D3): denying `socket` blocks
+    /// creation of any externally-routable socket (AF_INET/AF_INET6/…) on TOP of the
+    /// structural empty-netns. `socket` exists on every supported arch.
+    #[must_use]
+    pub fn socket_syscall() -> Syscall {
+        Syscall::new("socket", libc::SYS_socket)
+    }
+
+    /// The minimal launcher policy: the mandatory base ALLOWLIST over a chosen deny
+    /// floor (default-deny). This is the non-negotiable starting point every launcher
+    /// allowlist filter extends; it always compiles (the base is present by construction).
     #[must_use]
     pub fn launcher_base(default_action: DefaultAction) -> Self {
         let allow = Self::mandatory_base().into_iter().collect();
         Self {
-            default_action,
-            allow,
+            mode: Mode::Allowlist {
+                default_action,
+                allow,
+            },
         }
     }
 
-    /// Extend the allowlist with one more permitted syscall (chainable builder).
+    /// A DENYLIST policy (default-allow, S10): deny exactly `deny_syscalls`, permit
+    /// everything else. ONE composed confinement layer — never a standalone sandbox.
+    /// `deny_action` is the terminal each denied syscall resolves to. Building one is
+    /// pure; [`Self::compile`] rejects a deny set that names a mandatory base (the
+    /// fail-closed-on-deny-execve law) or an empty deny set (a permit-all no-op).
+    #[must_use]
+    pub fn denylist(
+        deny_action: DefaultAction,
+        deny_syscalls: impl IntoIterator<Item = Syscall>,
+    ) -> Self {
+        Self {
+            mode: Mode::Denylist {
+                deny_action,
+                deny: deny_syscalls.into_iter().collect(),
+            },
+        }
+    }
+
+    /// The `ChildSpawn::DenyNewTasks` denylist (proof-spine S10): deny the whole
+    /// `clone`/`clone3`/`fork`/`vfork` family by syscall number with the given terminal
+    /// (typically `Errno(EPERM)` so the workload's `fork()` fails observably, or
+    /// `KillProcess` for the hardest deny). Composed with the cgroup/ns/fd-scrub layers.
+    #[must_use]
+    pub fn deny_new_tasks(deny_action: DefaultAction) -> Self {
+        Self::denylist(deny_action, Self::task_creation_syscalls())
+    }
+
+    /// The `NetworkDenyAll` defense-in-depth denylist (proof-spine §5 D3): deny
+    /// `socket(2)` so no externally-routable socket can be created, ON TOP OF the
+    /// structural empty netns (which stays the primary guarantee). DiD, not a substitute.
+    #[must_use]
+    pub fn network_deny_did(deny_action: DefaultAction) -> Self {
+        Self::denylist(deny_action, [Self::socket_syscall()])
+    }
+
+    /// Extend an ALLOWLIST policy with one more permitted syscall (chainable builder).
+    /// A no-op on a denylist policy (a denylist has no allowlist to extend).
     #[must_use]
     pub fn allow(mut self, syscall: Syscall) -> Self {
-        self.allow.insert(syscall);
+        if let Mode::Allowlist { allow, .. } = &mut self.mode {
+            allow.insert(syscall);
+        }
         self
     }
 
-    /// The deny floor.
+    /// The deny floor / deny terminal — the action the filter's default (allowlist) or
+    /// matched-deny (denylist) syscalls resolve to.
     #[must_use]
     pub fn default_action(&self) -> DefaultAction {
-        self.default_action
+        match &self.mode {
+            Mode::Allowlist { default_action, .. } => *default_action,
+            Mode::Denylist { deny_action, .. } => *deny_action,
+        }
+    }
+
+    /// Whether this policy is a default-allow DENYLIST (S10) rather than a default-deny
+    /// allowlist (S7). Exposed so the launcher install + the evidence can record which
+    /// shape was assembled (the two have different action profiles).
+    #[must_use]
+    pub fn is_denylist(&self) -> bool {
+        matches!(self.mode, Mode::Denylist { .. })
     }
 
     /// Test-only: a policy with an EMPTY allowlist (rejected by `compile`).
@@ -211,23 +367,47 @@ impl SeccompPolicy {
     #[must_use]
     pub(crate) fn empty_for_test(default_action: DefaultAction) -> Self {
         Self {
-            default_action,
-            allow: BTreeSet::new(),
+            mode: Mode::Allowlist {
+                default_action,
+                allow: BTreeSet::new(),
+            },
         }
     }
 
     /// Test-only: drop a mandatory-base syscall by NAME to drive the fail-closed
-    /// path (e.g. an `execve`-denying policy that `compile` must reject).
+    /// path (e.g. an `execve`-denying allowlist that `compile` must reject).
     #[cfg(test)]
     #[must_use]
     pub(crate) fn without_for_test(mut self, name: &str) -> Self {
-        self.allow.retain(|s| s.name != name);
+        if let Mode::Allowlist { allow, .. } = &mut self.mode {
+            allow.retain(|s| s.name != name);
+        }
         self
     }
 
-    /// The sorted allowlist.
+    /// Test-only: a DENYLIST that ILLEGALLY denies a mandatory base syscall by NAME, to
+    /// drive the fail-closed-on-deny-execve denylist rejection.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn denylist_with_base_for_test(
+        deny_action: DefaultAction,
+        base: &'static str,
+    ) -> Self {
+        let nr = Self::mandatory_base()
+            .into_iter()
+            .find(|s| s.name == base)
+            .map_or(libc::SYS_execve, Syscall::number);
+        Self::denylist(deny_action, [Syscall::for_test(base, nr)])
+    }
+
+    /// The sorted set of syscalls this policy names — the allowlist (permitted) for an
+    /// allowlist policy, or the deny set (refused) for a denylist policy.
     pub fn allowlist(&self) -> impl Iterator<Item = Syscall> + '_ {
-        self.allow.iter().copied()
+        let set: &BTreeSet<Syscall> = match &self.mode {
+            Mode::Allowlist { allow, .. } => allow,
+            Mode::Denylist { deny, .. } => deny,
+        };
+        set.iter().copied()
     }
 
     /// The canonical seccomp-policy digest — blake3 over the domain-separated,
@@ -241,19 +421,30 @@ impl SeccompPolicy {
         #[derive(serde::Serialize)]
         struct PolicyDigestInput<'a> {
             domain: &'a str,
+            // 0 = allowlist (default-deny), 1 = denylist (default-allow). A mode tag in
+            // the digest input keeps an allowlist and a denylist over the SAME syscalls +
+            // the same floor distinct (distinct policies ⇒ distinct digests).
+            mode: u8,
             default_action: (u8, u32),
-            allow: Vec<&'a str>,
+            syscalls: Vec<&'a str>,
         }
-        let default_action = self.default_action.to_kind().wire_tag();
-        // Sort the allowlist by stable NAME so the digest is arch-independent and
+        let (mode_tag, action, set) = match &self.mode {
+            Mode::Allowlist {
+                default_action,
+                allow,
+            } => (0u8, *default_action, allow),
+            Mode::Denylist { deny_action, deny } => (1u8, *deny_action, deny),
+        };
+        // Sort the named syscalls by stable NAME so the digest is arch-independent and
         // input-order-independent (the BTreeSet already orders by name first).
-        let mut allow: Vec<&str> = self.allow.iter().map(|s| s.name).collect();
-        allow.sort_unstable();
-        allow.dedup();
+        let mut syscalls: Vec<&str> = set.iter().map(|s| s.name).collect();
+        syscalls.sort_unstable();
+        syscalls.dedup();
         let input = PolicyDigestInput {
             domain: POLICY_DIGEST_DOMAIN,
-            default_action,
-            allow,
+            mode: mode_tag,
+            default_action: action.to_kind().wire_tag(),
+            syscalls,
         };
         let bytes = batpak::canonical::to_bytes(&input)
             .map_err(|e| SeccompCompileError::CanonicalEncoding(e.to_string()))?;
@@ -280,29 +471,73 @@ impl SeccompPolicy {
     /// # Errors
     /// Any [`SeccompCompileError`].
     pub fn compile(&self, arch: SeccompArch) -> Result<CompiledFilter, SeccompCompileError> {
-        if self.allow.is_empty() {
-            return Err(SeccompCompileError::EmptyAllowlist);
-        }
-        // Fail-closed: the mandatory base must be in the allowlist by NAME (the
-        // arch-resolved number can differ per arch; identity is the name).
-        let allowed_names: BTreeSet<&str> = self.allow.iter().map(|s| s.name).collect();
-        for base in Self::mandatory_base() {
-            if !allowed_names.contains(base.name) {
-                return Err(SeccompCompileError::MissingMandatoryBase { syscall: base.name });
+        // Assemble the seccompiler filter for the mode: an allowlist matches each allowed
+        // syscall → Allow with the deny floor as mismatch; a denylist matches each denied
+        // syscall → the deny terminal with Allow as mismatch (default-allow). Both fail
+        // CLOSED on a mandatory-base violation (allowlist must include them; denylist must
+        // not deny them) so a filter can never trap the launcher's own fexecve.
+        // `named_action` = what each NAMED syscall (rule key) resolves to; `default_action`
+        // = the filter's mismatch terminal. `deny_terminal` is the deny action for the
+        // evidence action profile (the deny floor for an allowlist, the matched-deny for a
+        // denylist).
+        let (rules, named_action, default_action, deny_terminal): (
+            BTreeMap<i64, Vec<seccompiler::SeccompRule>>,
+            SeccompAction,
+            SeccompAction,
+            DefaultAction,
+        ) = match &self.mode {
+            Mode::Allowlist {
+                default_action,
+                allow,
+            } => {
+                if allow.is_empty() {
+                    return Err(SeccompCompileError::EmptyAllowlist);
+                }
+                // Fail-closed: the mandatory base must be in the allowlist by NAME.
+                let allowed_names: BTreeSet<&str> = allow.iter().map(|s| s.name).collect();
+                for base in Self::mandatory_base() {
+                    if !allowed_names.contains(base.name) {
+                        return Err(SeccompCompileError::MissingMandatoryBase {
+                            syscall: base.name,
+                        });
+                    }
+                }
+                let rules = allow.iter().map(|s| (s.nr, Vec::new())).collect();
+                // Each allowed syscall → Allow; mismatch → the deny floor.
+                (
+                    rules,
+                    SeccompAction::Allow,
+                    default_action.to_seccomp(),
+                    *default_action,
+                )
             }
-        }
-
-        // Assemble a default-deny allowlist: every allowed syscall → `Allow`
-        // (empty rule chain = unconditional match), the default floor = mismatch.
-        let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> =
-            self.allow.iter().map(|s| (s.nr, Vec::new())).collect();
-        let filter = SeccompFilter::new(
-            rules,
-            self.default_action.to_seccomp(),
-            SeccompAction::Allow,
-            to_target_arch(arch),
-        )
-        .map_err(|e| SeccompCompileError::Assembler(e.to_string()))?;
+            Mode::Denylist { deny_action, deny } => {
+                if deny.is_empty() {
+                    return Err(SeccompCompileError::EmptyDenylist);
+                }
+                // Fail-closed-on-deny-execve (restated for the denylist): the deny set must
+                // NOT name a mandatory base by NAME — denying execve/write/exit_group would
+                // trap the launcher's own fexecve / error reporting.
+                let denied_names: BTreeSet<&str> = deny.iter().map(|s| s.name).collect();
+                for base in Self::mandatory_base() {
+                    if denied_names.contains(base.name) {
+                        return Err(SeccompCompileError::DenylistDeniesMandatoryBase {
+                            syscall: base.name,
+                        });
+                    }
+                }
+                let rules = deny.iter().map(|s| (s.nr, Vec::new())).collect();
+                // Each denied syscall → the deny terminal; mismatch → Allow (default-allow).
+                (
+                    rules,
+                    deny_action.to_seccomp(),
+                    SeccompAction::Allow,
+                    *deny_action,
+                )
+            }
+        };
+        let filter = SeccompFilter::new(rules, default_action, named_action, to_target_arch(arch))
+            .map_err(|e| SeccompCompileError::Assembler(e.to_string()))?;
         let program: BpfProgram = filter.try_into().map_err(|e: seccompiler::BackendError| {
             SeccompCompileError::Assembler(e.to_string())
         })?;
@@ -311,9 +546,10 @@ impl SeccompPolicy {
         let bpf_bytes = canonical_bpf_bytes(&program);
         let bpf_digest = batpak::event::hash::compute_hash(&bpf_bytes);
 
-        // Action profile: Allow (every allowlisted syscall) + the deny floor,
+        // Action profile: the two terminals the kernel must honor — Allow + the deny
+        // terminal (the deny floor for an allowlist, the matched-deny for a denylist),
         // deduplicated + sorted for a canonical profile.
-        let mut action_profile = vec![SeccompActionKind::Allow, self.default_action.to_kind()];
+        let mut action_profile = vec![SeccompActionKind::Allow, deny_terminal.to_kind()];
         action_profile.sort_unstable_by_key(|a| a.wire_tag());
         action_profile.dedup();
 
@@ -355,6 +591,20 @@ impl CompiledFilter {
     pub fn bpf_bytes(&self) -> Vec<u8> {
         canonical_bpf_bytes(&self.program)
     }
+}
+
+/// Whether this host supports installing a seccomp BPF FILTER (the
+/// `ChildSpawn::DenyNewTasks` floor, S10). SAFE host-side probe: `seccomp(2)` filter mode
+/// advertises its supported actions in `/proc/sys/kernel/seccomp/actions_avail` (present
+/// IFF `CONFIG_SECCOMP_FILTER` is built in and the syscall is available). A readable,
+/// non-empty `actions_avail` ⇒ filter mode is supported; absence ⇒ the cell is FAIL_CLOSED
+/// (the workload's ChildSpawn::DenyNewTasks would have no mechanism, so the cell drops from
+/// the ceiling — never a silent unfiltered run). Reads only `/proc/sys`; no `unsafe`.
+#[must_use]
+pub fn seccomp_filter_available() -> bool {
+    std::fs::read_to_string("/proc/sys/kernel/seccomp/actions_avail")
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
 }
 
 /// Map the contract's arch enum to seccompiler's `TargetArch`.

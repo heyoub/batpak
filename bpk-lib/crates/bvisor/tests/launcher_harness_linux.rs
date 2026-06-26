@@ -164,6 +164,7 @@ fn body_with(
             exe_slot: u32::try_from(SLOT_EXE).expect("fd fits u32"),
             user_namespace: None,
             network_namespace: None,
+            seccomp: None,
         },
     }
 }

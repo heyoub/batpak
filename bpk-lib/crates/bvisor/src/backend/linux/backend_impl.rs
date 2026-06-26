@@ -111,6 +111,14 @@ pub struct LinuxBackend {
     /// Unsupported ⇒ `plan()` fails closed (no unbacked netns guarantee — the FAIL_CLOSED
     /// floor branch).
     netns_available: bool,
+    /// Whether this host supports installing a seccomp BPF FILTER (the
+    /// `ChildSpawn::DenyNewTasks` floor, S10), PROBED ONCE at construction via
+    /// [`seccomp::seccomp_filter_available`]. `true` ⇒ `execute()` installs a default-allow
+    /// seccomp denylist (deny the task-creation family) for an admitted
+    /// `ChildSpawn::DenyNewTasks`, so the ceiling backs `ChildSpawnDenyNewTasks=Enforced`.
+    /// `false` ⇒ the cell is absent from the ceiling ⇒ Unsupported ⇒ `plan()` fails closed
+    /// (the FAIL_CLOSED floor branch — never a silent unfiltered run).
+    seccomp_available: bool,
     /// The host's secret-lease resolver (proof-spine §5 D2). `execute()` resolves
     /// every [`crate::EnvSource::SecretLease`] in the admitted `Environment::Exact`
     /// table through this, in the PARENT, immediately before launch — the resolved
@@ -163,6 +171,7 @@ impl LinuxBackend {
             cgroup_base,
             cgroup_pids_peak,
             netns_available: launch::unprivileged_userns_available(),
+            seccomp_available: super::seccomp::seccomp_filter_available(),
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -194,6 +203,7 @@ impl LinuxBackend {
             cgroup_base,
             cgroup_pids_peak,
             netns_available: launch::unprivileged_userns_available(),
+            seccomp_available: super::seccomp::seccomp_filter_available(),
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -213,6 +223,7 @@ impl LinuxBackend {
             // FS-focused tests force netns OFF so NetworkDenyAll stays Unsupported in the
             // ceiling (the `unimplemented_kinds_fail_closed` test asserts exactly this).
             netns_available: false,
+            seccomp_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -235,6 +246,7 @@ impl LinuxBackend {
             // The cgroup-focused tests do not exercise the netns cell; keep it OFF so they
             // assert exactly the Kill/process_count ceiling without a NetworkDenyAll cell.
             netns_available: false,
+            seccomp_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -250,6 +262,24 @@ impl LinuxBackend {
     /// into an empty netns). `false` ⇒ the cell is absent from the ceiling (FAIL_CLOSED).
     fn network_deny_all_enforced(&self) -> bool {
         self.netns_available
+    }
+
+    /// Whether this host can enforce `ChildSpawn::DenyNewTasks` via a seccomp DENYLIST
+    /// (S10): it supports installing a seccomp BPF filter (`CONFIG_SECCOMP_FILTER`). The
+    /// launcher installs a default-allow denylist refusing clone/clone3/fork/vfork at the
+    /// syscall-number level. `false` ⇒ the cell is absent from the ceiling (FAIL_CLOSED —
+    /// never a silent unfiltered run).
+    fn child_spawn_deny_enforced(&self) -> bool {
+        self.seccomp_available
+    }
+
+    /// Whether this host can enforce `ChildSpawn::AllowDescendantsWithinBoundary` via the
+    /// CGROUP boundary (S10): a cgroup base with atomic `cgroup.kill` was probed, so a
+    /// descendant inherits the run cgroup (killable via `cgroup.kill`, counted by
+    /// `pids.max`, namespace-trapped) — NOT seccomp. `false` ⇒ the cell is absent from the
+    /// ceiling (FAIL_CLOSED — no unbacked descendant-boundary guarantee).
+    fn child_spawn_descendants_enforced(&self) -> bool {
+        self.cgroup_base.is_some()
     }
 
     /// The honest machine ceiling: `Filesystem` Enforced ONLY when the ABI floor
@@ -349,6 +379,9 @@ impl LinuxBackend {
                 ),
             );
         }
+        // The two S10 ChildSpawn cells (DenyNewTasks via seccomp + AllowDescendants via cgroup)
+        // are inserted by the helper below to hold `ceiling` under the complexity budget.
+        self.insert_child_spawn_ceiling(&mut ceiling);
         // Kill{RunTree,Atomic} is Enforced ONLY when a cgroup confinement base with
         // atomic `cgroup.kill` was probed: the workload runs in a cgroup leaf (placed
         // at birth by the launcher's CLONE_INTO_CGROUP), so the host can SIGKILL the
@@ -364,6 +397,55 @@ impl LinuxBackend {
             );
         }
         BackendProfile::from_ceiling(ceiling)
+    }
+
+    /// Insert the two S10 `ChildSpawn` ceiling cells (split from [`Self::ceiling`] to hold it
+    /// under the complexity budget):
+    ///
+    /// - `ChildSpawn::DenyNewTasks` is ENFORCED ONLY when this host supports seccomp FILTER
+    ///   mode: the launcher installs a default-allow seccomp DENYLIST refusing
+    ///   clone/clone3/fork/vfork at the syscall-number level (LAST, after landlock, before
+    ///   fexecve; EPERM so the workload's fork fails observably). ONE composed layer — the broad
+    ///   confinement is landlock/cgroup/netns/fd-scrub. Proven by the dual-channel + fail-closed
+    ///   oracle (`tests/child_spawn_linux.rs`: host reads /proc/<pid>/status Seccomp:2 + the
+    ///   workload's fork is refused); the mechanism is `linux:seccomp_deny_tasks:Enforced`.
+    /// - `ChildSpawn::AllowDescendantsWithinBoundary` is ENFORCED ONLY when a cgroup base was
+    ///   probed: a descendant INHERITS the run cgroup (killable via cgroup.kill, counted by
+    ///   pids.max, namespace-trapped — the S1 mechanisms; NOT seccomp). Proven by the same oracle
+    ///   (host confirms cgroup.procs + cgroup.kill drains the tree); the mechanism is
+    ///   `linux:cgroup_descendant_boundary:Enforced`.
+    /// - `ChildSpawn::AllowThreads` STAYS absent (the open clone3-pointer/classic-BPF problem,
+    ///   S6 — FailClosed, never faked).
+    fn insert_child_spawn_ceiling(&self, ceiling: &mut BTreeMap<RequirementKind, SupportVerdict>) {
+        if self.child_spawn_deny_enforced() {
+            ceiling.insert(
+                RequirementKind::ChildSpawnDenyNewTasks,
+                SupportVerdict::new(
+                    Enforcement::Enforced,
+                    [
+                        EvidenceClaim::DeniedAttempts,
+                        EvidenceClaim::ProcessTree,
+                        EvidenceClaim::MechanismAttestation,
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            );
+        }
+        if self.child_spawn_descendants_enforced() {
+            ceiling.insert(
+                RequirementKind::ChildSpawnAllowDescendants,
+                SupportVerdict::new(
+                    Enforcement::Enforced,
+                    [
+                        EvidenceClaim::ProcessTree,
+                        EvidenceClaim::MechanismAttestation,
+                    ]
+                    .into_iter()
+                    .collect(),
+                ),
+            );
+        }
     }
 }
 
@@ -390,6 +472,13 @@ use fds_lowering::lower_inherited_fds;
 #[path = "backend_impl_net.rs"]
 mod net_lowering;
 use net_lowering::{lower_network, NetLowering};
+
+// The ChildSpawn child-task lowering gate (admitted SpawnPolicy → the launcher seccomp
+// denylist / cgroup boundary, proof-spine S10), split out to hold this file under the size
+// cap. SAFE std; the seccomp install is the launcher's.
+#[path = "backend_impl_childspawn.rs"]
+mod child_spawn_lowering;
+use child_spawn_lowering::{lower_child_spawn, ChildTaskLowering};
 
 // The honest budget profile derivation, split out to hold this file under the size cap.
 #[path = "backend_impl_budget.rs"]
@@ -468,10 +557,18 @@ impl Backend for LinuxBackend {
             // reach any network. Backed ONLY when the host permits unprivileged userns+netns
             // (the ceiling gates the actual claim; this names the mechanism).
             RequirementKind::NetworkDenyAll => "empty_netns",
+            // ChildSpawn::DenyNewTasks rides a seccomp DENYLIST refusing the task-creation
+            // family (clone/clone3/fork/vfork) at the syscall-number level — backed ONLY when
+            // seccomp filter mode is supported (the ceiling gates the actual claim).
+            RequirementKind::ChildSpawnDenyNewTasks => "seccomp_deny_tasks",
+            // ChildSpawn::AllowDescendantsWithinBoundary rides the cgroup boundary (the
+            // descendant inherits the run cgroup ⇒ killable/counted/namespace-trapped) — NOT
+            // seccomp. Backed ONLY when a cgroup base was probed.
+            RequirementKind::ChildSpawnAllowDescendants => "cgroup_descendant_boundary",
             RequirementKind::NetworkAllowList
-            | RequirementKind::ChildSpawnDenyNewTasks
+            // ChildSpawn::AllowThreads is the open clone3-pointer/classic-BPF problem (S6) —
+            // unenforceable, FailClosed, named honestly as unimplemented.
             | RequirementKind::ChildSpawnAllowThreads
-            | RequirementKind::ChildSpawnAllowDescendants
             | RequirementKind::InheritedFdsOnly
             | RequirementKind::TempRoot
             | RequirementKind::ExposePath
@@ -563,13 +660,33 @@ fn execute_confined(backend: &LinuxBackend, plan: &BoundaryPlan) -> BoundaryRepo
         Err(facts) => return fail_closed(backend, plan, Outcome::Unsupported, facts),
     };
 
+    // LOWER the admitted ChildSpawn policy onto the launcher's child-task confinement
+    // (proof-spine S10). DenyNewTasks ⇒ deny_new_tasks (the launcher installs a seccomp
+    // denylist refusing the task-creation family); AllowDescendants ⇒ no filter (the cgroup
+    // boundary is the mechanism). FAIL CLOSED on AllowThreads (the unenforceable open
+    // problem): the workload never runs under an unrealized child-task guarantee.
+    let deny_new_tasks = match lower_child_spawn(backend, plan, observed) {
+        Ok(ChildTaskLowering {
+            deny_new_tasks,
+            observed: facts,
+        }) => {
+            observed = facts;
+            deny_new_tasks
+        }
+        Err(facts) => return fail_closed(backend, plan, Outcome::Unsupported, facts),
+    };
+
     run_prepared(
         backend,
         plan,
         &exe,
         &args,
         fs.as_ref(),
-        LoweredLaunch { envp, deny_network },
+        LoweredLaunch {
+            envp,
+            deny_network,
+            deny_new_tasks,
+        },
         observed,
     )
 }
@@ -589,6 +706,9 @@ struct LoweredLaunch {
     envp: Vec<(String, String)>,
     /// Whether the admitted NetworkDenyAll engages the empty network namespace (S9 / D3).
     deny_network: bool,
+    /// Whether the admitted ChildSpawn::DenyNewTasks engages the seccomp task-creation
+    /// denylist (S10). `false` ⇒ no task-creation deny (no ChildSpawn / AllowDescendants).
+    deny_new_tasks: bool,
 }
 
 fn run_prepared(
@@ -600,7 +720,11 @@ fn run_prepared(
     lowered: LoweredLaunch,
     observed: Vec<ObservedFact>,
 ) -> BoundaryReportBody {
-    let LoweredLaunch { envp, deny_network } = lowered;
+    let LoweredLaunch {
+        envp,
+        deny_network,
+        deny_new_tasks,
+    } = lowered;
     // Prepare the per-run cgroup leaf; FAIL CLOSED if the plan admitted cgroup-backed
     // guarantees but the leaf cannot be created (see `cgroup_for_run`). The launcher births
     // the child INTO the leaf via CLONE_INTO_CGROUP; `finish` tears it down after the run.
@@ -613,20 +737,28 @@ fn run_prepared(
     // including the optional CgroupDir slot). A host wiring fault (a root/exe that
     // cannot be opened, a slot that does not fit) fails closed — the workload never
     // runs, and the leaf is torn down via `finish`.
-    let prepared =
-        match plan_build::prepare_launch(exe, args, plan, fs, cgroup_dir_fd, envp, deny_network) {
-            Ok(prepared) => prepared,
-            Err(detail) => {
-                observed.push(ObservedFact {
-                    kind: "launch_plan_construction_failed".to_string(),
-                    detail,
-                });
-                return finish(
-                    cgroup_leaf,
-                    fail_closed(backend, plan, Outcome::SupervisorFault, observed),
-                );
-            }
-        };
+    let prepared = match plan_build::prepare_launch(plan_build::LaunchInputs {
+        exe,
+        args,
+        plan,
+        fs,
+        cgroup_dir_fd,
+        envp,
+        deny_network,
+        deny_new_tasks,
+    }) {
+        Ok(prepared) => prepared,
+        Err(detail) => {
+            observed.push(ObservedFact {
+                kind: "launch_plan_construction_failed".to_string(),
+                detail,
+            });
+            return finish(
+                cgroup_leaf,
+                fail_closed(backend, plan, Outcome::SupervisorFault, observed),
+            );
+        }
+    };
     let plan_build::Prepared {
         launch_plan,
         authority,
@@ -695,83 +827,11 @@ fn run_prepared(
     finish(cgroup_leaf, report)
 }
 
-/// Record the BLAKE3 digest of the launcher binary observed AT THE RESOLVED PATH, BEFORE
-/// spawn, as a provenance evidence fact.
-///
-/// HONEST SCOPE (the codex-review correction): this proves "the bytes at `path` when read
-/// here", NOT "the exact bytes the kernel exec'd" — `run_launcher` later spawns by PATH
-/// (`Command::new`), so a swap/symlink between this read and the exec is a TOCTOU window.
-/// The fact wording reflects that. Closing the race (hash an OPENED fd and `fexecve` that
-/// SAME fd) and digest PINNING (refuse on mismatch) are the follow-ons; this is provenance
-/// EVIDENCE, not a gate, so a read failure is silently skipped (the launch still proceeds).
-fn attest_launcher(path: &std::path::Path, observed: &mut Vec<ObservedFact>) {
-    let Ok(bytes) = std::fs::read(path) else {
-        return;
-    };
-    let digest = batpak::event::hash::compute_hash(&bytes);
-    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-    observed.push(ObservedFact {
-        kind: "launcher_identity".to_string(),
-        detail: format!(
-            "blake3={hex} observed_at_path={} (pre-spawn; not the exec'd-fd bytes — \
-             fd-exec pinning is the follow-on)",
-            path.display()
-        ),
-    });
-}
-
-/// Resolve the launcher binary path, failing closed if unresolvable. Resolution
-/// order: the backend's INJECTED `launcher_path` (constructor injection) FIRST, then
-/// the `BVISOR_LAUNCHER_BIN` env override, else the `bvisor-linux-launcher` binary
-/// CO-LOCATED with the current executable (the documented default install layout). If
-/// none resolves to an existing file ⇒ `Err` (the caller reports `Outcome::Unsupported`
-/// — the workload NEVER runs unconfined). The resolved binary's CONTENT digest is then
-/// attested by [`attest_launcher`]; digest-PINNING the exact bin (refuse on mismatch) is
-/// the follow-on.
-fn resolve_launcher(backend: &LinuxBackend) -> Result<std::path::PathBuf, String> {
-    // Injected launcher path (thread-safe constructor injection) takes precedence — it
-    // is how the integration tests point at the compile-time launcher without the banned
-    // process-env mutation. Confirm it exists so a bad inject still fails closed.
-    if let Some(path) = &backend.launcher_path {
-        if path.is_file() {
-            return Ok(path.clone());
-        }
-        return Err(format!(
-            "injected launcher path does not exist: {}",
-            path.display()
-        ));
-    }
-    // The override path is trusted as supplied (step-12 note); honor it even if a
-    // stat would race, but still confirm it exists so we fail closed on a typo.
-    if let Ok(p) = std::env::var(launch::ENV_LAUNCHER_BIN) {
-        if !p.trim().is_empty() {
-            let path = std::path::PathBuf::from(p);
-            if path.is_file() {
-                return Ok(path);
-            }
-            return Err(format!(
-                "{} points to a non-existent launcher binary: {}",
-                launch::ENV_LAUNCHER_BIN,
-                path.display()
-            ));
-        }
-    }
-    // Default: the launcher next to the current executable.
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot locate the current executable to find the launcher: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "current executable has no parent directory".to_string())?;
-    let default = dir.join("bvisor-linux-launcher");
-    if default.is_file() {
-        return Ok(default);
-    }
-    Err(format!(
-        "no launcher binary: {} unset and no bvisor-linux-launcher beside {}",
-        launch::ENV_LAUNCHER_BIN,
-        exe.display()
-    ))
-}
+// Launcher-binary resolution + content attestation (resolve_launcher/attest_launcher),
+// split out to hold this file under the non-overridable file-size cap. SAFE std.
+#[path = "backend_impl_resolve.rs"]
+mod launcher_resolve;
+use launcher_resolve::{attest_launcher, resolve_launcher};
 
 // The launcher-observation → report-body mapping (map_observation/exec_exit/body +
 // the fail_closed + filesystem_capability helpers), split out to hold this file under

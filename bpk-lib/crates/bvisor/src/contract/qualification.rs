@@ -131,6 +131,11 @@ pub struct ProfileFloor {
     /// that forbids unprivileged userns cannot realize the empty netns, so the cell is
     /// FAIL_CLOSED there — never a silent pass.
     pub requires_unprivileged_userns: bool,
+    /// The mechanism requires installing a seccomp BPF FILTER (the
+    /// `ChildSpawn::DenyNewTasks` floor, S10): a kernel without `CONFIG_SECCOMP_FILTER`
+    /// cannot install the task-creation denylist, so the cell is FAIL_CLOSED there — never
+    /// a silent unfiltered run.
+    pub requires_seccomp_filter: bool,
 }
 
 impl ProfileFloor {
@@ -143,6 +148,7 @@ impl ProfileFloor {
             requires_cgroup_kill: false,
             requires_pids_peak: false,
             requires_unprivileged_userns: false,
+            requires_seccomp_filter: false,
         }
     }
 
@@ -156,6 +162,37 @@ impl ProfileFloor {
             requires_cgroup_kill: false,
             requires_pids_peak: false,
             requires_unprivileged_userns: true,
+            requires_seccomp_filter: false,
+        }
+    }
+
+    /// The `ChildSpawn::DenyNewTasks` floor (S10): requires seccomp FILTER support. No
+    /// landlock / cgroup / userns minimum — the task-creation denylist is structural above
+    /// that floor (it holds on any kernel with `CONFIG_SECCOMP_FILTER`), so the proof
+    /// transfers upward. Below the floor the cell drops from the ceiling (fail-closed).
+    #[must_use]
+    pub const fn seccomp_filter() -> Self {
+        Self {
+            landlock_abi_min: None,
+            requires_cgroup_kill: false,
+            requires_pids_peak: false,
+            requires_unprivileged_userns: false,
+            requires_seccomp_filter: true,
+        }
+    }
+
+    /// The `ChildSpawn::AllowDescendantsWithinBoundary` floor (S10): requires the cgroup
+    /// `cgroup.kill` boundary (the S1 Kill mechanism the descendant inherits), no seccomp /
+    /// landlock / userns minimum — the descendant is killable + counted + namespace-trapped
+    /// by the cgroup. Below the floor (no cgroup) the cell drops from the ceiling.
+    #[must_use]
+    pub const fn cgroup_descendant_boundary() -> Self {
+        Self {
+            landlock_abi_min: None,
+            requires_cgroup_kill: true,
+            requires_pids_peak: false,
+            requires_unprivileged_userns: false,
+            requires_seccomp_filter: false,
         }
     }
 
@@ -178,6 +215,9 @@ impl ProfileFloor {
             return false;
         }
         if self.requires_unprivileged_userns && !facts.has_unprivileged_userns {
+            return false;
+        }
+        if self.requires_seccomp_filter && !facts.has_seccomp_filter {
             return false;
         }
         true
@@ -204,6 +244,10 @@ pub struct ProfileFacts {
     /// `NetworkDenyAll` empty-netns floor, S9 / D3). Probed once at construction
     /// (`unprivileged_userns_available`); `false` ⇒ the empty-netns cell fails closed.
     pub has_unprivileged_userns: bool,
+    /// Whether the host supports installing a seccomp BPF FILTER (the
+    /// `ChildSpawn::DenyNewTasks` floor, S10). Probed once at construction
+    /// (`seccomp_filter_available`); `false` ⇒ the task-creation-deny cell fails closed.
+    pub has_seccomp_filter: bool,
 }
 
 /// One committed row of the qualification LEDGER (§1 `Qualification(p,k)` joined to
@@ -319,6 +363,7 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
             requires_cgroup_kill: false,
             requires_pids_peak: false,
             requires_unprivileged_userns: false,
+            requires_seccomp_filter: false,
         },
         mechanism: "linux:landlock:Enforced",
         status: QualificationStatus::Proven,
@@ -362,6 +407,7 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
             requires_cgroup_kill: true,
             requires_pids_peak: false,
             requires_unprivileged_userns: false,
+            requires_seccomp_filter: false,
         },
         mechanism: "linux:cgroup_kill:Enforced",
         status: QualificationStatus::Proven,
@@ -478,23 +524,48 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
         status: QualificationStatus::FailClosed,
         proof_receipts: &[],
     },
-    // The three FROZEN child-task semantics (proof-spine S6). S6 freezes the
-    // taxonomy + the clone3-pointer/classic-BPF enforcement CONSTRAINT (see
-    // `SpawnPolicy`); it does NOT implement enforcement (that is S10, seccomp +
-    // cgroup). So ALL THREE stay FailClosed here with NO oracle (empty receipts) —
-    // none is advertised Enforced in the production ceiling, so the coupling gate
-    // never demands a Proven row for them.
+    // The three FROZEN child-task semantics (proof-spine S6). S6 froze the taxonomy +
+    // the clone3-pointer/classic-BPF enforcement CONSTRAINT (see `SpawnPolicy`); S10
+    // realizes two of the three and keeps the unenforceable one FailClosed:
+    //
+    // - DenyNewTasks → PROVEN via a seccomp DENYLIST (deny clone/clone3/fork/vfork at the
+    //   syscall-NUMBER level — no clone3 arg-deref). Floor = seccomp filter support.
+    // - AllowDescendants → PROVEN via the CGROUP boundary (the descendant inherits the run
+    //   cgroup ⇒ killable via cgroup.kill, counted by pids.max, namespace-trapped — NOT
+    //   seccomp). Floor = cgroup.kill.
+    // - AllowThreads → STAYS FailClosed: the clone3-pointer/classic-BPF problem (S6) means
+    //   seccomp cannot permit-threads-but-deny-processes precisely, and denying clone3
+    //   outright breaks glibc threads. The OPEN enforcement problem — NOT faked, absent
+    //   from the ceiling (Unsupported), so the coupling gate never demands a Proven row.
     QualificationRow {
         backend: "linux",
         key: RequirementKind::ChildSpawnDenyNewTasks,
-        profile_floor: ProfileFloor::structural(),
-        mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
-        status: QualificationStatus::FailClosed,
-        proof_receipts: &[],
+        // The seccomp-filter floor (S10): requires CONFIG_SECCOMP_FILTER. No landlock /
+        // cgroup / userns minimum — the task-creation denylist is structural above that
+        // floor (it holds on any kernel with seccomp filter mode), so the proof transfers
+        // upward. Below the floor the cell drops from the ceiling (fail-closed).
+        profile_floor: ProfileFloor::seccomp_filter(),
+        mechanism: "linux:seccomp_deny_tasks:Enforced",
+        status: QualificationStatus::Proven,
+        // §4 BOTH branches, DUAL channel (host-side kernel-state strongest, per §4):
+        //  - guarantee-holds (A) HOST-SIDE: the host reads the CHILD's /proc/<pid>/status
+        //    and observes `Seccomp: 2` (filter mode installed — the kernel-state witness the
+        //    launcher cannot forge); (B) WORKLOAD self-report: the workload attempts to spawn
+        //    a child and OBSERVES the fork/spawn is REFUSED (EPERM). NO-LEAK: the filter is
+        //    installed LAST, after landlock, before fexecve;
+        //  - fail-closed: a kernel without seccomp filter support ⇒ the cell SKIPs LOUD
+        //    (never a silent pass), and a contract-level setup failure ⇒ the target never
+        //    runs (the seccomp denylist engages on the full execute()/BoundaryRunner path).
+        proof_receipts: &[
+            "crates/bvisor/tests/child_spawn_linux.rs::deny_new_tasks_fork_is_refused_and_host_sees_seccomp_filter_or_skip",
+            "crates/bvisor/tests/child_spawn_linux.rs::a_deny_new_tasks_spec_runs_through_the_execute_path_or_skip",
+            "crates/bvisor/tests/child_spawn_linux.rs::allow_threads_fails_closed_at_admission_the_target_never_runs",
+        ],
     },
     QualificationRow {
         backend: "linux",
         key: RequirementKind::ChildSpawnAllowThreads,
+        // STAYS FailClosed: the open clone3-pointer/classic-BPF problem (S6). NOT faked.
         profile_floor: ProfileFloor::structural(),
         mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
         status: QualificationStatus::FailClosed,
@@ -503,10 +574,27 @@ pub const LINUX_QUALIFICATION_LEDGER: &[QualificationRow] = &[
     QualificationRow {
         backend: "linux",
         key: RequirementKind::ChildSpawnAllowDescendants,
-        profile_floor: ProfileFloor::structural(),
-        mechanism: "linux:none/unimplemented-this-chunk:Unsupported",
-        status: QualificationStatus::FailClosed,
-        proof_receipts: &[],
+        // The cgroup-boundary floor (S10): requires cgroup.kill (the descendant inherits the
+        // run cgroup ⇒ killable + counted + namespace-trapped — NOT seccomp). Below the
+        // floor (no cgroup) the cell drops from the ceiling (fail-closed).
+        profile_floor: ProfileFloor::cgroup_descendant_boundary(),
+        mechanism: "linux:cgroup_descendant_boundary:Enforced",
+        status: QualificationStatus::Proven,
+        // §4 BOTH branches:
+        //  - guarantee-holds: the workload (placed in the run cgroup via CLONE_INTO_CGROUP — the
+        //    SAME placement the S1 Kill cell proves) spawns a DESCENDANT that OUTLIVES it; the
+        //    descendant is in the leaf by the kernel fork-membership guarantee (it cannot leave
+        //    its cgroup without a privileged cgroup.procs write it lacks), and cgroup.kill reaps
+        //    the WHOLE leaf to empty (the S1 drain-to-empty witness — the OBSERVED branch). A
+        //    direct per-descendant cgroup.procs membership read is a tracked §4-quality
+        //    strengthening; today the descendant claim rests on the fork-inheritance guarantee +
+        //    the whole-tree drain, not a direct membership observation.
+        //  - fail-closed: no cgroup base ⇒ the cell SKIPs LOUD (absent from the ceiling), and
+        //    a contract-level setup failure ⇒ the target never runs.
+        proof_receipts: &[
+            "crates/bvisor/tests/child_spawn_linux.rs::allow_descendants_is_cgroup_confined_and_cgroup_kill_drains_the_tree_or_skip",
+            "crates/bvisor/tests/child_spawn_linux.rs::an_allow_descendants_spec_runs_through_the_execute_path_or_skip",
+        ],
     },
 ];
 

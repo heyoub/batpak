@@ -68,6 +68,7 @@ fn sample_body() -> LinuxLaunchBodyV1 {
             exe_slot: 0,
             user_namespace: None,
             network_namespace: None,
+            seccomp: None,
         },
     }
 }

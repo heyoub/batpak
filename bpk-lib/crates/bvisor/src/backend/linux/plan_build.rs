@@ -12,8 +12,8 @@
 use crate::backend::linux::launch::AuthorityFd;
 use crate::backend::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
-    LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, NetworkNsRequest, TargetSpecV1,
-    UserNsRequest,
+    LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, NetworkNsRequest, SeccompRequest,
+    TargetSpecV1, UserNsRequest,
 };
 use crate::contract::capability::{FsAccess, PathSet};
 use crate::contract::ids::{
@@ -43,11 +43,15 @@ const ID_AMBIENT_SCRUB: &str = "linux.ambient.scrub.v1";
 /// The landlock-apply primitive (Confinement phase). Scheduled ONLY when the plan
 /// carries a Filesystem capability; its absence ⇒ Confinement resolves NotRequired.
 const ID_LANDLOCK_APPLY: &str = "linux.landlock.apply.v1";
+/// The seccomp-apply primitive (Confinement phase, S10). Scheduled ONLY when a seccomp
+/// denylist is engaged (ChildSpawn::DenyNewTasks and/or the NetworkDenyAll DiD); its
+/// absence ⇒ no seccomp filter is installed (the child window is unchanged).
+const ID_SECCOMP_APPLY: &str = "linux.seccomp.apply.v1";
 /// The launch primitive (marks the `fexecve` step). Always scheduled.
 const ID_EXEC: &str = "linux.exec.v1";
 /// `LoweringPhase::FdHygiene.code()` — the scrub action's wire phase.
 const PHASE_CODE_SCRUB: u8 = 3;
-/// `LoweringPhase::PolicyInstall.code()` — the landlock-apply action's wire phase.
+/// `LoweringPhase::PolicyInstall.code()` — the landlock-apply / seccomp-apply wire phase.
 const PHASE_CODE_CONFINE: u8 = 4;
 /// `LoweringPhase::Launch.code()` — the exec action's wire phase.
 const PHASE_CODE_EXEC: u8 = 5;
@@ -84,20 +88,46 @@ pub(super) struct Prepared {
     pub(super) confined: bool,
 }
 
+/// The lowered launch inputs `prepare_launch` assembles a [`LinuxLaunchPlanV1`] from.
+/// Bundled into one struct so `prepare_launch` stays within the argument budget (zero
+/// `#[allow]` doctrine — no `too_many_arguments`). Borrows the plan/fs by reference and
+/// MOVES the owned `cgroup_dir_fd` / `envp` into the build.
+pub(super) struct LaunchInputs<'a> {
+    /// The target executable path (opened host-side as the exe authority handle).
+    pub(super) exe: &'a str,
+    /// The workload argument vector (after `argv[0]`).
+    pub(super) args: &'a [String],
+    /// The admitted boundary plan (its identity binds `h_l`/`h_p`/`plan_id`).
+    pub(super) plan: &'a BoundaryPlan,
+    /// The admitted Filesystem capability (access + scope), or `None` (no FS confinement).
+    pub(super) fs: Option<&'a (FsAccess, PathSet)>,
+    /// The prepared per-run cgroup leaf dir fd, or `None` (no cgroup placement).
+    pub(super) cgroup_dir_fd: Option<OwnedFd>,
+    /// The explicit environment served to the workload (lowered Environment::Exact).
+    pub(super) envp: Vec<(String, String)>,
+    /// Whether the admitted NetworkDenyAll engages the empty netns (S9 / D3).
+    pub(super) deny_network: bool,
+    /// Whether the admitted ChildSpawn::DenyNewTasks engages the seccomp task-creation
+    /// denylist (S10).
+    pub(super) deny_new_tasks: bool,
+}
+
 /// Build the [`LinuxLaunchPlanV1`] + pre-opened authority handles from the admitted
 /// plan, host-side with SAFE std (`File::open`). Returns a human-readable error
 /// string on any wiring fault (the caller fails closed). The descriptor table, the
 /// lowering schedule, and the authority handles are all assembled here so the
 /// launcher reads each handle at its declared slot fd number.
-pub(super) fn prepare_launch(
-    exe: &str,
-    args: &[String],
-    plan: &BoundaryPlan,
-    fs: Option<&(FsAccess, PathSet)>,
-    cgroup_dir_fd: Option<OwnedFd>,
-    envp: Vec<(String, String)>,
-    deny_network: bool,
-) -> Result<Prepared, String> {
+pub(super) fn prepare_launch(inputs: LaunchInputs<'_>) -> Result<Prepared, String> {
+    let LaunchInputs {
+        exe,
+        args,
+        plan,
+        fs,
+        cgroup_dir_fd,
+        envp,
+        deny_network,
+        deny_new_tasks,
+    } = inputs;
     let mut table: Vec<DescriptorSlotV1> = Vec::new();
     let mut authority: Vec<AuthorityFd> = Vec::new();
     let mut read_roots: Vec<String> = Vec::new();
@@ -166,19 +196,37 @@ pub(super) fn prepare_launch(
         table.push(cgroup_slot());
     }
 
+    // Compose the OPT-IN seccomp DENYLIST request (S10): ChildSpawn::DenyNewTasks denies the
+    // task-creation family, and a NetworkDenyAll engagement ADDS the socket(2) defense-in-
+    // depth (D3) on TOP of the structural empty netns. `None` ⇒ no filter (the child window
+    // is byte-for-byte unchanged). Both flags fold into ONE denylist the launcher compiles.
+    let seccomp_request = seccomp_request(deny_new_tasks, deny_network);
+
     // 3. The lowering schedule the launcher SERVES: scrub (mandatory) + landlock-apply
-    //    (only when confining) + exec. Mirrors the launcher's served ids/phase codes
-    //    exactly, else the launcher refuses MissingPrimitive. (If the BoundaryPlan
-    //    later carries a real lowering schedule we project it; today the confinement
-    //    model is exactly this minimal schedule — see the H_L note below.)
+    //    (only when confining) + seccomp-apply (only when a denylist is engaged) + exec.
+    //    Mirrors the launcher's served ids/phase codes exactly, else the launcher refuses
+    //    MissingPrimitive. (If the BoundaryPlan later carries a real lowering schedule we
+    //    project it; today the confinement model is exactly this minimal schedule.)
     let mut entries = vec![entry(ID_AMBIENT_SCRUB, PHASE_CODE_SCRUB)];
     if confined {
         entries.push(entry(ID_LANDLOCK_APPLY, PHASE_CODE_CONFINE));
     }
+    if seccomp_request.is_some() {
+        entries.push(entry(ID_SECCOMP_APPLY, PHASE_CODE_CONFINE));
+    }
     entries.push(entry(ID_EXEC, PHASE_CODE_EXEC));
     let lowering = LoweringWireV1 { entries };
 
-    let body = build_body(plan, lowering, table, exe, args, envp, deny_network)?;
+    let body = build_body(BuildBody {
+        plan,
+        lowering,
+        table,
+        exe,
+        args,
+        envp,
+        deny_network,
+        seccomp_request,
+    })?;
     Ok(Prepared {
         launch_plan: LinuxLaunchPlanV1 { body },
         authority,
@@ -186,6 +234,26 @@ pub(super) fn prepare_launch(
         write_roots,
         confined,
     })
+}
+
+/// Compose the OPT-IN [`SeccompRequest`] from the lowering flags: `deny_new_tasks`
+/// (ChildSpawn::DenyNewTasks) denies the task-creation family; `deny_network`
+/// (NetworkDenyAll engaged) ADDS the `socket(2)` defense-in-depth (D3) on top of the
+/// structural empty netns. Returns `None` when NEITHER is set, so a plan with no
+/// child-task / no network-DiD omits the field entirely (the off-path bytes stay stable
+/// and the child window installs no filter).
+fn seccomp_request(deny_new_tasks: bool, deny_network: bool) -> Option<SeccompRequest> {
+    if !deny_new_tasks && !deny_network {
+        return None;
+    }
+    let request = SeccompRequest {
+        deny_new_tasks,
+        // NetworkDenyAll DiD: deny externally-routable socket creation (D3) ON TOP of the
+        // empty netns (the netns stays the structural guarantee; seccomp strengthens it).
+        deny_inet_sockets: deny_network,
+    };
+    // Defensive: only emit a request that actually denies something.
+    request.denies_anything().then_some(request)
 }
 
 /// Open a directory/file path as an owned handle with SAFE std (`File::open`). The
@@ -252,6 +320,19 @@ fn entry(id: &str, phase_code: u8) -> LoweringWireEntryV1 {
     }
 }
 
+/// The inputs `build_body` assembles a [`LinuxLaunchBodyV1`] from. Bundled to keep
+/// `build_body` within the argument budget (no `too_many_arguments` lint, doctrine-clean).
+struct BuildBody<'a> {
+    plan: &'a BoundaryPlan,
+    lowering: LoweringWireV1,
+    table: Vec<DescriptorSlotV1>,
+    exe: &'a str,
+    args: &'a [String],
+    envp: Vec<(String, String)>,
+    deny_network: bool,
+    seccomp_request: Option<SeccompRequest>,
+}
+
 /// Assemble the launcher body. Identity binding:
 /// - `plan_id` is the REAL admitted-plan identity;
 /// - `h_p` is the honest digest of the plan's bound profile snapshot
@@ -263,15 +344,17 @@ fn entry(id: &str, phase_code: u8) -> LoweringWireEntryV1 {
 ///   `BoundaryPlan` carries neither, and the launcher does NOT verify them — it
 ///   checks ONLY `h_l`; the real attempt/admission-program threading is #75). They
 ///   are domain-separated so they never collide with each other or with `plan_id`.
-fn build_body(
-    plan: &BoundaryPlan,
-    lowering: LoweringWireV1,
-    table: Vec<DescriptorSlotV1>,
-    exe: &str,
-    args: &[String],
-    envp: Vec<(String, String)>,
-    deny_network: bool,
-) -> Result<LinuxLaunchBodyV1, String> {
+fn build_body(b: BuildBody<'_>) -> Result<LinuxLaunchBodyV1, String> {
+    let BuildBody {
+        plan,
+        lowering,
+        table,
+        exe,
+        args,
+        envp,
+        deny_network,
+        seccomp_request,
+    } = b;
     let lowering_bytes = batpak::canonical::to_bytes(&lowering)
         .map_err(|e| format!("cannot canonically encode the lowering schedule: {e}"))?;
     let h_l: Digest32 = batpak::event::hash::compute_hash(&lowering_bytes);
@@ -308,6 +391,10 @@ fn build_body(
             // the pre-S8/S9 wire form (both fields are omitted from the encoding).
             user_namespace: deny_network.then(UserNsRequest::new),
             network_namespace: deny_network.then(NetworkNsRequest::new),
+            // S10: the OPT-IN seccomp denylist request (ChildSpawn::DenyNewTasks and/or the
+            // NetworkDenyAll socket DiD). `None` ⇒ no filter (the off-path bytes are
+            // byte-for-byte unchanged — the field is omitted from the canonical encoding).
+            seccomp: seccomp_request,
         },
     })
 }

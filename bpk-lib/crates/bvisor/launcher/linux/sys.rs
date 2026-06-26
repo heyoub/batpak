@@ -24,6 +24,11 @@ use landlock::{
     Access, AccessFs, CompatLevel, Compatible, PathBeneath, Ruleset, RulesetAttr,
     RulesetCreatedAttr, ABI,
 };
+// The compiled BPF the coordinator builds in the PARENT (via the bvisor seccomp model)
+// and the child installs LAST in its window. `sock_filter` is the kernel-ABI BPF
+// instruction; `BpfProgram = Vec<sock_filter>` is the assembled stream. The child only
+// READS this pre-built slice (no allocation) when building the stack `sock_fprog`.
+pub(crate) use seccompiler::{sock_filter, BpfProgram};
 // Re-export so the SAFE coordinator (`imp.rs`) can name the owned ruleset type it
 // carries from `build_landlock_ruleset` into `clone3_child` without itself depending
 // on the `landlock` crate surface.
@@ -413,6 +418,7 @@ pub(crate) fn adopt_fd(fd: RawFd) -> File {
 pub(crate) fn clone3_child(
     plan: &ChildExecPlan,
     confinement: Option<RulesetCreated>,
+    seccomp: Option<&BpfProgram>,
     cgroup_fd: Option<RawFd>,
     userns: bool,
     netns: bool,
@@ -497,8 +503,9 @@ pub(crate) fn clone3_child(
         // ruleset was fully BUILT in the parent (every allocation + add_rule syscall);
         // the child only APPLIES it via the async-signal-safe `restrict_self`. This
         // call site is reached ONLY in the child branch, satisfying `run_child`'s
-        // contract.
-        unsafe { run_child(plan, confinement) }
+        // contract. The optional seccomp `program` was assembled ENTIRELY in the parent
+        // (the bvisor seccomp model's compile()); the child only reads that slice.
+        unsafe { run_child(plan, confinement, seccomp) }
     }
     // PARENT — return the child pid. `rc` is the pid (> 0). `confinement` (if any)
     // drops here, closing ONLY the parent's copy of the ruleset fd; the child holds
@@ -513,12 +520,19 @@ pub(crate) fn clone3_child(
 /// dereferences the pre-built raw pointer arrays and issues raw syscalls.
 ///
 /// SAFETY: callable ONLY from the `rc == 0` child branch of [`clone3_child`], with a
-/// `plan` whose `argv`/`envp`/`close_fds`/`sync_read_fd` were fully built in the parent
-/// and an OPTIONAL `confinement` ruleset whose every allocation + `add_rule` syscall ran
-/// in the parent. It indexes only that already-allocated memory and calls only
-/// async-signal-safe syscalls — the optional userns-rendezvous blocking `read` (raw
-/// `SYS_read` into a stack byte), then `restrict_self` (`prctl` + `landlock_restrict_self`).
-unsafe fn run_child(plan: &ChildExecPlan, confinement: Option<RulesetCreated>) -> ! {
+/// `plan` whose `argv`/`envp`/`close_fds`/`sync_read_fd` were fully built in the parent,
+/// an OPTIONAL `confinement` ruleset whose every allocation + `add_rule` syscall ran in
+/// the parent, and an OPTIONAL `seccomp` BPF program assembled ENTIRELY in the parent. It
+/// indexes only that already-allocated memory and calls only async-signal-safe syscalls —
+/// the optional userns-rendezvous blocking `read` (raw `SYS_read` into a stack byte),
+/// `restrict_self` (`prctl` + `landlock_restrict_self`), the STANDALONE
+/// `prctl(PR_SET_NO_NEW_PRIVS)`, and `seccomp(SECCOMP_SET_MODE_FILTER, ..)` on the pre-built
+/// BPF (a fixed stack `sock_fprog`).
+unsafe fn run_child(
+    plan: &ChildExecPlan,
+    confinement: Option<RulesetCreated>,
+    seccomp: Option<&BpfProgram>,
+) -> ! {
     // 0. USER-NAMESPACE RENDEZVOUS (S8, async-signal-safe): if a sync-pipe read end was
     //    packed in, the child was born in a NEW userns (CLONE_NEWUSER) and is currently
     //    UNMAPPED (overflow uid). BLOCK on a 1-byte `read()` of the sync pipe until the
@@ -592,6 +606,31 @@ unsafe fn run_child(plan: &ChildExecPlan, confinement: Option<RulesetCreated>) -
             // restrict_self returns Ok without enforcing — but we built it at
             // HardRequirement above the probed ABI floor, so a real enforce is reached
             // or create() already failed in the parent.)
+            child_fail(plan.error_fd);
+        }
+    }
+
+    // 4b. NO_NEW_PRIVS, STANDALONE (S10): set it explicitly here so the seccomp filter can
+    //     install WITHOUT/BEFORE landlock and in the load-bearing order — NNP MUST precede
+    //     an unprivileged seccomp filter (the kernel refuses SECCOMP_SET_MODE_FILTER
+    //     otherwise). It is idempotent with landlock's own NNP. Run it ONLY when a seccomp
+    //     filter is scheduled (a no-seccomp plan leaves the child window byte-for-byte
+    //     unchanged); fail-closed on a prctl error so the target never runs without it.
+    //     `set_no_new_privs` is the async-signal-safe basement wrapper (prctl, no alloc).
+    if seccomp.is_some() && !set_no_new_privs() {
+        child_fail(plan.error_fd);
+    }
+
+    // 4c. SECCOMP FILTER, LAST (S10): install the parent-built BPF denylist AFTER the fd
+    //     scrub + landlock (so landlock's own syscalls already ran) and IMMEDIATELY before
+    //     fexecve (the filter allows execve/execveat so the exec survives + write/exit_group
+    //     so an error can still be reported). The program was assembled ENTIRELY in the
+    //     parent; `install_seccomp_filter` only builds a fixed stack `sock_fprog` over the
+    //     borrowed slice and issues the async-signal-safe `SYS_seccomp` syscall — NO
+    //     allocation, NO lock. Fail-closed: a failed install _exits so the target NEVER runs
+    //     un-filtered (e.g. a ChildSpawn::DenyNewTasks workload must not run able to fork).
+    if let Some(program) = seccomp {
+        if !install_seccomp_filter(program) {
             child_fail(plan.error_fd);
         }
     }
@@ -695,6 +734,91 @@ pub(crate) fn effective_ids() -> (libc::uid_t, libc::gid_t) {
     // create/close NO fd, and CANNOT fail (POSIX guarantees they always succeed). They
     // only return the calling process's effective uid/gid. Sound for any caller state.
     unsafe { (libc::geteuid(), libc::getegid()) }
+}
+
+/// The kernel-ABI `struct sock_fprog` (uapi `linux/filter.h`): a `{ len, filter }` pair
+/// pointing at the BPF instruction stream `seccomp(SECCOMP_SET_MODE_FILTER, ..)` installs.
+/// libc does not expose it and seccompiler keeps its own copy private, so the launcher
+/// basement declares its own `#[repr(C)]` mirror (two plain fields — a `u16` count and a
+/// pointer to the pre-built `sock_filter` slice). Built ON THE STACK in the child window
+/// (no allocation) from the PARENT-built filter; the kernel `copy_from_user`s the program
+/// during the syscall and leaves the memory untouched, so a borrowed pointer is sound.
+#[repr(C)]
+struct SockFprog {
+    len: u16,
+    filter: *const sock_filter,
+}
+
+/// Set `PR_SET_NO_NEW_PRIVS` STANDALONE in the CHILD window (async-signal-safe, S10).
+///
+/// EXTRACTED from landlock's `restrict_self` (which sets NNP internally) so the seccomp
+/// filter can be installed WITHOUT/BEFORE landlock and in the right order: NNP must be set
+/// before any unprivileged seccomp filter (the kernel refuses `SECCOMP_SET_MODE_FILTER`
+/// from an unprivileged caller otherwise). `prctl` is async-signal-safe and allocates
+/// nothing; it is idempotent (landlock setting it again later is harmless). Returns `true`
+/// on success; a non-zero `prctl` return ⇒ `false` (the caller fails closed before the
+/// filter install, so the target never runs without NNP).
+///
+#[must_use]
+fn set_no_new_privs() -> bool {
+    // SAFETY (LEDGER:linux-launcher-no-new-privs): child-window (async-signal-safe)
+    // `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)`. The four trailing args are the documented
+    // ignored-zero arguments for this prctl option; it reads NO user memory and
+    // dereferences NO pointer — it only sets the calling thread's no_new_privs bit (so a
+    // subsequent unprivileged seccomp filter is permitted, and no exec can gain privilege).
+    // It allocates nothing and takes no lock, so it is sound in the post-clone3 child
+    // window. A non-zero return (failure) is surfaced to the caller, which fails closed
+    // BEFORE the filter install so the target never runs without NNP. Idempotent with
+    // landlock's own NNP.
+    unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0 }
+}
+
+/// Install the PARENT-built seccomp BPF filter in the CHILD window via
+/// `seccomp(SECCOMP_SET_MODE_FILTER, 0, &fprog)` (async-signal-safe, S10).
+///
+/// The `program` slice was assembled ENTIRELY in the parent (the bvisor seccomp model's
+/// `compile()`); the child only READS it. A fixed `SockFprog` is built ON THE STACK
+/// (no heap, no lock) pointing at that slice, and the raw `SYS_seccomp` syscall installs
+/// it. The kernel `copy_from_user`s the program during the syscall, so the borrowed
+/// pointer needs no ownership. PRECONDITION: `PR_SET_NO_NEW_PRIVS` is already set (see
+/// [`set_no_new_privs`]) — call this LAST, after landlock, immediately before `fexecve`.
+/// Returns `true` on a successful install; any non-zero return ⇒ `false` (the caller fails
+/// closed so the target never runs without the filter).
+///
+#[must_use]
+fn install_seccomp_filter(program: &[sock_filter]) -> bool {
+    // An empty program would install a no-op filter — refuse it (the caller built a real
+    // denylist; an empty stream means the parent compile silently produced nothing).
+    if program.is_empty() {
+        return false;
+    }
+    let Ok(len) = u16::try_from(program.len()) else {
+        return false;
+    };
+    let fprog = SockFprog {
+        len,
+        filter: program.as_ptr(),
+    };
+    // SAFETY (LEDGER:linux-launcher-seccomp-install): child-window (async-signal-safe)
+    // `seccomp(SECCOMP_SET_MODE_FILTER, 0, &fprog)`. `fprog` is a FIXED stack
+    // `SockFprog { len, filter }` built HERE (no heap) over the PARENT-built `program`
+    // slice (assembled entirely in the parent by the bvisor seccomp model's compile()); the
+    // child only READS that already-mapped slice. The kernel `copy_from_user`s the BPF
+    // program DURING the syscall and leaves the memory untouched, so the borrowed pointer
+    // needs no ownership and is sound for the call's duration. `len` is the bounded
+    // instruction count (try_from-guarded). NNP is already set (the caller ran
+    // set_no_new_privs first), so the unprivileged install is permitted. It allocates
+    // nothing, takes no lock, and runs LAST (after the scrub + landlock, immediately before
+    // fexecve — the filter allows execve/execveat/write/exit_group). A non-zero return
+    // (failure) is surfaced so the caller fails closed (the target never runs un-filtered).
+    unsafe {
+        libc::syscall(
+            libc::SYS_seccomp,
+            libc::SECCOMP_SET_MODE_FILTER,
+            0usize,
+            std::ptr::addr_of!(fprog).cast::<libc::c_void>(),
+        ) == 0
+    }
 }
 
 /// Reap a child pid via `waitid(P_PID, …, WEXITED)` in the COORDINATOR (the parent,

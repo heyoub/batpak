@@ -366,6 +366,62 @@ impl NetworkNsRequest {
     }
 }
 
+/// An OPT-IN request that the launcher INSTALL a default-allow seccomp DENYLIST in the child
+/// window, LAST before `fexecve` (proof-spine S10). The denylist is ONE composed layer (the
+/// broad confinement is landlock/cgroup/netns/fd-scrub); it expresses the SPECIFIC,
+/// syscall-number-level denies those structural layers cannot:
+///   - `deny_new_tasks` — deny the whole `clone`/`clone3`/`fork`/`vfork` family
+///     (`ChildSpawn::DenyNewTasks`: the workload may create NO new task). Enforced at the
+///     syscall-NUMBER level — no `clone3` arg-deref needed (S6 freeze).
+///   - `deny_inet_sockets` — deny `socket(2)` as `NetworkDenyAll` DEFENSE-IN-DEPTH (D3) on
+///     top of the structural empty netns (which stays the primary guarantee).
+///
+/// The COORDINATOR compiles ONE BPF denylist from these flags (the bvisor seccomp model) in
+/// the PARENT and installs it in the child window; the filter ALWAYS allows
+/// `execve`/`execveat`/`write`/`exit_group` so the following `fexecve` + error reporting
+/// survive (the fail-closed-on-deny-execve law). At least one flag must be true for a
+/// `Some` request (an all-false request would compile an empty no-op denylist — the
+/// coordinator omits the field rather than emit one).
+///
+/// CRITICAL OFF-PATH INVARIANT: [`TargetSpecV1::seccomp`] is
+/// `#[serde(default, skip_serializing_if = "Option::is_none")]`, so a plan with no
+/// ChildSpawn / no NetworkDenyAll-DiD omits the field ENTIRELY from the canonical bytes —
+/// the no-seccomp wire form (and every PROVEN oracle that runs through it) is byte-for-byte
+/// unchanged, and the child window installs NO filter (its sequence is unchanged).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SeccompRequest {
+    /// Deny the `clone`/`clone3`/`fork`/`vfork` family (`ChildSpawn::DenyNewTasks`).
+    pub deny_new_tasks: bool,
+    /// Deny `socket(2)` as the `NetworkDenyAll` defense-in-depth (D3), on top of the netns.
+    pub deny_inet_sockets: bool,
+}
+
+impl SeccompRequest {
+    /// A `DenyNewTasks` request: install a denylist refusing the task-creation family.
+    #[must_use]
+    pub fn deny_new_tasks() -> Self {
+        Self {
+            deny_new_tasks: true,
+            deny_inet_sockets: false,
+        }
+    }
+
+    /// Whether this request denies anything at all (an all-false request is a no-op and
+    /// must NOT be emitted — the coordinator omits the field instead).
+    #[must_use]
+    pub fn denies_anything(self) -> bool {
+        self.deny_new_tasks || self.deny_inet_sockets
+    }
+
+    /// Fold in the `NetworkDenyAll` defense-in-depth socket deny (chainable).
+    #[must_use]
+    pub fn with_inet_socket_deny(mut self) -> Self {
+        self.deny_inet_sockets = true;
+        self
+    }
+}
+
 /// The exact process image to launch. Environment is EXPLICIT — nothing is
 /// inherited — and the executable rides a descriptor (`exe_slot`), never a path.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,6 +449,14 @@ pub struct TargetSpecV1 {
     /// request without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network_namespace: Option<NetworkNsRequest>,
+    /// OPT-IN child-window seccomp DENYLIST install (S10). `None` (the default) ⇒ NO filter
+    /// is installed — the child window's sequence is byte-for-byte unchanged (the field is
+    /// omitted from the canonical encoding, see [`SeccompRequest`]). `Some` ⇒ the coordinator
+    /// compiles ONE default-allow denylist from the request (deny task-creation for
+    /// `ChildSpawn::DenyNewTasks` and/or deny `socket(2)` as the NetworkDenyAll DiD) and
+    /// installs it LAST, after landlock, immediately before `fexecve`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seccomp: Option<SeccompRequest>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

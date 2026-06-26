@@ -28,6 +28,12 @@ const ID_EXEC: &str = "linux.exec.v1";
 /// the launcher serves.
 const ID_LANDLOCK_APPLY: &str = "linux.landlock.apply.v1";
 
+/// The seccomp-apply primitive (Confinement phase, S10). The coordinator compiles a
+/// default-allow DENYLIST in the parent (from `target.seccomp`) and the child installs it
+/// LAST, after landlock, immediately before `fexecve` (`prctl(NO_NEW_PRIVS)` then
+/// `seccomp(SET_MODE_FILTER)`). Backs `ChildSpawn::DenyNewTasks` + the NetworkDenyAll DiD.
+const ID_SECCOMP_APPLY: &str = "linux.seccomp.apply.v1";
+
 /// Wire `phase_code` for the scrub action's phase, frozen by
 /// `contract::primitive::LoweringPhase::FdHygiene.code()` (== 3): "Sanitize inherited
 /// file descriptors (CLOEXEC sweep, handle list)". The skeleton maps this code to
@@ -227,10 +233,28 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     };
     let confine_built = confinement.is_some();
 
-    // 7. Compute the four phase results and hold the ReadyToExec gate BEFORE any child
-    //    is created. Confinement is `Applied` IFF a landlock action was scheduled AND
-    //    its ruleset was built (the child WILL restrict_self).
-    let phases = compute_phases(&schedule, confine_built);
+    // 6b. SECCOMP (S10): when a `linux.seccomp.apply.v1` action is scheduled, the plan's
+    //     `target.seccomp` request drives a default-allow DENYLIST the coordinator COMPILES
+    //     NOW, in the PARENT (the bvisor seccomp model's compile()), so the child window
+    //     install is allocation-free. A scheduled seccomp action WITHOUT a request, an
+    //     empty (no-op) request, or a compile failure fails CLOSED to a refusal — the
+    //     launcher never advertises a filter it cannot install. The BpfProgram is owned here
+    //     and passed by reference into clone3; the child installs it LAST, before fexecve.
+    let seccomp_program: Option<sys::BpfProgram> = if schedule.seccomp.is_empty() {
+        None
+    } else {
+        match build_seccomp_filter(body) {
+            Ok(program) => Some(program),
+            Err(()) => return Ok(refuse(control, RefusalReason::MissingPrimitive)),
+        }
+    };
+    let seccomp_built = seccomp_program.is_some();
+
+    // 7. Compute the four phase results and hold the ReadyToExec gate BEFORE any child is
+    //    created. Confinement (landlock + seccomp) is `Applied` IFF at least one Confinement
+    //    action was scheduled AND every scheduled one was built (the child WILL apply them).
+    let confinement_built = confinement_actions_built(&schedule, confine_built, seccomp_built);
+    let phases = compute_phases(&schedule, confinement_built);
     // Phase-honesty self-check (anti over/under-claim) before we trust the results.
     if !phases_are_honest(&schedule, &phases) {
         return Ok(Verdict::Faulted);
@@ -241,12 +265,15 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         (SetupPhase::AmbientAuthority, phases.ambient),
         (SetupPhase::Confinement, phases.confinement),
     ];
-    // confinement_installed is REAL evidence: true IFF a landlock action was scheduled
-    // AND applied. With no landlock action it MUST be false (no over-claim); with one
-    // built+applied it MUST be true.
+    // confinement_installed is REAL evidence: true IFF a Confinement action (landlock OR
+    // seccomp) was SCHEDULED and every scheduled one was built+applied. With NONE scheduled it
+    // MUST be false (no over-claim — `confinement_built` is vacuously true when nothing is
+    // scheduled, so we AND it with "at least one scheduled"); with one built+applied it MUST be
+    // true.
+    let confinement_scheduled = !schedule.confinement_actions().is_empty();
     debug_assert_eq!(
-        confinement_installed(schedule.confine.len(), phases.confinement),
-        confine_built
+        confinement_installed(schedule.confinement_actions().len(), phases.confinement),
+        confinement_scheduled && confinement_built
     );
     if !ready_to_exec(true, phase_results, observed_digest, body.h_l) {
         // The decision is fail-closed: refuse NOW, no child.
@@ -321,6 +348,7 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
     let child_pid = sys::clone3_child(
         &child_plan,
         confinement.map(|c| c.ruleset),
+        seccomp_program.as_ref(),
         cgroup_fd,
         userns_requested,
         netns_requested,
@@ -331,6 +359,13 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
         // The kernel placed the child into the leaf at birth (CLONE_INTO_CGROUP); the
         // HOST independently confirms membership by reading the leaf's cgroup.procs.
         let _ = control.note("cgroup_placement=clone_into_cgroup");
+    }
+    if seccomp_built {
+        // The child installs the parent-built seccomp DENYLIST LAST, before fexecve (a
+        // default-allow filter denying the task-creation family and/or socket as DiD). The
+        // HOST independently confirms the install by reading /proc/<pid>/status (Seccomp: 2,
+        // filter mode) — the §4 oracle; this note is the honest mechanism attestation.
+        let _ = control.note("seccomp=denylist_installed mode=filter");
     }
 
     // USER-NAMESPACE RENDEZVOUS (S8): when a userns was requested, the child is now born
@@ -381,9 +416,10 @@ fn drive(control: &mut Transcript) -> Result<Verdict, BootError> {
             control.emit(LauncherState::IdentityPhaseResolved);
             control.emit(LauncherState::VisibilityPhaseResolved);
             control.emit(LauncherState::AmbientAuthorityPhaseResolved);
-            // Note the HONEST confinement result: Applied (real landlock install) only
-            // when a landlock action was scheduled + its ruleset built+applied.
-            let installed = confinement_installed(schedule.confine.len(), phases.confinement);
+            // Note the HONEST confinement result: Applied (real landlock and/or seccomp
+            // install) only when a Confinement action was scheduled + built+applied.
+            let installed =
+                confinement_installed(schedule.confinement_actions().len(), phases.confinement);
             let _ = control.note(&format!(
                 "confinement={:?} installed={installed}",
                 phases.confinement
@@ -420,6 +456,10 @@ struct ClassifiedSchedule {
     /// The `linux.landlock.apply.v1` entries (Confinement phase). Empty ⇒ no landlock
     /// action scheduled, so Confinement resolves `NotRequired` (unchanged skeleton).
     confine: Vec<LoweringWireEntryV1>,
+    /// The `linux.seccomp.apply.v1` entries (Confinement phase, S10). Empty ⇒ no seccomp
+    /// filter scheduled (the child installs none). Tracked separately from `confine` so
+    /// the launcher can serve a seccomp filter independently of a landlock ruleset.
+    seccomp: Vec<LoweringWireEntryV1>,
 }
 
 /// Classify the wire lowering: confirm an `linux.exec.v1` entry exists, collect the
@@ -429,11 +469,13 @@ struct ClassifiedSchedule {
 fn classify_schedule(body: &LinuxLaunchBodyV1) -> Result<ClassifiedSchedule, RefusalReason> {
     let mut scrub: Vec<LoweringWireEntryV1> = Vec::new();
     let mut confine: Vec<LoweringWireEntryV1> = Vec::new();
+    let mut seccomp: Vec<LoweringWireEntryV1> = Vec::new();
     let mut saw_exec = false;
     for entry in &body.lowering.entries {
         match (entry.id.as_str(), entry.phase_code) {
             (ID_AMBIENT_SCRUB, PHASE_CODE_SCRUB) => scrub.push(entry.clone()),
             (ID_LANDLOCK_APPLY, PHASE_CODE_CONFINE) => confine.push(entry.clone()),
+            (ID_SECCOMP_APPLY, PHASE_CODE_CONFINE) => seccomp.push(entry.clone()),
             (ID_EXEC, PHASE_CODE_EXEC) => saw_exec = true,
             // Any other id, or a serviced id in the wrong phase, or any action in a
             // phase the launcher does not serve ⇒ a primitive we do not implement.
@@ -444,7 +486,23 @@ fn classify_schedule(body: &LinuxLaunchBodyV1) -> Result<ClassifiedSchedule, Ref
         // No launch action: the launcher has nothing to exec.
         return Err(RefusalReason::MissingPrimitive);
     }
-    Ok(ClassifiedSchedule { scrub, confine })
+    Ok(ClassifiedSchedule {
+        scrub,
+        confine,
+        seccomp,
+    })
+}
+
+impl ClassifiedSchedule {
+    /// The FULL set of Confinement-phase actions, in canonical lowering order: the landlock
+    /// ruleset apply (`confine`) followed by the seccomp filter install (`seccomp`). The
+    /// Confinement phase resolves over this combined list — `phase_resolution_consistent`
+    /// needs observed == scheduled for the WHOLE phase, so landlock + seccomp are one phase.
+    fn confinement_actions(&self) -> Vec<LoweringWireEntryV1> {
+        let mut actions = self.confine.clone();
+        actions.extend(self.seccomp.iter().cloned());
+        actions
+    }
 }
 
 /// The schedule-integrity digest the coordinator binds against `h_l`:
@@ -470,16 +528,31 @@ struct Phases {
     confinement: PhaseResult,
 }
 
+/// Whether EVERY scheduled Confinement action (landlock + seccomp) was actually built in
+/// the parent: a landlock action requires the ruleset built, a seccomp action requires the
+/// BPF compiled. Confinement may resolve `Applied` ONLY when all scheduled ones are built;
+/// if any scheduled-but-unbuilt remains, the phase fails closed (never an over-claim).
+fn confinement_actions_built(
+    schedule: &ClassifiedSchedule,
+    confine_built: bool,
+    seccomp_built: bool,
+) -> bool {
+    let landlock_ok = schedule.confine.is_empty() || confine_built;
+    let seccomp_ok = schedule.seccomp.is_empty() || seccomp_built;
+    landlock_ok && seccomp_ok
+}
+
 /// Compute the four phase results: Identity/Visibility have no scheduled actions ⇒
 /// `NotRequired`; AmbientAuthority has the scrub action the child WILL run ⇒ `Applied`;
-/// Confinement is `Applied` IFF a landlock-apply action is scheduled AND its ruleset
-/// was built (the child WILL `restrict_self`), else `NotRequired` (no landlock action).
+/// Confinement (landlock + seccomp) is `Applied` IFF at least one Confinement action is
+/// scheduled AND every scheduled one was built (the child WILL `restrict_self` / install
+/// the filter), else `NotRequired` (no Confinement action) or `Refused` (built-failure).
 ///
-/// `confine_built` is the coordinator's evidence that the ruleset was actually
-/// constructed in the parent — Confinement is reported `Applied` ONLY when the action
-/// was scheduled and the launcher really built (and will apply) the ruleset, so the
+/// `confinement_built` is the coordinator's evidence that every scheduled Confinement
+/// action was actually constructed in the parent — Confinement is reported `Applied` ONLY
+/// when an action was scheduled and the launcher really built (and will apply) it, so the
 /// phase result can never over-claim an install that did not happen.
-fn compute_phases(schedule: &ClassifiedSchedule, confine_built: bool) -> Phases {
+fn compute_phases(schedule: &ClassifiedSchedule, confinement_built: bool) -> Phases {
     let ambient = if schedule.scrub.is_empty() {
         // No scrub scheduled — but the launcher REQUIRES the scrub (the mandatory
         // ambient-authority action), so an empty ambient phase is a refusal upstream.
@@ -488,15 +561,16 @@ fn compute_phases(schedule: &ClassifiedSchedule, confine_built: bool) -> Phases 
     } else {
         PhaseResult::Applied
     };
-    let confinement = if schedule.confine.is_empty() {
-        // No landlock action scheduled ⇒ Confinement stays NotRequired (unchanged).
+    let confinement = if schedule.confinement_actions().is_empty() {
+        // No landlock + no seccomp action scheduled ⇒ Confinement stays NotRequired.
         PhaseResult::NotRequired
-    } else if confine_built {
-        // A landlock action IS scheduled and the ruleset was built in the parent — the
-        // child will restrict_self before exec ⇒ Applied (REAL confinement evidence).
+    } else if confinement_built {
+        // A Confinement action IS scheduled and every scheduled one was built in the parent
+        // — the child will apply them before exec ⇒ Applied (REAL confinement evidence).
         PhaseResult::Applied
     } else {
-        // Scheduled but un-buildable (ABI below floor / fd not a root): fail closed.
+        // Scheduled but un-buildable (ABI below floor / fd not a root / seccomp compile
+        // failed): fail closed.
         PhaseResult::Refused
     };
     Phases {
@@ -519,10 +593,13 @@ fn compute_phases(schedule: &ClassifiedSchedule, confine_built: bool) -> Phases 
 /// drop a scheduled action), so OBSERVED equals SCHEDULED for every phase.
 fn phases_are_honest(schedule: &ClassifiedSchedule, phases: &Phases) -> bool {
     let empty: [LoweringWireEntryV1; 0] = [];
+    // The Confinement phase resolves over the FULL set of Confinement actions (landlock +
+    // seccomp), in canonical order — observed == scheduled for the whole phase.
+    let confinement = schedule.confinement_actions();
     phase_resolution_consistent(&empty, &empty, phases.identity)
         && phase_resolution_consistent(&empty, &empty, phases.visibility)
         && phase_resolution_consistent(&schedule.scrub, &schedule.scrub, phases.ambient)
-        && phase_resolution_consistent(&schedule.confine, &schedule.confine, phases.confinement)
+        && phase_resolution_consistent(&confinement, &confinement, phases.confinement)
 }
 
 // ── Confinement (landlock) root resolution + ruleset build ─────────────────────
@@ -625,6 +702,80 @@ fn landlock_roots(body: &LinuxLaunchBodyV1) -> Vec<LandlockRoot> {
             | _ => None,
         })
         .collect()
+}
+
+// ── Seccomp (S10): compile the parent-built denylist BPF ───────────────────────
+
+/// Compile the default-allow seccomp DENYLIST the child installs, from the plan's
+/// `target.seccomp` request, IN THE PARENT (so the child-window install is allocation-free).
+/// The request composes into ONE denylist: `deny_new_tasks` denies the
+/// `clone`/`clone3`/`fork`/`vfork` family (`ChildSpawn::DenyNewTasks`), `deny_inet_sockets`
+/// denies `socket(2)` (the NetworkDenyAll DiD). The deny terminal is `Errno(EPERM)` so the
+/// workload's `fork()` / `socket()` FAILS OBSERVABLY (the §4 oracle reads the failure) rather
+/// than the harder SIGSYS kill — the filter ALWAYS allows execve/execveat/write/exit_group so
+/// the following fexecve + error reporting survive (seccomp's compile() enforces that).
+///
+/// Returns `Err(())` (⇒ the launcher refuses, the target never runs) when: a seccomp action
+/// was scheduled but the plan carries NO `target.seccomp` request, the request denies nothing
+/// (a no-op), or the seccomp model rejects the policy / the compile fails. A denylist is ONE
+/// composed layer — the broad confinement is landlock/cgroup/netns/fd-scrub.
+fn build_seccomp_filter(body: &LinuxLaunchBodyV1) -> Result<sys::BpfProgram, ()> {
+    use bvisor::linux::seccomp::{DefaultAction, SeccompPolicy};
+    let Some(request) = body.target.seccomp else {
+        // A seccomp action was scheduled but no request describes it ⇒ fail closed.
+        return Err(());
+    };
+    if !request.denies_anything() {
+        // An all-false request would compile a no-op (empty) denylist ⇒ fail closed.
+        return Err(());
+    }
+    // Compose the deny set from the request flags (EPERM so the deny is OBSERVABLE).
+    let mut deny = Vec::new();
+    if request.deny_new_tasks {
+        deny.extend(SeccompPolicy::task_creation_syscalls());
+    }
+    if request.deny_inet_sockets {
+        deny.push(SeccompPolicy::socket_syscall());
+    }
+    let policy = SeccompPolicy::denylist(DefaultAction::Errno(eperm()), deny);
+    // Compile for the launcher's OWN arch (the install is always same-arch).
+    let compiled = policy.compile(current_seccomp_arch()).map_err(|_| ())?;
+    Ok(compiled.program().clone())
+}
+
+/// `EPERM` as the seccomp deny errno (so the denied syscall fails with a standard,
+/// observable error rather than a SIGSYS kill). Cast through `u32` for the errno field.
+fn eperm() -> u32 {
+    u32::try_from(libc::EPERM).unwrap_or(1)
+}
+
+/// The launcher's OWN seccomp target arch (the install is always same-arch). The seccomp
+/// model supports LE x86_64/aarch64/riscv64; on any OTHER build arch the launcher cannot
+/// assemble a correct filter, so a seccomp-bearing plan would have failed to compile a
+/// usable filter — we map the three supported arches and fall through to x86_64 only as a
+/// compile-time impossibility guard (the binary is built for exactly one arch).
+fn current_seccomp_arch() -> bvisor::SeccompArch {
+    use bvisor::SeccompArch;
+    #[cfg(target_arch = "x86_64")]
+    {
+        SeccompArch::X86_64
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        SeccompArch::Aarch64
+    }
+    #[cfg(target_arch = "riscv64")]
+    {
+        SeccompArch::Riscv64
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        target_arch = "aarch64",
+        target_arch = "riscv64"
+    )))]
+    {
+        SeccompArch::X86_64
+    }
 }
 
 // ── Handle verification ────────────────────────────────────────────────────────

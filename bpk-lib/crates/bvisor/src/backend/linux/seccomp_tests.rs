@@ -198,6 +198,123 @@ fn evidence_records_build_time_facts_and_no_install_mode() {
     assert!(findings.is_empty(), "evidence facts: {findings:?}");
 }
 
+// ── S10: the DENYLIST mode (default-allow, deny specific) ────────────────────────
+
+#[test]
+fn a_denylist_compiles_and_records_a_denylist_shape() {
+    // The ChildSpawn::DenyNewTasks denylist (deny clone/clone3/fork/vfork by number)
+    // compiles deterministically and the policy reports it is a denylist. The deny
+    // terminal (EPERM) + Allow are both in the action profile (default-allow + matched-deny).
+    let mut findings: Vec<String> = Vec::new();
+    for arch in ARCHES {
+        let policy = SeccompPolicy::deny_new_tasks(DefaultAction::Errno(1));
+        if !policy.is_denylist() {
+            findings.push(format!("deny_new_tasks must report is_denylist ({arch:?})"));
+        }
+        let (Ok(c1), Ok(c2)) = (policy.compile(arch), policy.compile(arch)) else {
+            findings.push(format!("deny_new_tasks failed to compile for {arch:?}"));
+            continue;
+        };
+        if c1.bpf_bytes() != c2.bpf_bytes() {
+            findings.push(format!("denylist BPF non-deterministic for {arch:?}"));
+        }
+        let ev = c1.evidence();
+        if !ev.action_profile.contains(&SeccompActionKind::Allow) {
+            findings.push(format!("denylist must default-ALLOW (profile) {arch:?}"));
+        }
+        if !ev.action_profile.contains(&SeccompActionKind::Errno(1)) {
+            findings.push(format!("denylist must carry the deny terminal {arch:?}"));
+        }
+        // The clone3 number must be compiled into a comparison (the syscall-number deny).
+        let k = u32::try_from(libc::SYS_clone3).unwrap_or(u32::MAX);
+        if !c1.program().iter().any(|insn| insn.k == k) {
+            findings.push(format!(
+                "clone3 nr not compiled into the denylist BPF {arch:?}"
+            ));
+        }
+    }
+    assert!(findings.is_empty(), "denylist shape: {findings:?}");
+}
+
+#[test]
+fn a_denylist_that_denies_a_mandatory_base_is_rejected_at_build() {
+    // Fail-closed-on-deny-execve, restated for the denylist: a deny set that names a
+    // mandatory base (execve) must be REJECTED — it would trap the launcher's own fexecve.
+    let mut findings: Vec<String> = Vec::new();
+    let bad = SeccompPolicy::denylist_with_base_for_test(DefaultAction::KillProcess, "execve");
+    for arch in ARCHES {
+        match bad.compile(arch) {
+            Ok(_) => findings.push(format!(
+                "compile() accepted a denylist that denies execve for {arch:?} (must fail closed)"
+            )),
+            Err(SeccompCompileError::DenylistDeniesMandatoryBase { syscall }) => {
+                if syscall != "execve" {
+                    findings.push(format!("rejected for wrong base {syscall} ({arch:?})"));
+                }
+            }
+            Err(other) => {
+                findings.push(format!(
+                    "rejected with unexpected error {other:?} ({arch:?})"
+                ));
+            }
+        }
+    }
+    assert!(
+        findings.is_empty(),
+        "denylist deny-execve fail-closed: {findings:?}"
+    );
+}
+
+#[test]
+fn an_empty_denylist_is_rejected() {
+    let empty = SeccompPolicy::denylist(DefaultAction::KillProcess, []);
+    let mut findings: Vec<String> = Vec::new();
+    for arch in ARCHES {
+        if !matches!(empty.compile(arch), Err(SeccompCompileError::EmptyDenylist)) {
+            findings.push(format!("empty denylist not rejected for {arch:?}"));
+        }
+    }
+    assert!(findings.is_empty(), "empty denylist: {findings:?}");
+}
+
+#[test]
+fn an_allowlist_and_a_denylist_over_the_same_syscalls_have_distinct_digests() {
+    // A default-deny allowlist and a default-allow denylist are DIFFERENT policies even
+    // over the same syscall set + floor — the mode tag keeps their digests distinct.
+    let read = extra_read();
+    let allow = SeccompPolicy::launcher_base(DefaultAction::KillProcess).allow(read);
+    let deny = SeccompPolicy::denylist(DefaultAction::KillProcess, [read]);
+    let mut findings: Vec<String> = Vec::new();
+    match (allow.policy_digest(), deny.policy_digest()) {
+        (Ok(a), Ok(d)) if a == d => {
+            findings.push("allowlist and denylist collapsed to one policy digest".into());
+        }
+        (Ok(_), Ok(_)) => {}
+        _ => findings.push("a policy_digest failed to compute".into()),
+    }
+    assert!(findings.is_empty(), "mode distinctness: {findings:?}");
+}
+
+#[test]
+fn the_network_did_denylist_denies_socket() {
+    // The NetworkDenyAll defense-in-depth denylist denies socket(2) (DiD on top of the
+    // structural empty netns).
+    let mut findings: Vec<String> = Vec::new();
+    let policy = SeccompPolicy::network_deny_did(DefaultAction::Errno(1));
+    let denied: Vec<&str> = policy.allowlist().map(|s| s.name()).collect();
+    if denied != vec!["socket"] {
+        findings.push(format!(
+            "network DiD must deny exactly `socket`, got {denied:?}"
+        ));
+    }
+    for arch in ARCHES {
+        if policy.compile(arch).is_err() {
+            findings.push(format!("network DiD denylist failed to compile {arch:?}"));
+        }
+    }
+    assert!(findings.is_empty(), "network DiD: {findings:?}");
+}
+
 #[test]
 fn different_arches_produce_different_bpf_but_same_policy_digest() {
     // The arch-audit preamble differs per arch ⇒ different BPF bytes; the policy

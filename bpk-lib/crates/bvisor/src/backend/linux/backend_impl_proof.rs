@@ -32,6 +32,9 @@ impl LinuxBackend {
             // The production-shaped proof profile permits unprivileged userns+netns, so its
             // ceiling backs NetworkDenyAll=Enforced and the coupling gate qualifies it.
             netns_available: true,
+            // The production-shaped proof profile supports seccomp filter mode, so its ceiling
+            // backs ChildSpawnDenyNewTasks=Enforced and the coupling gate qualifies it.
+            seccomp_available: true,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -51,6 +54,9 @@ impl LinuxBackend {
             // so NetworkDenyAll does not enter the ceiling and the FS/Kill coupling tests
             // stay focused on exactly their cells.
             netns_available: false,
+            // The ABI-focused proof profiles isolate the FS floor; force seccomp OFF so
+            // ChildSpawnDenyNewTasks does not enter the ceiling.
+            seccomp_available: false,
             secret_resolver: default_secret_resolver(),
         }
     }
@@ -72,6 +78,7 @@ impl LinuxBackend {
             has_cgroup_kill: self.cgroup_base.is_some(),
             has_pids_peak: self.cgroup_pids_peak,
             has_unprivileged_userns: self.netns_available,
+            has_seccomp_filter: self.seccomp_available,
         }
     }
 
