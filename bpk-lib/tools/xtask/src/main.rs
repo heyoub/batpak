@@ -144,7 +144,22 @@ enum XtaskCommand {
     /// `support_matrix()` best-case table + the witnessed-invariant set. The
     /// matching `--check` mode runs inside `structural-check` (drift => fail).
     CapabilitySnapshot,
+    /// Validate the release terminal-status ledger (`traceability/releases/*.yaml`).
+    ReleaseStatus(ReleaseStatusArgs),
     Release(ReleaseArgs),
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub(crate) struct ReleaseStatusArgs {
+    /// Release version to check (for example `0.9.0`).
+    #[arg(long)]
+    pub(crate) target: Option<String>,
+    /// Require exactly one `active: true` release target.
+    #[arg(long)]
+    pub(crate) active: bool,
+    /// Fail when any `terminal_required` row is not in a terminal status.
+    #[arg(long)]
+    pub(crate) strict: bool,
 }
 
 #[derive(Args, Clone, Copy)]
@@ -686,6 +701,7 @@ fn main() -> Result<()> {
         }
         XtaskCommand::Docs(args) => docs::docs(args),
         XtaskCommand::CapabilitySnapshot => commands::integrity("capability-snapshot", []),
+        XtaskCommand::ReleaseStatus(args) => commands::release_status(args),
         XtaskCommand::Release(args) => commands::release(args),
     }
 }

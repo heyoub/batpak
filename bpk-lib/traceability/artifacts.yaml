@@ -336,6 +336,11 @@
   paths:
     - crates/core/tests/fork_hostile_fs.rs
     - crates/core/src/store/sim/fork_hostile.rs
+- id: ART-FORK-UNDER-FAULT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/fork_under_fault.rs
+    - crates/core/src/store/sim/fork_recovery.rs
 - id: ART-STORE-FORK-IMPORT-EXAMPLES
   kind: examples
   paths:
@@ -853,6 +858,12 @@
   kind: tests
   paths:
     - crates/core/tests/dst_recovery.rs
+- id: ART-DST-CORPUS-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/dst_corpus_currency.rs
+    - crates/core/src/store/sim/corpus.rs
+    - traceability/dst_corpus.yaml
 - id: ART-RECOVERY-ORACLE-SOURCE
   kind: source
   paths:

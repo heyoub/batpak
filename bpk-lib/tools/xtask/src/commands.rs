@@ -65,6 +65,39 @@ pub(crate) fn integrity<const N: usize>(subcommand: &str, extra: [&str; N]) -> R
     cargo(args)
 }
 
+pub(crate) fn release_status(args: crate::ReleaseStatusArgs) -> Result<()> {
+    let mut extra: Vec<&str> = Vec::new();
+    if args.strict {
+        extra.push("--strict");
+    }
+    if args.active {
+        extra.push("--active");
+    }
+    let target_buf;
+    if let Some(target) = args.target {
+        target_buf = target;
+        extra.push("--target");
+        extra.push(target_buf.as_str());
+    }
+    let mut cargo_args = vec![
+        "run",
+        "--package",
+        "batpak-integrity",
+        "--",
+        "release-status-check",
+    ];
+    cargo_args.extend(extra);
+    cargo(cargo_args)
+}
+
+pub(crate) fn release_status_strict_active() -> Result<()> {
+    release_status(crate::ReleaseStatusArgs {
+        target: None,
+        active: true,
+        strict: true,
+    })
+}
+
 pub(crate) fn scaffold(args: ScaffoldArgs) -> Result<()> {
     scaffold::scaffold(args)
 }

@@ -290,6 +290,16 @@
     - ART-STORE-FORK-IMPORT-SOURCE
     - ART-FORK-HOSTILE-TESTS
   witness_test: crates/core/tests/fork_hostile_fs.rs::fork_enospc_mid_copy_publishes_nothing
+- id: INV-FORK-CRASH-ATOMIC
+  statement: >-
+    Store fork survives StoreFs-level seeded faults: after SimFs crash, a fork
+    destination must classify as exactly one of {CommittedPrefix | RolledBack |
+    CanonicalRefusal} via the recovery oracle — never an illegal half-fork that
+    open() accepts as valid corrupted state.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-FORK-UNDER-FAULT-TESTS
+  witness_test: crates/core/tests/fork_under_fault.rs::fork_under_fault_is_legal_and_deterministic
 - id: INV-IMPORT-CONTENT-ISOMORPHISM
   statement: >-
     Store import is re-application rather than merge: source event identity,
@@ -765,6 +775,16 @@
     - ART-DST-RECOVERY-SOURCE
     - ART-DST-RECOVERY-TEST
   witness_test: crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic
+- id: INV-DST-CORPUS-CURRENCY
+  statement: >-
+    Every graduated row in `traceability/dst_corpus.yaml` replays through the real
+    Store+SimFs recovery oracle with the stored FNV-1a op-trace digest identity;
+    the structural ledger validates schema and non-emptiness, and this gate proves
+    digest replay currency under `dangerous-test-hooks`.
+  artifacts:
+    - ART-DST-CORPUS-TEST
+    - ART-DST-RECOVERY-SOURCE
+  witness_test: crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
 - id: INV-RECOVERY-ORACLE-LEGAL
   statement: >-
     A real Store opened over the fault-injecting SimFs backend (plus the

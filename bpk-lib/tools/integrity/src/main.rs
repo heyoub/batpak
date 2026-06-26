@@ -49,6 +49,7 @@ mod overclaim;
 mod perf_gates_contract;
 mod public_surface;
 mod receipts;
+mod release_status;
 mod repo_ir;
 mod repo_surface;
 mod rust_ast;
@@ -130,6 +131,20 @@ enum CommandKind {
     /// claims against delivered witnesses and assertion-bearing tests. Also
     /// folded into `structural-check`.
     OverclaimCheck,
+    /// Release terminal-status ledger: validate `traceability/releases/*.yaml`
+    /// schema and witness references. With `--strict`, fail when any
+    /// `terminal_required` row is still `INCOMPLETE` or a waiver is expired.
+    ReleaseStatusCheck {
+        /// Release version to check (e.g. `0.9.0`). Default: all release files.
+        #[arg(long)]
+        target: Option<String>,
+        /// Require exactly one `active: true` release target (strict release mode).
+        #[arg(long)]
+        active: bool,
+        /// Enforce terminal completeness for required rows.
+        #[arg(long)]
+        strict: bool,
+    },
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -206,6 +221,25 @@ fn main() -> Result<()> {
         CommandKind::OverclaimCheck => {
             let repo_root = repo_surface::repo_root()?;
             overclaim::check(&repo_root).map(|_| ())
+        }
+        CommandKind::ReleaseStatusCheck {
+            target,
+            active,
+            strict,
+        } => {
+            let repo_root = repo_surface::repo_root()?;
+            let opts = release_status::ReleaseCheckOptions {
+                strict,
+                target,
+                active_only: active,
+            };
+            release_status::check(&repo_root, &opts).map(|work| {
+                outln!(
+                    "release-status: ok ({} file(s), {} assertion(s))",
+                    work.files_examined,
+                    work.assertions_run
+                );
+            })
         }
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),

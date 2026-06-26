@@ -225,7 +225,7 @@ pub(crate) fn validate(repo_root: &Path, waivers: &[Waiver], today: IsoDate) -> 
 
 /// Today's date from the system clock as an [`IsoDate`] (UTC). Used by the
 /// production gate; tests inject a fixed date via [`check_with_today`].
-fn today_utc() -> IsoDate {
+pub(crate) fn today_utc() -> IsoDate {
     // Days since the Unix epoch, converted to a proleptic-Gregorian calendar
     // date. No external clock crate; deterministic and dependency-free.
     let secs = std::time::SystemTime::now()

@@ -126,6 +126,7 @@ verify-ts:
 seal:
     cd bpk-lib; cargo xtask check-version-pins
     cd bpk-lib; cargo xtask evidence-audit
+    cd bpk-lib; cargo xtask release-status --strict --active
     cd bpk-lib; cargo xtask release-manifest --strict
 
 ship mode="dry":
