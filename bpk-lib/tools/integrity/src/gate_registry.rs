@@ -331,6 +331,46 @@ pub(crate) const GATES: &[Gate] = &[
         has_blocking_authority: true,
     },
     Gate {
+        slug: "dangerous-hooks-contract",
+        red_fixture_test: Some(
+            "tools/integrity/src/dangerous_hooks_contract.rs::dangerous_hooks_default_feature_and_cfg_contract_rejects_planted_exposure",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "chaos-linux-only-contract",
+        red_fixture_test: Some(
+            "tools/integrity/src/chaos_contract.rs::chaos_contract_rejects_missing_linux_or_feature_cfg",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "literal-regex-contract",
+        red_fixture_test: Some(
+            "tools/integrity/src/literal_regex_contract.rs::literal_regex_contract_rejects_unjustified_or_dynamic_expect",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "canonical-container-ci",
+        red_fixture_test: Some(
+            "tools/integrity/src/ci_container_contract.rs::canonical_container_contract_rejects_host_cargo_fast_lane",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
+        slug: "cross-directory-scope-contract",
+        red_fixture_test: Some(
+            "tools/integrity/src/scope_exclusion_contract.rs::cross_directory_scope_contract_rejects_positive_store_overclaim",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::GateNegativePath),
+        has_blocking_authority: true,
+    },
+    Gate {
         slug: "pub-items-have-tests",
         red_fixture_test: Some(
             "tools/integrity/src/public_surface.rs::pub_items_have_tests_rejects_unwitnessed_pub_item",
@@ -595,8 +635,13 @@ pub(crate) const RECEIPT_REQUIRED_GATES: &[&str] = &[
     "typed-waivers",
     "capability-snapshot",
     "ci-parity",
+    "canonical-container-ci",
+    "chaos-linux-only-contract",
+    "cross-directory-scope-contract",
+    "dangerous-hooks-contract",
     "examples-observable-output",
     "invariant-bridge",
+    "literal-regex-contract",
     "perf-gates-contract",
     "structural-source-lints",
     "overclaim",

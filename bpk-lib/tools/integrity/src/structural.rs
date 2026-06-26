@@ -5,8 +5,10 @@ use crate::repo_surface::{
 use crate::shared_checks::{collect_dead_code_silencer_sites, load_dead_code_silencer_allowlist};
 use crate::source_cache::SourceCache;
 use crate::{
-    agent_surface, architecture_lints, ci_parity, complexity, docs_catalog, glob_coverage,
-    harness_lints, invariant_bridge, public_surface, store_pub_fn_coverage, wallclock,
+    agent_surface, architecture_lints, chaos_contract, ci_container_contract, ci_parity,
+    complexity, dangerous_hooks_contract, docs_catalog, glob_coverage, harness_lints,
+    invariant_bridge, literal_regex_contract, public_surface, scope_exclusion_contract,
+    store_pub_fn_coverage, wallclock,
 };
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeSet;
@@ -81,6 +83,36 @@ pub(crate) fn run() -> Result<()> {
 
     crate::receipts::run_gate("perf-gates-contract", || {
         let inputs = crate::perf_gates_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("dangerous-hooks-contract", || {
+        let inputs = dangerous_hooks_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("chaos-linux-only-contract", || {
+        let inputs = chaos_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("literal-regex-contract", || {
+        let inputs = literal_regex_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("canonical-container-ci", || {
+        let inputs = ci_container_contract::check(&repo_root)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("cross-directory-scope-contract", || {
+        let inputs = scope_exclusion_contract::check(&repo_root, &mut source_cache)?;
         let files = inputs.len().max(1);
         Ok(crate::receipts::GateWork::new(files, files, inputs))
     })?;

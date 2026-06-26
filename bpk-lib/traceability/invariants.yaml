@@ -146,11 +146,7 @@
     - ART-TYPESTATE-TESTS
 - id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT
   statement: Dangerous test hooks are not exposed in default production builds.
-  # weak-tier (honest-C): the witness is the compiler. The hooks live behind
-  # #[cfg(feature = "dangerous-test-hooks")], so their absence in a default build is
-  # a compile-time guarantee, not a runtime property. No existing gate red-fixture
-  # asserts this (the cited ART-STORE-ADVANCED file is a doc stub). Left witnessless
-  # rather than ship a vacuous "feature off => symbol absent" test.
+  witness_test: tools/integrity/src/dangerous_hooks_contract.rs::dangerous_hooks_default_feature_and_cfg_contract_rejects_planted_exposure
   artifacts:
     - ART-STORE-DANGEROUS-TEST-HOOKS
     - ART-STORE-ADVANCED
@@ -195,9 +191,7 @@
     - ART-STORE-MOD
 - id: INV-CANONICAL-CONTAINER-CI
   statement: The canonical Linux CI path executes inside the checked-in devcontainer image rather than a separately hand-installed host environment.
-  # weak-tier (honest-C): the witness is CI infrastructure (the checked-in
-  # devcontainer + workflow), not runnable code. There is no in-repo test that can
-  # observe "CI ran inside the container". Left witnessless by design.
+  witness_test: tools/integrity/src/ci_container_contract.rs::canonical_container_contract_rejects_host_cargo_fast_lane
   artifacts:
     - ART-DEVCONTAINER
     - ART-DEVCONTAINER-RUNNER
@@ -520,10 +514,7 @@
   witness_test: crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_durable_gate_blocks_until_synced
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
-  # weak-tier (honest-C): the witness is the compiler. The harness is #[cfg(...)]'d
-  # off on non-Linux, so a runtime test can only ever run on Linux and could never
-  # observe the off-target case — any "witness" would be tautological. Left
-  # witnessless by design.
+  witness_test: tools/integrity/src/chaos_contract.rs::chaos_contract_rejects_missing_linux_or_feature_cfg
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-CHAOS-DM-FLAKEY
@@ -552,9 +543,7 @@
     - ART-MACROS
 - id: INV-LITERAL-REGEX-UNWRAP-SAFE
   statement: "unwrap / expect on regex::Regex::new with a literal string pattern inside tool code is safe because the pattern is a compile-time constant string with known-valid regex syntax; the call cannot fire in any reachable execution of the tool."
-  # weak-tier (honest-C): this is a justification of an un-firing code path, not a
-  # falsifiable property. There is nothing to witness at runtime (the unwrap can
-  # never fire), so any "test" would be vacuous. Left witnessless by design.
+  witness_test: tools/integrity/src/literal_regex_contract.rs::literal_regex_contract_rejects_unjustified_or_dynamic_expect
   artifacts:
     - ART-DOCTOR
 - id: INV-TEST-PANIC-AS-ASSERTION
@@ -672,9 +661,7 @@
   statement: >-
     Cross-data_dir consistency is outside Store invariants; multi-journal systems compose by
     product-owned routing, observations, receipts, and local policy.
-  # weak-tier (honest-C / GAP): a scope-EXCLUSION statement ("X is outside Store
-  # invariants") has no falsifiable runtime property to witness — there is nothing
-  # for a test to exercise. Doc-backed only; left witnessless by design.
+  witness_test: tools/integrity/src/scope_exclusion_contract.rs::cross_directory_scope_contract_rejects_positive_store_overclaim
   artifacts:
     - ART-STORE-MOD
     - ART-DX-DOCS

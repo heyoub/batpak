@@ -445,6 +445,7 @@ fn assert_workflow_just_recipes_map_to_xtask(
     workflows: &[(&str, &str)],
     xtask_main: &str,
 ) -> Result<()> {
+    // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; pattern is a string literal known-safe at compile time in tools/integrity/src/ci_parity.rs; this expect cannot fire in any reachable code path
     let just_re = Regex::new(r"\bjust\s+([a-z][a-z0-9-]*)\b")
         .expect("internal regex is a compile-time constant and will compile");
     let mut found_recipes: BTreeSet<(String, String)> = BTreeSet::new();

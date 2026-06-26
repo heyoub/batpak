@@ -278,7 +278,7 @@ pub(crate) fn aspirational_pub_fn_subjects(
 ) -> Result<Vec<String>> {
     let mut subjects = BTreeSet::new();
     let mut paths = Vec::new();
-    for root in production_rust_roots(repo_root)? {
+    for root in overclaim_production_roots(repo_root)? {
         paths.extend(rust_files(&root));
     }
     for path in paths {
@@ -289,6 +289,32 @@ pub(crate) fn aspirational_pub_fn_subjects(
         collect_aspirational_pub_fns(&file.items, &rel, &mut subjects);
     }
     Ok(subjects.into_iter().collect())
+}
+
+fn overclaim_production_roots(repo_root: &Path) -> Result<Vec<PathBuf>> {
+    match production_rust_roots(repo_root) {
+        Ok(roots) => Ok(roots),
+        Err(err) if !repo_root.join("Cargo.toml").exists() => {
+            Ok(synthetic_fixture_production_roots(repo_root))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn synthetic_fixture_production_roots(repo_root: &Path) -> Vec<PathBuf> {
+    let crates_root = repo_root.join("crates");
+    let mut roots = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&crates_root) else {
+        return roots;
+    };
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let src = entry.path().join("src");
+        if src.is_dir() {
+            roots.push(src);
+        }
+    }
+    roots.sort();
+    roots
 }
 
 fn collect_aspirational_pub_fns(items: &[syn::Item], rel: &str, out: &mut BTreeSet<String>) {

@@ -86,16 +86,19 @@ fn check_no_legacy_topology_or_replay_names(
         ),
         (
             "ViewConfig",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bViewConfig\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),
         (
             "ProjectionMode",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bProjectionMode\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),
         (
             "ValueInput",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bValueInput\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),

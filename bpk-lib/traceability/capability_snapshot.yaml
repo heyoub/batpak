@@ -82,9 +82,9 @@ witnesses:
   - { id: INV-BIDIRECTIONAL-SUBSTRATE-LANE, witnessed: true }
   - { id: INV-BUILD-FAIL-FAST, witnessed: true }
   - { id: INV-CACHE-CAPABILITIES-EXPLICIT, witnessed: true }
-  - { id: INV-CANONICAL-CONTAINER-CI, witnessed: false }
+  - { id: INV-CANONICAL-CONTAINER-CI, witnessed: true }
   - { id: INV-CANONICAL-PATCH-STABILITY, witnessed: true }
-  - { id: INV-CHAOS-LINUX-ONLY, witnessed: false }
+  - { id: INV-CHAOS-LINUX-ONLY, witnessed: true }
   - { id: INV-CHECKPOINT-V2-INTERNED, witnessed: true }
   - { id: INV-CLOCK-NOW-US-LIVE, witnessed: true }
   - { id: INV-COLD-START-ARTIFACTS, witnessed: true }
@@ -93,8 +93,8 @@ witnesses:
   - { id: INV-CONCURRENCY-SCHEDULE-PROOF, witnessed: true }
   - { id: INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY, witnessed: true }
   - { id: INV-COORDINATE-IS-LOGICAL-STREAM, witnessed: true }
-  - { id: INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED, witnessed: false }
-  - { id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT, witnessed: false }
+  - { id: INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED, witnessed: true }
+  - { id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT, witnessed: true }
   - { id: INV-DELIVERY-AT-LEAST-ONCE-WITNESS, witnessed: true }
   - { id: INV-DEPENDENCY-DIRECTION, witnessed: true }
   - { id: INV-DOCS-CATALOG-VIEW-CURRENT, witnessed: true }
@@ -131,7 +131,7 @@ witnesses:
   - { id: INV-JOURNAL-WRITER-SERIALIZES-COMMITS, witnessed: true }
   - { id: INV-LANE-BRANCH-ISOLATION, witnessed: true }
   - { id: INV-LINEARIZABILITY-SINGLE-WRITER, witnessed: true }
-  - { id: INV-LITERAL-REGEX-UNWRAP-SAFE, witnessed: false }
+  - { id: INV-LITERAL-REGEX-UNWRAP-SAFE, witnessed: true }
   - { id: INV-MACRO-BOUNDED-CAST, witnessed: true }
   - { id: INV-MMAP-SEALED-READS, witnessed: true }
   - { id: INV-MULTI-VIEW-PUBLISH-AFTER-VIEW-SYNC, witnessed: true }
