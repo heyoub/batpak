@@ -26,6 +26,8 @@
 !.cursor/rules/
 !.cursor/rules/**
 .cursor/plans/
+# Local codebase-memory-mcp graph artifacts (optional team export lives here).
+.codebase-memory/
 # Local pnpm content store when install runs with a repo-local store-dir.
 .pnpm-store/
 # Most nested Cargo.lock files from path-dependency fixture crates are cache,
