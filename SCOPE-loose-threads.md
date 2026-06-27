@@ -1,5 +1,23 @@
 # SCOPE — Loose Threads to 0.9.0 (implementation-ready)
 
+> **Current status (post-E3, 2026-06):** See release ledger `traceability/releases/0.9.0.yaml`.
+> | Thread | Status |
+> |--------|--------|
+> | #48 fork/import gauntlet | Local PROVEN (`STORE-FORK-*`, `STORE-IMPORT-*`); cloud equiv audit `STORE-LOOSE-EQUIV-MUTANT-AUDIT` INCOMPLETE |
+> | #64 mutation/DST/hybrid | Local E1/E2 PROVEN; cloud rows `CLOUD-*` INCOMPLETE |
+> | #67 overclaim/witness/triangulation | PROVEN (`GAUNTLET-OVERCLAIM`, `GAUNTLET-WITNESS-CATALOG`, `GAUNTLET-TRIANGULATION`) |
+> | #68 example dedup | PROVEN (`STORE-68-EXAMPLE-DEDUP`) |
+> | D1 pre-commit clippy | Resolved |
+> | D3 mutation Phase4 | Cloud (`CLOUD-MUTATION-PHASE4`) |
+> | D5 witness burndown | Done (102/102 invariants witnessed) |
+> | D7 triangulation | Done |
+> | D8 typed FutureVersion | Superseded — compat_matrix rows landed |
+> | D9 repo-IR / structural | `just inspect` passes |
+> | D10 ReactLoopHandle | Superseded — `ReactLoopHandle` in watch_api.rs |
+> | D11 SimClock export | Superseded — exported from store/mod.rs |
+> | 0.8.3 audit carryover (C2/C3/R9/R17/R18) | Eight `STORE-*` / `NETBAT-*` rows on 0.9.0 board |
+> | BVISOR platform matrix | `BVISOR-PLATFORM-MATRIX` INCOMPLETE |
+>
 > Read-only mapping pass. Hand this to Cursor. Every section is implementation-ready: scope, AL, files (`path:line`),
 > exact changes, **red + green fixtures**, gate wiring, sequencing, done-when. No source was edited producing this.
 >

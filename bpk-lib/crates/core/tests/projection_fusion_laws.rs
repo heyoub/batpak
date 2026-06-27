@@ -18,12 +18,9 @@
 //! mutant that drops one fold's relevant kinds from the fused union — passing the
 //! single fixed witness — is still killed here.
 //!
-//! NOTE (deferred breadth): on this branch the store does not yet expose the
-//! `project_fused2/3` public surface (it lands with the 0.9 fork-import work).
-//! This test therefore proves the fusion law over the same catamorphism algebra
-//! against a single-pass reference fuser defined here; wiring the law to the
-//! public `Store::project_fused*` surface is logged as deferred in
-//! GAUNTLET_ISSUES.md.
+//! NOTE: `Store::project_fused2/3` is public (`read_api.rs`); this property
+//! proves the fusion law over the catamorphism algebra. A follow-on may wire
+//! the same law directly through the store fused API surface.
 
 use batpak::event::EventKind;
 use proptest::prelude::*;

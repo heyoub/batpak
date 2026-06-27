@@ -417,9 +417,9 @@
     targets the fold/merge/map seams a single fixed example cannot kill (dropped
     fold kinds, equal-coordinate HLC tiebreak, Batch-arm map distribution).
   blind_spots: >
-    the banana-split law runs against an in-test single-pass fuser because the
-    public Store::project_fused* surface is not yet on this branch; wiring the
-    same property to that surface is deferred to the 0.9 fork-import work.
+    the banana-split law runs against an in-test single-pass fuser; wiring the
+    same property directly through Store::project_fused2/3 is optional follow-on
+    (the public fused API exists in read_api.rs).
 
 - title: Fuzz and chaos probe outputs stay within explicit policy gates
   section: Property Harness

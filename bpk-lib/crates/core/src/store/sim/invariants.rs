@@ -12,9 +12,9 @@
 //!   * **no-loss-after-crash-recover** — after a simulated crash, every event
 //!     that was acknowledged as durable is still present on recovery.
 //!
-//! The engine is model-only (no real `Store`), which keeps the determinism test
-//! small and fast. Wiring these checks against a real `Store` driven over the
-//! sim backends is the deferred breadth (see GAUNTLET_ISSUES.md).
+//! The engine checks model-only state for fast determinism tests. Real-Store
+//! safety over sim backends is proven via the fork/import/recovery DST corpus
+//! (`recovery.rs`, `fork_recovery.rs`, `import_recovery.rs`).
 
 /// A single logged event in the simulation model.
 #[derive(Clone, Copy, Debug)]

@@ -24,12 +24,12 @@
 //! `sim_is_deterministic` integration test (`crates/core/tests/sim.rs`) runs a
 //! seeded workload twice and asserts the op-trace hashes match.
 //!
-//! Scope (skeleton, per GAUNT-SIM-2c budget note): this lands the three
-//! trait-implementing backends + the seeded workload/invariant engine + the
-//! determinism test. Composing the *real* `Store` over these backends (driving
-//! the writer thread through `SimScheduler` and routing every durability op
-//! through `SimFs`) is deferred until the remaining `StoreFs` durability ops
-//! are routed — see GAUNTLET_ISSUES.md.
+//! Scope (GAUNT-SIM-2c): the three trait backends, seeded workload/invariant
+//! engine, and determinism test are live. `Store` over `SimFs` is wired for
+//! fork/import/recovery DST paths (`recovery.rs`, `fork_recovery.rs`,
+//! `import_recovery.rs`). Optional follow-on: route the writer thread through
+//! `SimScheduler` for full cooperative scheduling — not required for current
+//! corpus proofs.
 
 pub mod clock;
 pub(crate) mod corpus;
@@ -68,8 +68,8 @@ pub(crate) fn seed_from_env(default: u64) -> u64 {
 ///
 /// The three backends are exposed as `Arc<dyn Trait>` so they can be installed
 /// on a [`crate::store::StoreConfig`] via `with_clock` / `with_spawner` /
-/// `with_fs` once the full `Store`-over-sim composition lands. Until then the
-/// [`workload`] engine drives them directly to prove determinism end to end.
+/// `with_fs`. The [`workload`] engine also drives them directly for determinism
+/// proofs; full Store-over-`SimScheduler` wiring is optional follow-on.
 pub(crate) struct Sim {
     /// Seed every backend and the workload PRNG derive from.
     pub(crate) seed: u64,
