@@ -1,5 +1,5 @@
-# cargo-deny configuration for batpak.
-# Run locally with: cargo deny check
+# cargo-deny configuration for batpak (workspace root: bpk-lib/deny.toml).
+# Run locally from bpk-lib with: cargo deny check
 
 [graph]
 targets = [

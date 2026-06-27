@@ -57,6 +57,22 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
     check_root_markdown_allowlist(project_root)?;
+    ensure(
+        !project_root.join("deny.toml").exists(),
+        "deny.toml belongs under bpk-lib/ (cargo deny runs from the workspace root)",
+    )?;
+    ensure(
+        !project_root.join("clippy.toml").exists(),
+        "clippy.toml belongs under bpk-lib/ (Cargo workspace root)",
+    )?;
+    ensure(
+        repo_root.join("deny.toml").is_file(),
+        "project layout contract requires bpk-lib/deny.toml",
+    )?;
+    ensure(
+        repo_root.join("clippy.toml").is_file(),
+        "project layout contract requires bpk-lib/clippy.toml",
+    )?;
 
     for path in [
         "Cargo.toml",
