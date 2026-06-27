@@ -36,11 +36,18 @@ mod composition_tests;
 #[cfg(test)]
 mod composition_interface_tests;
 
+#[cfg(test)]
+mod event_payload_binding_tests;
+
+#[cfg(test)]
+mod append_validation_tests;
+
 pub mod builder;
 pub mod client_manifest;
 pub mod composition;
 pub mod descriptor;
 pub mod error;
+pub mod event_payload_binding;
 pub mod host;
 pub mod identity;
 pub mod interface;
@@ -50,15 +57,18 @@ pub mod schema;
 pub mod schema_shape;
 pub mod subscription;
 pub mod supervisor;
+pub mod validating_effect_backend;
 
 pub use builder::HostBuilder;
 pub use client_manifest::{
-    ClientManifest, ClientManifestEncoding, ClientManifestGoldenVector, ClientManifestOperation,
-    ClientManifestSchema, ClientManifestSubscription,
+    ClientManifest, ClientManifestEncoding, ClientManifestEventPayloadBinding,
+    ClientManifestGoldenVector, ClientManifestOperation, ClientManifestSchema,
+    ClientManifestSubscription,
 };
 pub use composition::{CompositionSchema, HostCompositionManifest};
 pub use descriptor::{GuardDescriptor, HookDescriptor, HookPhase, JobDescriptor};
 pub use error::{HookFailure, HostError, HostRuntimeError, SchemaCollision};
+pub use event_payload_binding::EventPayloadBinding;
 pub use host::Host;
 pub use identity::{Digest, HostFingerprint, InterfaceFingerprint, ModuleDigest};
 pub use manifest::HostModuleManifest;
@@ -77,3 +87,4 @@ pub use subscription::{
     SUBSCRIPTION_WIRE_REQUIRES,
 };
 pub use supervisor::Supervisor;
+pub use validating_effect_backend::ValidatingEffectBackend;

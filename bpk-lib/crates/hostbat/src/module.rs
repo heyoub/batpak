@@ -13,7 +13,10 @@ use std::collections::BTreeMap;
 use syncbat::{AdmissionGuard, Handler, OperationDescriptor};
 
 use crate::descriptor::{GuardDescriptor, HookDescriptor, HookPhase, JobDescriptor};
+use batpak::event::EventKind;
+
 use crate::error::HostError;
+use crate::event_payload_binding::EventPayloadBinding;
 use crate::manifest::{HostModuleManifest, SealedParts};
 use crate::schema::SchemaDescriptor;
 use crate::subscription::SubscriptionDescriptor;
@@ -125,6 +128,7 @@ pub struct HostModuleBuilder {
     jobs: BTreeMap<String, (JobDescriptor, BoxedJob)>,
     schemas: BTreeMap<(String, u32, crate::schema::SchemaRole), SchemaDescriptor>,
     subscriptions: BTreeMap<String, SubscriptionDescriptor>,
+    event_payload_bindings: BTreeMap<u16, EventPayloadBinding>,
 }
 
 impl HostModuleBuilder {
@@ -141,6 +145,7 @@ impl HostModuleBuilder {
             jobs: BTreeMap::new(),
             schemas: BTreeMap::new(),
             subscriptions: BTreeMap::new(),
+            event_payload_bindings: BTreeMap::new(),
         }
     }
 
@@ -251,6 +256,33 @@ impl HostModuleBuilder {
         Ok(self)
     }
 
+    /// Bind an event kind to a declared event-payload schema for host-mediated
+    /// appends.
+    ///
+    /// Event kinds are globally unique across the composed host; this method
+    /// rejects duplicates within the module before mount-time cross-module checks.
+    ///
+    /// # Errors
+    /// [`HostError::EventPayloadBindingInvalid`] if the schema reference is empty;
+    /// [`HostError::EventPayloadBindingDuplicateWithinModule`] if the kind is
+    /// bound twice in this module.
+    pub fn bind_event_payload(
+        mut self,
+        kind: EventKind,
+        payload_schema_ref: impl Into<String>,
+    ) -> Result<Self, HostError> {
+        let binding = EventPayloadBinding::new(kind, payload_schema_ref)?;
+        let kind_raw = binding.kind_raw();
+        if self.event_payload_bindings.contains_key(&kind_raw) {
+            return Err(HostError::EventPayloadBindingDuplicateWithinModule {
+                module: self.id.clone(),
+                kind: kind_raw,
+            });
+        }
+        self.event_payload_bindings.insert(kind_raw, binding);
+        Ok(self)
+    }
+
     /// Register a lifecycle hook in `phase` with module-local `order`.
     pub fn hook<H>(mut self, phase: HookPhase, name: impl Into<String>, order: u32, hook: H) -> Self
     where
@@ -295,10 +327,11 @@ impl HostModuleBuilder {
             && self.guard.is_none()
             && self.schemas.is_empty()
             && self.subscriptions.is_empty()
+            && self.event_payload_bindings.is_empty()
         {
             return Err(HostError::coherence(
                 &self.id,
-                "module declares no operations, hooks, jobs, guard, schemas, or subscriptions",
+                "module declares no operations, hooks, jobs, guard, schemas, subscriptions, or event payload bindings",
             ));
         }
 
@@ -336,6 +369,8 @@ impl HostModuleBuilder {
         // The BTreeMap already holds schemas in canonical (id, version, role) order.
         let schemas: Vec<SchemaDescriptor> = self.schemas.into_values().collect();
         let subscriptions: Vec<SubscriptionDescriptor> = self.subscriptions.into_values().collect();
+        let event_payload_bindings: Vec<EventPayloadBinding> =
+            self.event_payload_bindings.into_values().collect();
 
         let manifest = HostModuleManifest::seal(SealedParts {
             id: self.id,
@@ -347,6 +382,7 @@ impl HostModuleBuilder {
             jobs: job_descriptors,
             schemas,
             subscriptions,
+            event_payload_bindings,
         })?;
 
         Ok(HostModule {

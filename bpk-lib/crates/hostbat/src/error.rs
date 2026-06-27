@@ -205,6 +205,49 @@ pub enum HostError {
         /// Required schema role.
         role: String,
     },
+    /// An event payload binding is malformed.
+    EventPayloadBindingInvalid {
+        /// Bound event kind (raw u16).
+        kind: u16,
+        /// Stable detail describing the violation.
+        detail: String,
+    },
+    /// Two bindings in one module declare the same event kind.
+    EventPayloadBindingDuplicateWithinModule {
+        /// The offending module id.
+        module: String,
+        /// Duplicated event kind (raw u16).
+        kind: u16,
+    },
+    /// Two mounted modules bind the same event kind.
+    DuplicateEventPayloadBinding {
+        /// Duplicated event kind (raw u16).
+        kind: u16,
+        /// The module that re-declared the binding.
+        module: String,
+    },
+    /// Two mounted modules bind the same event kind to different payload schemas.
+    EventPayloadBindingConflict {
+        /// Conflicted event kind (raw u16).
+        kind: u16,
+        /// Module that first bound the kind.
+        first_module: String,
+        /// First binding's payload schema id.
+        first_schema_ref: String,
+        /// Module whose conflicting binding was rejected.
+        second_module: String,
+        /// Rejected binding's payload schema id.
+        second_schema_ref: String,
+    },
+    /// An event payload binding references a schema id missing from the composition.
+    EventPayloadBindingSchemaMissing {
+        /// Module containing the binding.
+        module: String,
+        /// Bound event kind (raw u16).
+        kind: u16,
+        /// Referenced schema id.
+        reference: String,
+    },
 }
 
 impl HostError {
@@ -254,7 +297,12 @@ impl std::fmt::Display for HostError {
             | Self::SubscriptionInvalidProjectionId { .. }
             | Self::SubscriptionDuplicateWithinModule { .. }
             | Self::SubscriptionReservedCategory { .. }
-            | Self::SubscriptionPayloadSchemaMissing { .. } => fmt_schema_error(self, f),
+            | Self::SubscriptionPayloadSchemaMissing { .. }
+            | Self::EventPayloadBindingInvalid { .. }
+            | Self::EventPayloadBindingDuplicateWithinModule { .. }
+            | Self::DuplicateEventPayloadBinding { .. }
+            | Self::EventPayloadBindingConflict { .. }
+            | Self::EventPayloadBindingSchemaMissing { .. } => fmt_schema_error(self, f),
         }
     }
 }
@@ -296,6 +344,11 @@ fn fmt_host_wiring_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> 
         | HostError::SubscriptionDuplicateWithinModule { .. }
         | HostError::SubscriptionReservedCategory { .. }
         | HostError::SubscriptionPayloadSchemaMissing { .. }
+        | HostError::EventPayloadBindingInvalid { .. }
+        | HostError::EventPayloadBindingDuplicateWithinModule { .. }
+        | HostError::DuplicateEventPayloadBinding { .. }
+        | HostError::EventPayloadBindingConflict { .. }
+        | HostError::EventPayloadBindingSchemaMissing { .. }
         | HostError::SchemaInvalid { .. }
         | HostError::SchemaCollision(_)
         | HostError::SchemaReferenceMissing { .. }
@@ -358,6 +411,34 @@ fn fmt_schema_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::
                 )
             }
         }
+        HostError::SubscriptionInvalidId { .. }
+        | HostError::SubscriptionInvalidProjectionId { .. }
+        | HostError::SubscriptionDuplicateWithinModule { .. }
+        | HostError::DuplicateSubscriptionId { .. }
+        | HostError::SubscriptionReservedCategory { .. }
+        | HostError::SubscriptionPayloadSchemaMissing { .. } => fmt_subscription_error(error, f),
+        HostError::EventPayloadBindingInvalid { .. }
+        | HostError::EventPayloadBindingDuplicateWithinModule { .. }
+        | HostError::DuplicateEventPayloadBinding { .. }
+        | HostError::EventPayloadBindingConflict { .. }
+        | HostError::EventPayloadBindingSchemaMissing { .. } => {
+            fmt_event_payload_binding_error(error, f)
+        }
+        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
+        HostError::DuplicateModuleId { .. }
+        | HostError::DuplicateOperation { .. }
+        | HostError::EffectConflict { .. }
+        | HostError::DuplicateReceiptNamespace { .. }
+        | HostError::DuplicateJobKind { .. }
+        | HostError::ModuleHashMismatch { .. }
+        | HostError::ModuleCoherence { .. }
+        | HostError::EmptyHost
+        | HostError::Build(_) => fmt_host_wiring_error(error, f),
+    }
+}
+
+fn fmt_subscription_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match error {
         HostError::SubscriptionInvalidId { id, detail } => {
             write!(f, "subscription id {id:?} is invalid: {detail}")
         }
@@ -385,8 +466,19 @@ fn fmt_schema_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::
             f,
             "module {module:?} subscription {subscription:?} references missing schema {reference:?} for role {role}"
         ),
-        HostError::CanonicalEncoding { detail } => write!(f, "canonical encoding failed: {detail}"),
-        HostError::DuplicateModuleId { .. }
+        HostError::SchemaInvalid { .. }
+        | HostError::SchemaCollision(_)
+        | HostError::SchemaReferenceMissing { .. }
+        | HostError::SchemaReferenceAmbiguous { .. }
+        | HostError::SchemaValidation { .. }
+        | HostError::SchemaShapeMissing { .. }
+        | HostError::EventPayloadBindingInvalid { .. }
+        | HostError::EventPayloadBindingDuplicateWithinModule { .. }
+        | HostError::DuplicateEventPayloadBinding { .. }
+        | HostError::EventPayloadBindingConflict { .. }
+        | HostError::EventPayloadBindingSchemaMissing { .. }
+        | HostError::CanonicalEncoding { .. }
+        | HostError::DuplicateModuleId { .. }
         | HostError::DuplicateOperation { .. }
         | HostError::EffectConflict { .. }
         | HostError::DuplicateReceiptNamespace { .. }
@@ -394,7 +486,68 @@ fn fmt_schema_error(error: &HostError, f: &mut std::fmt::Formatter<'_>) -> std::
         | HostError::ModuleHashMismatch { .. }
         | HostError::ModuleCoherence { .. }
         | HostError::EmptyHost
-        | HostError::Build(_) => fmt_host_wiring_error(error, f),
+        | HostError::Build(_) => fmt_schema_error(error, f),
+    }
+}
+
+fn fmt_event_payload_binding_error(
+    error: &HostError,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    match error {
+        HostError::EventPayloadBindingInvalid { kind, detail } => write!(
+            f,
+            "event payload binding for kind 0x{kind:04x} is invalid: {detail}"
+        ),
+        HostError::EventPayloadBindingDuplicateWithinModule { module, kind } => {
+            write!(f, "module {module:?} binds event kind 0x{kind:04x} twice")
+        }
+        HostError::DuplicateEventPayloadBinding { kind, module } => write!(
+            f,
+            "event kind 0x{kind:04x} re-bound by module {module:?} is already mounted"
+        ),
+        HostError::EventPayloadBindingConflict {
+            kind,
+            first_module,
+            first_schema_ref,
+            second_module,
+            second_schema_ref,
+        } => write!(
+            f,
+            "event kind 0x{kind:04x} bound to conflicting payload schemas: \
+             module {first_module:?} => {first_schema_ref:?}, \
+             module {second_module:?} => {second_schema_ref:?}"
+        ),
+        HostError::EventPayloadBindingSchemaMissing {
+            module,
+            kind,
+            reference,
+        } => write!(
+            f,
+            "module {module:?} binds event kind 0x{kind:04x} to missing schema {reference:?}"
+        ),
+        HostError::SchemaInvalid { .. }
+        | HostError::SchemaCollision(_)
+        | HostError::SchemaReferenceMissing { .. }
+        | HostError::SchemaReferenceAmbiguous { .. }
+        | HostError::SchemaValidation { .. }
+        | HostError::SchemaShapeMissing { .. }
+        | HostError::SubscriptionInvalidId { .. }
+        | HostError::SubscriptionInvalidProjectionId { .. }
+        | HostError::SubscriptionDuplicateWithinModule { .. }
+        | HostError::DuplicateSubscriptionId { .. }
+        | HostError::SubscriptionReservedCategory { .. }
+        | HostError::SubscriptionPayloadSchemaMissing { .. }
+        | HostError::CanonicalEncoding { .. }
+        | HostError::DuplicateModuleId { .. }
+        | HostError::DuplicateOperation { .. }
+        | HostError::EffectConflict { .. }
+        | HostError::DuplicateReceiptNamespace { .. }
+        | HostError::DuplicateJobKind { .. }
+        | HostError::ModuleHashMismatch { .. }
+        | HostError::ModuleCoherence { .. }
+        | HostError::EmptyHost
+        | HostError::Build(_) => fmt_schema_error(error, f),
     }
 }
 
@@ -478,6 +631,11 @@ impl std::error::Error for HostError {
             | Self::SubscriptionDuplicateWithinModule { .. }
             | Self::SubscriptionReservedCategory { .. }
             | Self::SubscriptionPayloadSchemaMissing { .. }
+            | Self::EventPayloadBindingInvalid { .. }
+            | Self::EventPayloadBindingDuplicateWithinModule { .. }
+            | Self::DuplicateEventPayloadBinding { .. }
+            | Self::EventPayloadBindingConflict { .. }
+            | Self::EventPayloadBindingSchemaMissing { .. }
             | Self::EmptyHost => None,
         }
     }

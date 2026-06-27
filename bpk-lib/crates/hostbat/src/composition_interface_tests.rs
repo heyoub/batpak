@@ -319,7 +319,7 @@ fn client_manifest_projects_live_host_contract() {
 
     let manifest = ClientManifest::from_host(&host);
 
-    assert_eq!(manifest.manifest_version, 3);
+    assert_eq!(manifest.manifest_version, 4);
     assert_eq!(manifest.netbat_version, "NETBAT/1");
     assert_eq!(
         manifest.subscription_wire_requires,

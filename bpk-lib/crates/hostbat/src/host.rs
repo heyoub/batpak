@@ -16,6 +16,7 @@ use syncbat::{CheckoutResult, Core, OperationDescriptor, RuntimeError};
 use crate::composition::HostCompositionManifest;
 use crate::descriptor::{HookDescriptor, HookPhase};
 use crate::error::{HookFailure, HostRuntimeError};
+use crate::event_payload_binding::EventPayloadBinding;
 use crate::identity::{HostFingerprint, InterfaceFingerprint};
 use crate::module::{BoxedHook, BoxedJob};
 use crate::schema::SchemaRegistry;
@@ -71,6 +72,7 @@ pub struct Host {
     interface_fingerprint: InterfaceFingerprint,
     operations: Vec<OperationDescriptor>,
     subscriptions: Vec<(String, SubscriptionDescriptor)>,
+    event_payload_bindings: Vec<(String, EventPayloadBinding)>,
     composition_schemas: HostCompositionManifest,
     schema_registry: SchemaRegistry,
     startup: Vec<HostHook>,
@@ -88,6 +90,7 @@ pub(crate) struct HostParts {
     pub(crate) interface_fingerprint: InterfaceFingerprint,
     pub(crate) operations: Vec<OperationDescriptor>,
     pub(crate) subscriptions: Vec<(String, SubscriptionDescriptor)>,
+    pub(crate) event_payload_bindings: Vec<(String, EventPayloadBinding)>,
     pub(crate) composition_schemas: HostCompositionManifest,
     pub(crate) schema_registry: SchemaRegistry,
     pub(crate) startup: Vec<HostHook>,
@@ -104,6 +107,7 @@ impl Host {
             interface_fingerprint,
             operations,
             subscriptions,
+            event_payload_bindings,
             composition_schemas,
             schema_registry,
             startup,
@@ -117,6 +121,7 @@ impl Host {
             interface_fingerprint,
             operations,
             subscriptions,
+            event_payload_bindings,
             composition_schemas,
             schema_registry,
             startup,
@@ -148,6 +153,13 @@ impl Host {
         self.subscriptions
             .iter()
             .map(|(module, descriptor)| (module.as_str(), descriptor))
+    }
+
+    /// Event payload bindings in canonical `(module-id, kind)` order.
+    pub fn event_payload_bindings(&self) -> impl Iterator<Item = (&str, &EventPayloadBinding)> {
+        self.event_payload_bindings
+            .iter()
+            .map(|(module, binding)| (module.as_str(), binding))
     }
 
     /// The content-addressed composition schema manifest aggregating every

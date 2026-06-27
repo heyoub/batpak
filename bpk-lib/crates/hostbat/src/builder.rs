@@ -21,12 +21,14 @@ use syncbat::{
 use crate::composition::CompositionSchemaBuilder;
 use crate::descriptor::HookPhase;
 use crate::error::HostError;
+use crate::event_payload_binding::EventPayloadBinding;
 use crate::host::{Host, HostHook, HostParts};
 use crate::identity::{canonical_digest, HostFingerprint};
 use crate::interface::compute_interface_fingerprint;
 use crate::module::{BoxedJob, HostModule, HostModuleParts};
 use crate::schema::{SchemaRegistry, SchemaRole};
 use crate::subscription::SubscriptionDescriptor;
+use crate::validating_effect_backend::ValidatingEffectBackend;
 
 type BoxedGuard = Box<dyn AdmissionGuard + 'static>;
 type BoxedHandler = Box<dyn Handler + 'static>;
@@ -45,6 +47,7 @@ pub struct HostBuilder {
     receipt_namespaces: BTreeMap<String, String>,
     job_owners: BTreeMap<String, String>,
     subscription_owners: BTreeMap<String, String>,
+    event_payload_bindings: BTreeMap<u16, (String, String)>,
     schemas: CompositionSchemaBuilder,
     spawn: Arc<dyn Spawn>,
     receipt_sink: Option<BoxedReceiptSink>,
@@ -61,6 +64,7 @@ impl Default for HostBuilder {
             receipt_namespaces: BTreeMap::new(),
             job_owners: BTreeMap::new(),
             subscription_owners: BTreeMap::new(),
+            event_payload_bindings: BTreeMap::new(),
             schemas: CompositionSchemaBuilder::default(),
             spawn: Arc::new(ThreadSpawn),
             receipt_sink: None,
@@ -183,6 +187,27 @@ impl HostBuilder {
                 });
             }
         }
+        for binding in parts.manifest.event_payload_bindings() {
+            let kind = binding.kind_raw();
+            let schema_ref = binding.payload_schema_ref().to_owned();
+            if let Some((first_module, first_schema_ref)) = self.event_payload_bindings.get(&kind) {
+                if first_schema_ref == &schema_ref {
+                    return Err(HostError::DuplicateEventPayloadBinding {
+                        kind,
+                        module: id.clone(),
+                    });
+                }
+                return Err(HostError::EventPayloadBindingConflict {
+                    kind,
+                    first_module: first_module.clone(),
+                    first_schema_ref: first_schema_ref.clone(),
+                    second_module: id.clone(),
+                    second_schema_ref: schema_ref,
+                });
+            }
+            self.event_payload_bindings
+                .insert(kind, (id.clone(), schema_ref));
+        }
         // Aggregate this module's schemas into the composition, failing closed on
         // a cross-module identity collision with a differing canonical encoding.
         for descriptor in parts.manifest.schemas() {
@@ -208,6 +233,7 @@ impl HostBuilder {
         let fingerprint = compute_fingerprint(&self.modules)?;
         let composition_schemas = self.schemas.seal()?;
         validate_subscription_payload_schemas(&self.modules, &composition_schemas)?;
+        validate_event_payload_bindings(&self.modules, &composition_schemas)?;
         validate_client_visible_schema_shapes(&self.modules, &composition_schemas)?;
         let interface_fingerprint =
             compute_interface_fingerprint(&self.modules, &composition_schemas)?;
@@ -217,64 +243,28 @@ impl HostBuilder {
                 .map(|entry| entry.descriptor().clone()),
         );
 
-        let mut core_builder = CoreBuilder::new();
-        let mut guard = CompositeGuard::default();
-        let supervisor = crate::supervisor::Supervisor::new(self.spawn);
-        let mut startup: Vec<HostHook> = Vec::new();
-        let mut shutdown: Vec<HostHook> = Vec::new();
-        let mut job_factories: BTreeMap<String, BoxedJob> = BTreeMap::new();
-        let mut operation_descriptors: Vec<OperationDescriptor> = Vec::new();
-        let mut subscriptions: Vec<(String, SubscriptionDescriptor)> = Vec::new();
-
-        for parts in self.modules {
-            let HostModuleParts {
-                manifest,
-                mut handlers,
-                guard: module_guard,
-                hooks,
-                jobs,
-            } = parts;
-            let module_id = manifest.id().to_owned();
-
-            let mut operation_names = Vec::new();
-            for descriptor in manifest.operations() {
-                let name = descriptor.name().to_owned();
-                let handler = handlers.remove(&name).ok_or_else(|| {
-                    HostError::coherence(&module_id, format!("operation {name:?} has no handler"))
-                })?;
-                let handler =
-                    SchemaValidatingHandler::new(descriptor, schema_registry.clone(), handler);
-                core_builder.register_boxed(descriptor.clone(), Box::new(handler))?;
-                operation_descriptors.push(descriptor.clone());
-                operation_names.push(name);
-            }
-            if let Some(module_guard) = module_guard {
-                guard.add(operation_names, module_guard);
-            }
-            for (descriptor, hook) in hooks {
-                let entry = HostHook::new(module_id.clone(), descriptor, hook);
-                match entry.phase() {
-                    HookPhase::Startup => startup.push(entry),
-                    HookPhase::Shutdown => shutdown.push(entry),
-                }
-            }
-            for (kind, body) in jobs {
-                job_factories.insert(kind, body);
-            }
-            for descriptor in manifest.subscriptions() {
-                subscriptions.push((module_id.clone(), descriptor.clone()));
-            }
-        }
-
-        if !guard.is_empty() {
-            core_builder.admission_guard(guard);
+        let lowered = lower_modules(self.modules, &schema_registry)?;
+        let mut core_builder = lowered.core_builder;
+        if !lowered.guard.is_empty() {
+            core_builder.admission_guard(lowered.guard);
         }
         if let Some(sink) = self.receipt_sink {
             core_builder.receipt_sink_boxed(sink);
         }
         if let Some(backend) = self.effect_backend {
-            core_builder.effect_backend_boxed(backend);
+            let validating = ValidatingEffectBackend::new(
+                backend,
+                collect_event_payload_binding_map(&lowered.event_payload_bindings),
+                schema_registry.clone(),
+            );
+            core_builder.effect_backend_boxed(Box::new(validating));
         }
+
+        let mut startup = lowered.startup;
+        let mut shutdown = lowered.shutdown;
+        let mut operation_descriptors = lowered.operation_descriptors;
+        let mut subscriptions = lowered.subscriptions;
+        let mut event_payload_bindings = lowered.event_payload_bindings;
 
         // Global deterministic hook order: (order, module-id, name). Module ids
         // are unique, so this is a total order with no cross-module ambiguity.
@@ -285,22 +275,157 @@ impl HostBuilder {
             a_id.cmp(b_id)
                 .then_with(|| a.id().as_str().cmp(b.id().as_str()))
         });
+        event_payload_bindings.sort_by(|(a_id, a), (b_id, b)| {
+            a_id.cmp(b_id).then_with(|| a.kind_raw().cmp(&b.kind_raw()))
+        });
 
         let core = core_builder.build()?;
         Ok(Host::new(HostParts {
             core,
-            supervisor,
+            supervisor: crate::supervisor::Supervisor::new(self.spawn),
             fingerprint,
             interface_fingerprint,
             operations: operation_descriptors,
             subscriptions,
+            event_payload_bindings,
             composition_schemas,
             schema_registry,
             startup,
             shutdown,
-            job_factories,
+            job_factories: lowered.job_factories,
         }))
     }
+}
+
+struct LoweredModules {
+    core_builder: CoreBuilder,
+    guard: CompositeGuard,
+    startup: Vec<HostHook>,
+    shutdown: Vec<HostHook>,
+    job_factories: BTreeMap<String, BoxedJob>,
+    operation_descriptors: Vec<OperationDescriptor>,
+    subscriptions: Vec<(String, SubscriptionDescriptor)>,
+    event_payload_bindings: Vec<(String, EventPayloadBinding)>,
+}
+
+fn lower_modules(
+    modules: Vec<HostModuleParts>,
+    schema_registry: &SchemaRegistry,
+) -> Result<LoweredModules, HostError> {
+    let mut core_builder = CoreBuilder::new();
+    let mut guard = CompositeGuard::default();
+    let mut startup: Vec<HostHook> = Vec::new();
+    let mut shutdown: Vec<HostHook> = Vec::new();
+    let mut job_factories: BTreeMap<String, BoxedJob> = BTreeMap::new();
+    let mut operation_descriptors: Vec<OperationDescriptor> = Vec::new();
+    let mut subscriptions: Vec<(String, SubscriptionDescriptor)> = Vec::new();
+    let mut event_payload_bindings: Vec<(String, EventPayloadBinding)> = Vec::new();
+
+    for parts in modules {
+        let HostModuleParts {
+            manifest,
+            mut handlers,
+            guard: module_guard,
+            hooks,
+            jobs,
+        } = parts;
+        let module_id = manifest.id().to_owned();
+
+        let mut operation_names = Vec::new();
+        for descriptor in manifest.operations() {
+            let name = descriptor.name().to_owned();
+            let handler = handlers.remove(&name).ok_or_else(|| {
+                HostError::coherence(&module_id, format!("operation {name:?} has no handler"))
+            })?;
+            let handler =
+                SchemaValidatingHandler::new(descriptor, schema_registry.clone(), handler);
+            core_builder.register_boxed(descriptor.clone(), Box::new(handler))?;
+            operation_descriptors.push(descriptor.clone());
+            operation_names.push(name);
+        }
+        if let Some(module_guard) = module_guard {
+            guard.add(operation_names, module_guard);
+        }
+        for (descriptor, hook) in hooks {
+            let entry = HostHook::new(module_id.clone(), descriptor, hook);
+            match entry.phase() {
+                HookPhase::Startup => startup.push(entry),
+                HookPhase::Shutdown => shutdown.push(entry),
+            }
+        }
+        for (kind, body) in jobs {
+            job_factories.insert(kind, body);
+        }
+        for descriptor in manifest.subscriptions() {
+            subscriptions.push((module_id.clone(), descriptor.clone()));
+        }
+        for binding in manifest.event_payload_bindings() {
+            event_payload_bindings.push((module_id.clone(), binding.clone()));
+        }
+    }
+
+    Ok(LoweredModules {
+        core_builder,
+        guard,
+        startup,
+        shutdown,
+        job_factories,
+        operation_descriptors,
+        subscriptions,
+        event_payload_bindings,
+    })
+}
+
+fn collect_event_payload_binding_map(
+    bindings: &[(String, EventPayloadBinding)],
+) -> BTreeMap<u16, String> {
+    bindings
+        .iter()
+        .map(|(_module, binding)| (binding.kind_raw(), binding.payload_schema_ref().to_owned()))
+        .collect()
+}
+
+fn validate_event_payload_bindings(
+    modules: &[HostModuleParts],
+    composition_schemas: &crate::composition::HostCompositionManifest,
+) -> Result<(), HostError> {
+    for parts in modules {
+        let module_id = parts.manifest.id();
+        for binding in parts.manifest.event_payload_bindings() {
+            let reference = binding.payload_schema_ref();
+            let matches = composition_schemas
+                .schemas()
+                .filter_map(|entry| {
+                    let schema = entry.descriptor();
+                    if schema.id().as_str() == reference
+                        && schema.role() == SchemaRole::EventPayload
+                    {
+                        Some(schema)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [_descriptor] => {}
+                _ => {
+                    return Err(HostError::EventPayloadBindingSchemaMissing {
+                        module: module_id.to_owned(),
+                        kind: binding.kind_raw(),
+                        reference: reference.to_owned(),
+                    });
+                }
+            }
+            require_schema_shape(
+                composition_schemas,
+                module_id,
+                None,
+                reference,
+                SchemaRole::EventPayload,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_subscription_payload_schemas(

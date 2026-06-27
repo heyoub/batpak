@@ -5,6 +5,7 @@ use syncbat::OperationDescriptor;
 
 use crate::composition::HostCompositionManifest;
 use crate::error::HostError;
+use crate::event_payload_binding::EventPayloadBinding;
 use crate::identity::{canonical_digest, Digest, InterfaceFingerprint};
 use crate::module::HostModuleParts;
 use crate::schema::{SchemaDescriptor, SchemaRole};
@@ -12,9 +13,9 @@ use crate::subscription::{BackpressurePolicy, SubscriptionDescriptor, SUBSCRIPTI
 use crate::SchemaShape;
 
 /// Domain separator for the client-visible interface fingerprint.
-const INTERFACE_DIGEST_DOMAIN: &str = "hostbat.interface.v3";
+const INTERFACE_DIGEST_DOMAIN: &str = "hostbat.interface.v4";
 /// Version of the canonical view folded into [`InterfaceFingerprint`].
-const INTERFACE_VIEW_SCHEMA_VERSION: u16 = 3;
+const INTERFACE_VIEW_SCHEMA_VERSION: u16 = 4;
 /// Wire protocol version exposed to generated clients for callable operations.
 const WIRE_PROTOCOL_VERSION: &str = "NETBAT/1";
 /// Batpak named-field MessagePack encoding contract exposed to generated
@@ -32,6 +33,7 @@ struct InterfaceView<'a> {
     subscription_wire_requires: &'a str,
     operations: Vec<InterfaceOperationView<'a>>,
     subscriptions: Vec<InterfaceSubscriptionView<'a>>,
+    event_payload_bindings: Vec<InterfaceEventPayloadBindingView<'a>>,
     exported_event_payloads: Vec<SchemaIdentityView<'a>>,
 }
 
@@ -53,6 +55,13 @@ struct InterfaceSubscriptionView<'a> {
     payload_schema: SchemaIdentityView<'a>,
     delivery: &'a str,
     backpressure: BackpressureView,
+}
+
+#[derive(Serialize)]
+struct InterfaceEventPayloadBindingView<'a> {
+    module_id: &'a str,
+    kind: u16,
+    payload_schema: SchemaIdentityView<'a>,
 }
 
 #[derive(Serialize)]
@@ -81,6 +90,7 @@ pub(crate) fn compute_interface_fingerprint(
 ) -> Result<InterfaceFingerprint, HostError> {
     let mut operations = Vec::new();
     let mut subscriptions = Vec::new();
+    let mut event_payload_bindings = Vec::new();
     for parts in modules {
         let module_id = parts.manifest.id();
         for descriptor in parts.manifest.operations() {
@@ -93,6 +103,13 @@ pub(crate) fn compute_interface_fingerprint(
                 composition_schemas,
             )?);
         }
+        for binding in parts.manifest.event_payload_bindings() {
+            event_payload_bindings.push(event_payload_binding_view(
+                module_id,
+                binding,
+                composition_schemas,
+            )?);
+        }
     }
     operations.sort_by(|a, b| {
         a.module_id
@@ -100,6 +117,11 @@ pub(crate) fn compute_interface_fingerprint(
             .then_with(|| a.name.cmp(b.name))
     });
     subscriptions.sort_by(|a, b| a.module_id.cmp(b.module_id).then_with(|| a.id.cmp(b.id)));
+    event_payload_bindings.sort_by(|a, b| {
+        a.module_id
+            .cmp(b.module_id)
+            .then_with(|| a.kind.cmp(&b.kind))
+    });
 
     let mut exported_event_payloads = composition_schemas
         .schemas()
@@ -122,9 +144,29 @@ pub(crate) fn compute_interface_fingerprint(
         subscription_wire_requires: SUBSCRIPTION_WIRE_REQUIRES,
         operations,
         subscriptions,
+        event_payload_bindings,
         exported_event_payloads,
     };
     canonical_digest(&view).map(InterfaceFingerprint)
+}
+
+fn event_payload_binding_view<'a>(
+    module_id: &'a str,
+    binding: &'a EventPayloadBinding,
+    composition_schemas: &'a HostCompositionManifest,
+) -> Result<InterfaceEventPayloadBindingView<'a>, HostError> {
+    let payload_schema = resolve_schema_ref(
+        module_id,
+        None,
+        binding.payload_schema_ref(),
+        SchemaRole::EventPayload,
+        composition_schemas,
+    )?;
+    Ok(InterfaceEventPayloadBindingView {
+        module_id,
+        kind: binding.kind_raw(),
+        payload_schema,
+    })
 }
 
 fn operation_view<'a>(

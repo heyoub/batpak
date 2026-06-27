@@ -198,19 +198,35 @@ rows:
 
   - id: S12-P3D-EVENT-PAYLOAD-BINDINGS
     title: Hostbat event payload schema bindings for mediated appends
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: hostbat
-    blocked_by:
-      - Packet D2 not started
+    witness_tests:
+      - crates/hostbat/src/event_payload_binding_tests.rs::binding_rejects_empty_schema_reference
+      - crates/hostbat/src/event_payload_binding_tests.rs::module_rejects_duplicate_binding_within_module
+      - crates/hostbat/src/event_payload_binding_tests.rs::module_digest_changes_when_event_payload_binding_is_added
+      - crates/hostbat/src/event_payload_binding_tests.rs::composition_rejects_duplicate_event_kind_across_modules
+      - crates/hostbat/src/event_payload_binding_tests.rs::composition_rejects_conflicting_bindings_for_same_kind
+      - crates/hostbat/src/event_payload_binding_tests.rs::host_build_rejects_binding_to_missing_schema
+      - crates/hostbat/src/event_payload_binding_tests.rs::interface_fingerprint_changes_when_event_payload_binding_is_added
+      - crates/hostbat/src/event_payload_binding_tests.rs::client_manifest_exports_event_payload_bindings
+    proof_commands:
+      - just cargo test -p hostbat event_payload_binding
+      - just cargo clippy -p hostbat --all-targets -- -D warnings
 
   - id: S12-P3D-APPEND-SCHEMA-VALIDATION
     title: Append-time schema validation on hostbat-mediated effect backends
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: hostbat
-    blocked_by:
-      - Packet D2 not started
+    witness_tests:
+      - crates/hostbat/src/append_validation_tests.rs::bound_payload_append_reaches_backend
+      - crates/hostbat/src/append_validation_tests.rs::unbound_event_kind_fails_before_backend
+      - crates/hostbat/src/append_validation_tests.rs::invalid_payload_fails_before_backend
+      - crates/hostbat/src/append_validation_tests.rs::raw_store_append_remains_unvalidated_by_hostbat
+    proof_commands:
+      - just cargo test -p hostbat append_validation
+      - just cargo clippy -p hostbat --all-targets -- -D warnings
 
   - id: S12-P3E-EFFECT-ROW-COMPLETE
     title: Real scoped handles and backends for projection reads, receipt emits, and host controls
