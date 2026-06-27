@@ -1,3 +1,16 @@
+# Historical Planning Artifact
+
+This document is archived. It is not a live source of release truth.
+
+Current gauntlet and release truth lives in:
+
+- `bpk-lib/traceability/releases/0.9.0.yaml`
+- `bpk-lib/traceability/invariants.yaml`
+- `bpk-lib/traceability/artifacts.yaml`
+- `bpk-lib/traceability/seam_registry.yaml`
+
+---
+
 # Gauntlet build-out issues (resolve after nap)
 
 ## From Phase 2 batch 1

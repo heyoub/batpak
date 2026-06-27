@@ -44,7 +44,8 @@
 //! DEFERRED breadth (logged, not built here): syn-derived symbol/call/type
 //! columns, crate-graph dep edges (lives in `triangulation.rs` today), on-disk
 //! format-version column (item 4), the YAML-authored fitness registry (item 3.4).
-//! See GAUNTLET_ISSUES.md.
+//! Deferred breadth is tracked on the release board (`traceability/releases/0.9.0.yaml`)
+//! and live seam truth (`traceability/seam_registry.yaml`).
 //!
 //! Anchors: INV-GAUNTLET-FOLD-FUSION (traceability/invariants.yaml),
 //! architecture_ir.rs (the on-disk IR sibling this complements).

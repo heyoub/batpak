@@ -56,6 +56,7 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
             format!("project layout contract requires `{path}`"),
         )?;
     }
+    check_root_markdown_allowlist(project_root)?;
 
     for path in [
         "Cargo.toml",
@@ -91,6 +92,50 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
             format!(
                 "template lockfile `{}` is generated cache; do not track it",
                 relative(repo_root, entry.path())
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn check_root_markdown_allowlist(project_root: &Path) -> Result<()> {
+    let allowed: BTreeSet<&str> = [
+        "AGENTS.md",
+        "BATTERIES.md",
+        "CHANGELOG.md",
+        "CIRCUITS.md",
+        "CODE_OF_CONDUCT.md",
+        "CONFORMANCE.md",
+        "CONTRIBUTING.md",
+        "EVENTS.md",
+        "FACTORY.md",
+        "INTEGRATION.md",
+        "INVARIANTS.md",
+        "MODEL.md",
+        "PROJECTIONS.md",
+        "README.md",
+        "RECEIPTS.md",
+        "REPLAY.md",
+        "SUPPORT.md",
+        "TERMINALS.md",
+    ]
+    .into_iter()
+    .collect();
+
+    for entry in fs::read_dir(project_root).context("read project root")? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        ensure(
+            allowed.contains(name),
+            format!(
+                "root markdown `{name}` is not canonical; move planning/debt docs under archive/legacy-docs or machine truth under bpk-lib/traceability"
             ),
         )?;
     }

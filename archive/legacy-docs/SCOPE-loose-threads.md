@@ -1,3 +1,19 @@
+# Historical Planning Artifact
+
+This document is archived. It is not a live source of release truth.
+
+Current release truth lives in:
+
+- `bpk-lib/traceability/releases/0.9.0.yaml`
+- `bpk-lib/traceability/mutation_debt.yaml`
+- `bpk-lib/traceability/seam_registry.yaml`
+- `bpk-lib/traceability/platform_qualification_matrix.yaml`
+
+Some status tables and sequencing notes below were accurate only at the time they
+were written. Treat this file as planning history, not current scope.
+
+---
+
 # SCOPE — Loose Threads to 0.9.0 (implementation-ready)
 
 > **Current status (post-E3, 2026-06):** See release ledger `traceability/releases/0.9.0.yaml`.

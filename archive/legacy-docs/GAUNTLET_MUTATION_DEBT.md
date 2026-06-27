@@ -1,3 +1,16 @@
+# Historical Planning Artifact
+
+This document is archived. It is not a live source of release truth.
+
+Current release and mutation truth lives in:
+
+- `bpk-lib/traceability/releases/0.9.0.yaml`
+- `bpk-lib/traceability/mutation_debt.yaml`
+- `bpk-lib/traceability/seam_registry.yaml`
+- `bpk-lib/traceability/platform_qualification_matrix.yaml`
+
+---
+
 # Gauntlet Mutation Debt
 
 Surviving / hard-to-kill mutants from cloud mutation runs, with the cure status of

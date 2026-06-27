@@ -39,7 +39,7 @@
 #                     cancelled fence), so the path is the in-temp artifact name,
 #                     not a checked-in blob.
 #
-# DEFERRED FORMATS (honest skip — see GAUNTLET_ISSUES.md):
+# DEFERRED FORMATS (honest skip — tracked here until typed *FutureVersion arms land):
 #   - segment (.fbat): its version field is msgpack-encoded inside the header
 #     (not a fixed byte offset), so the shared version-field forge does not
 #     apply, AND a future-version segment already fails closed via
