@@ -14,6 +14,7 @@ detector's own self-tests and error-message strings — never live attributes.
 
 **Cure type-first, never silence.** A lint firing on production code is the type system
 telling you it is underused. The fix is one of:
+
 - The right type already exists and just needs *wiring* (e.g. route a value through it), **or**
 - The right type exists and needs *one variant/field added* (e.g. a new typed error arm).
 A production `expect`/`unwrap`/`panic`/`as`-cast on an invariant means "encode the invariant
@@ -41,6 +42,7 @@ signal. (Do NOT "cure" this by converting the ~4.4k `.expect()` sites to `?` —
 ritual, not rigor: `.expect("what step failed")` gives BETTER diagnostics than a
 `?`-propagated error, changes no assertion's strictness, and the lint deliberately permits
 it.) So in **test code**:
+
 - SETUP / preconditions ("the store must open"): `.expect("clear message")` — bails with your
   message + the real error + the line. Never `.unwrap()` (generic, lint-denied).
 - The PROPERTY under test: assert the **EXACT** outcome, never just "it errored". For an error
@@ -61,6 +63,7 @@ an allow to make the compiler happy and trip the wire. Also tell them to run
 **4. Concurrency is SYNC-FIRST + `flume`, never an async runtime — and the launcher child
 window is async-signal-safe ONLY (no channels there).** Two rules that are easy to conflate
 but are about *different* `async`es:
+
 - **Library concurrency = `flume`, not tokio.** The `Store` API is synchronous and the
   workspace stays runtime-agnostic — **no `tokio`, no `async fn`/`-> impl Future` in the public
   surface** (INV-NO-TOKIO-PROD, INV-STORE-SYNC-ONLY; both currently weak-tier in
@@ -129,6 +132,7 @@ but are about *different* `async`es:
 - Public docs stay flat at root. The canonical reading surface is `README.md` plus the factory docs listed above; historical numbered docs are migration inputs until archived.
 - Tool-standard config paths live where their tools require them: `bpk-lib/.cargo/` and `bpk-lib/.config/` for the Cargo workspace; root `.devcontainer/`, `.github/`, and `.githooks/` for repo/CI entrypoints.
 - Tracked repo-wide agent doctrine may live under `.cursor/rules/`; `.cursor/plans` and other IDE session state (`.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) are local and not substrate source.
+- Optional local code graph via [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (`.cbmignore`, `.codebase-memory.json`). Index with **`mode: full`** — default moderate skips `tools/`, `bin/`, and `fixtures/` by directory name and would hide `bpk-lib/tools/` and `batpak-examples/src/bin/`. Graph output is navigation only; `traceability/` and `just inspect` remain machine law.
 
 ## Canonical Commands
 
