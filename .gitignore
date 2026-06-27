@@ -21,8 +21,11 @@
 .DS_Store
 .idea/
 .vscode/
+# Agent IDE state. Repo-wide doctrine may live under .cursor/rules/ (tracked).
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 .cursor/plans/
-.cursor
 # Local pnpm content store when install runs with a repo-local store-dir.
 .pnpm-store/
 # Most nested Cargo.lock files from path-dependency fixture crates are cache,

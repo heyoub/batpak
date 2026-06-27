@@ -110,6 +110,7 @@ but are about *different* `async`es:
   - `bpk-lib/crates/core/fixtures/`: downstream and cross-crate fixture packages
 - `bpk-lib/crates/macros/`, `bpk-lib/crates/macros-support/`, `bpk-lib/crates/bench-support/`: companion workspace crates
 - `bpk-lib/tools/integrity/`: traceability and structural detectors
+- `bpk-lib/tools/shared/`: thin `include!` shims into `crates/core/build_support/` so the same AST detectors run from `core/build.rs` and `batpak-integrity` without duplicating source
 - `bpk-lib/tools/xtask/`: canonical developer command surface
 - `README.md`: primary repo entrypoint
 - `01_FACTORY.md`, `02_MODEL.md`, `03_INVARIANTS.md`, `04_BATTERIES.md`, `05_TERMINALS.md`, `06_EVENTS.md`, `07_RECEIPTS.md`, `08_CIRCUITS.md`, `09_REPLAY.md`, `10_PROJECTIONS.md`, `11_INTEGRATION.md`, `12_CONFORMANCE.md`: canonical factory reading surface
@@ -122,11 +123,12 @@ but are about *different* `async`es:
 - Canonical source lives under `bpk-lib/crates/core/` and companion `bpk-lib/crates/*` members.
 - Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, and `bpk-lib/traceability/` (including the machine-law testing ledger `bpk-lib/traceability/testing_ledger.yaml`). The testing doctrine itself lives in `12_CONFORMANCE.md`.
 - Runnable demos live in the family-wide `bpk-lib/crates/batpak-examples/` crate (`src/bin/` binary targets); do not add root `examples/` or per-crate `examples/` folders.
+- The in-repo proof path is Rust-only (no npm workspace); CI and `just verify` do not run package installs.
 - Runtime/network crates (`syncbat`, `netbat`) must have integration `tests/`. Proc-macro/support crates may be tested through their owning consumer crates instead of carrying empty `tests/` folders.
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.
 - Public docs stay flat at root. The canonical reading surface is `README.md` plus the factory docs listed above; historical numbered docs are migration inputs until archived.
 - Tool-standard config paths live where their tools require them: `bpk-lib/.cargo/` and `bpk-lib/.config/` for the Cargo workspace; root `.devcontainer/`, `.github/`, and `.githooks/` for repo/CI entrypoints.
-- Agent/local workspace state (`.cursor/`, `.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) is not substrate source.
+- Tracked repo-wide agent doctrine may live under `.cursor/rules/`; `.cursor/plans` and other IDE session state (`.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) are local and not substrate source.
 
 ## Canonical Commands
 
