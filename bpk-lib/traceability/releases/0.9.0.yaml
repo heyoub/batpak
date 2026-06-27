@@ -566,7 +566,15 @@ rows:
 
   - id: BVISOR-PLATFORM-MATRIX
     title: Platform backend terminal statuses (PROVEN/FAIL-CLOSED/WAIVED per cell)
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: bvisor
-    notes: Blocking for 0.9.0; bvisor ships unpublished but must reach terminal matrix cells.
+    witness_gates:
+      - bvisor-platform-matrix
+    witness_tests:
+      - tools/integrity/src/platform_qualification_matrix_tests.rs::committed_matrix_mirrors_source
+      - crates/bvisor/tests/platform_matrix_refusal.rs::windows_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/tests/platform_matrix_refusal.rs::macos_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/tests/platform_matrix_refusal.rs::wasm_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/src/backend/linux/backend_impl_tests.rs::linux_unimplemented_kinds_refuse_at_plan
+      - crates/bvisor/tests/support_matrix_honesty.rs::every_platform_table_is_honest_about_load_bearing_cells

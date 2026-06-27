@@ -542,6 +542,18 @@ pub(crate) const GATES: &[Gate] = &[
         red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
         has_blocking_authority: true,
     },
+    //     `bvisor-support-matrix-honesty` (S3, step a): every platform's real
+    //     `support_matrix()` must be HONEST about its load-bearing cells (SCOPE §4).
+    //     Under `gauntlet_red_fixture` the red branch asserts the ILLEGAL outcome — that
+    //     a lying macOS Mount table PASSES the honesty predicate — so the red half FAILS.
+    Gate {
+        slug: "bvisor-support-matrix-honesty",
+        red_fixture_test: Some(
+            "crates/bvisor/tests/support_matrix_honesty.rs::red_fixture_lying_mount_must_escape",
+        ),
+        red_fixture_kind: Some(RedFixtureKind::ProductionFlip),
+        has_blocking_authority: true,
+    },
     Gate {
         slug: "bvisor-platform-matrix",
         red_fixture_test: Some(

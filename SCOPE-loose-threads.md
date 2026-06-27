@@ -15,8 +15,8 @@
 > | D9 repo-IR / structural | `just inspect` passes |
 > | D10 ReactLoopHandle | Superseded — `ReactLoopHandle` in watch_api.rs |
 > | D11 SimClock export | Superseded — exported from store/mod.rs |
-> | 0.8.3 audit carryover (C2/C3/R9/R17/R18) | Eight `STORE-*` / `NETBAT-*` rows on 0.9.0 board |
-> | BVISOR platform matrix | `BVISOR-PLATFORM-MATRIX` INCOMPLETE |
+> | 0.8.3 audit carryover (C2/C3/R9/R17/R18) | Eight `STORE-*` / `NETBAT-*` rows terminal on 0.9.0 board |
+> | BVISOR platform matrix | `BVISOR-PLATFORM-MATRIX` PROVEN |
 >
 > Read-only mapping pass. Hand this to Cursor. Every section is implementation-ready: scope, AL, files (`path:line`),
 > exact changes, **red + green fixtures**, gate wiring, sequencing, done-when. No source was edited producing this.
