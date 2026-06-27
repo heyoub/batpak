@@ -10,8 +10,50 @@
 //! YAML ledger, where the `dst_corpus_currency` gate re-graduates every row and
 //! checks both the digest AND the recovered outcome label.
 
+use super::fork_recovery;
+use super::import_recovery;
 use super::recovery::{run, RecoveryOutcome};
 use super::recovery_matrix::{self, Boundary, Classification, FaultMode};
+
+/// Corpus YAML label selecting which replay oracle owns a row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CorpusOracle {
+    /// Writer crash-recovery oracle (`recovery` / `recovery_matrix`).
+    StoreRecovery,
+    /// Fork-under-fault isolation oracle (`fork_recovery`).
+    ForkIsolation,
+    /// Import re-apply oracle (`import_recovery`).
+    ImportReapply,
+}
+
+impl CorpusOracle {
+    pub(crate) fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "StoreRecovery" => Some(Self::StoreRecovery),
+            "ForkIsolation" => Some(Self::ForkIsolation),
+            "ImportReapply" => Some(Self::ImportReapply),
+            _ => None,
+        }
+    }
+}
+
+/// Import-reapply corpus variant carried in the optional `boundary` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImportReapplyKind {
+    /// Crash mid-import, reopen, re-import with dedup.
+    UnderFault,
+    /// Same-store import terminates at the call-time frontier.
+    SameStoreCeiling,
+}
+
+pub(crate) const IMPORT_CEILING_BOUNDARY: &str = "SameStoreCeiling";
+
+fn parse_import_kind(boundary: Option<&str>) -> ImportReapplyKind {
+    match boundary {
+        Some(IMPORT_CEILING_BOUNDARY) => ImportReapplyKind::SameStoreCeiling,
+        _ => ImportReapplyKind::UnderFault,
+    }
+}
 
 /// Legal recovery classification stored in the corpus ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,11 +90,16 @@ impl CorpusOutcome {
 pub(crate) struct CorpusEntry {
     /// Seeded PRNG / SimFs schedule selector (`BATPAK_SEED` replay).
     pub seed: u64,
+    /// Replay oracle that owns this row.
+    pub oracle: CorpusOracle,
     /// Hostile-fs mode exercised (honest-disk crash, lying-disk fsync-drop, or
     /// crash-before-fsync at a durability boundary).
     pub fault_mode: FaultModeLabel,
     /// Durability boundary when `fault_mode` is crash-before-fsync; absent otherwise.
+    /// For `ImportReapply`, may carry `SameStoreCeiling` instead.
     pub boundary: Option<Boundary>,
+    /// Import-reapply variant when `oracle == ImportReapply`.
+    pub import_kind: Option<ImportReapplyKind>,
     /// Critical mutation seam this seed is intended to stress.
     pub seam_touched: String,
     /// Declared assurance level (`L3` / `L4`) for AL-graded consumers.
@@ -191,8 +238,28 @@ fn classify_honest_recovery(outcome: &RecoveryOutcome) -> CorpusOutcome {
 /// classification, for currency checks against the YAML identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CorpusReplay {
+    /// FNV-1a digest identity for this seed + oracle outcome.
     pub digest: u64,
+    /// Recovered-state classification recorded at graduation time.
     pub outcome: CorpusOutcome,
+}
+
+/// Doc-hidden public mirror of [`CorpusReplay`] for integration gates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CorpusReplayPublic {
+    /// FNV-1a digest identity for this seed + oracle outcome.
+    pub digest: u64,
+    /// Recovered classification label (`CommittedPrefix` / `RolledBack` / `CanonicalRefusal`).
+    pub outcome: &'static str,
+}
+
+impl From<CorpusReplay> for CorpusReplayPublic {
+    fn from(replay: CorpusReplay) -> Self {
+        Self {
+            digest: replay.digest,
+            outcome: replay.outcome.as_str(),
+        }
+    }
 }
 
 /// Replay one (seed, steps, mode, boundary) cell through the recovery oracle that
@@ -235,6 +302,55 @@ fn replay_cell(
     }
 }
 
+/// Replay one fork-isolation corpus cell through [`fork_recovery::run_seeded_fork_fault`].
+fn replay_fork_isolation_cell(seed: u64) -> Result<CorpusReplay, String> {
+    let outcome = fork_recovery::run_seeded_fork_fault(seed)?;
+    Ok(CorpusReplay {
+        digest: outcome.digest,
+        outcome: classification_to_outcome(outcome.classification),
+    })
+}
+
+/// Replay one import-reapply corpus cell through the import oracle that owns the
+/// variant (`UnderFault` vs `SameStoreCeiling`).
+fn replay_import_reapply_cell(seed: u64, kind: ImportReapplyKind) -> Result<CorpusReplay, String> {
+    match kind {
+        ImportReapplyKind::UnderFault => {
+            let outcome = import_recovery::run_seeded_import_fault(seed)?;
+            Ok(CorpusReplay {
+                digest: outcome.digest,
+                outcome: CorpusOutcome::CommittedPrefix,
+            })
+        }
+        ImportReapplyKind::SameStoreCeiling => {
+            let outcome = import_recovery::run_seeded_import_same_store_ceiling(seed)?;
+            Ok(CorpusReplay {
+                digest: outcome.digest,
+                outcome: CorpusOutcome::CommittedPrefix,
+            })
+        }
+    }
+}
+
+/// Route one corpus entry through the oracle declared on the row.
+fn replay_entry(entry: &CorpusEntry) -> Result<CorpusReplay, String> {
+    match entry.oracle {
+        CorpusOracle::StoreRecovery => {
+            replay_cell(entry.seed, entry.steps, entry.fault_mode, entry.boundary)
+        }
+        CorpusOracle::ForkIsolation => replay_fork_isolation_cell(entry.seed),
+        CorpusOracle::ImportReapply => {
+            let kind = entry.import_kind.ok_or_else(|| {
+                format!(
+                    "corpus replay (seed=0x{:X}): ImportReapply row missing import_kind",
+                    entry.seed
+                )
+            })?;
+            replay_import_reapply_cell(entry.seed, kind)
+        }
+    }
+}
+
 /// Replay one corpus entry through the recovery oracle that owns its fault mode
 /// and return the live digest plus recovered outcome (for currency checks against
 /// the YAML identity).
@@ -242,32 +358,44 @@ fn replay_cell(
 /// # Errors
 /// Seed-tagged violation string when recovery is illegal.
 pub(crate) fn replay_corpus_entry(entry: &CorpusEntry) -> Result<CorpusReplay, String> {
-    replay_cell(entry.seed, entry.steps, entry.fault_mode, entry.boundary)
+    replay_entry(entry)
 }
 
 /// Graduation criterion (#64-B): (a) deterministic across two runs, (b) names a
 /// target seam, (c) the legality oracle passes on both runs. Routes the seed
 /// through the oracle that owns `fault_mode` (honest-disk or recovery-matrix).
-pub(crate) fn check_graduation_for(
-    seed: u64,
-    steps: usize,
-    fault_mode: FaultModeLabel,
-    boundary: Option<Boundary>,
-    seam_touched: &str,
-    assurance_level: &str,
+fn check_graduation_for(
+    cell: GraduationCell<'_>,
 ) -> Result<GraduationCandidate, GraduationRefusal> {
-    if seam_touched.is_empty() {
-        return Err(GraduationRefusal::EmptySeam { seed });
+    if cell.seam_touched.is_empty() {
+        return Err(GraduationRefusal::EmptySeam { seed: cell.seed });
     }
 
-    let first = replay_cell(seed, steps, fault_mode, boundary)
-        .map_err(|reason| GraduationRefusal::IllegalRecovery { seed, reason })?;
-    let second = replay_cell(seed, steps, fault_mode, boundary)
-        .map_err(|reason| GraduationRefusal::IllegalRecovery { seed, reason })?;
+    let entry = CorpusEntry {
+        seed: cell.seed,
+        oracle: cell.oracle,
+        fault_mode: cell.fault_mode,
+        boundary: cell.boundary,
+        import_kind: cell.import_kind,
+        seam_touched: cell.seam_touched.to_owned(),
+        assurance_level: cell.assurance_level.to_owned(),
+        steps: cell.steps,
+        op_trace_digest: 0,
+        outcome: CorpusOutcome::CommittedPrefix,
+    };
+
+    let first = replay_entry(&entry).map_err(|reason| GraduationRefusal::IllegalRecovery {
+        seed: cell.seed,
+        reason,
+    })?;
+    let second = replay_entry(&entry).map_err(|reason| GraduationRefusal::IllegalRecovery {
+        seed: cell.seed,
+        reason,
+    })?;
 
     if first.digest != second.digest {
         return Err(GraduationRefusal::NonDeterministic {
-            seed,
+            seed: cell.seed,
             first: first.digest,
             second: second.digest,
         });
@@ -275,16 +403,23 @@ pub(crate) fn check_graduation_for(
 
     Ok(GraduationCandidate {
         entry: CorpusEntry {
-            seed,
-            fault_mode,
-            boundary,
-            seam_touched: seam_touched.to_owned(),
-            assurance_level: assurance_level.to_owned(),
-            steps,
             op_trace_digest: first.digest,
             outcome: first.outcome,
+            ..entry
         },
     })
+}
+
+#[derive(Clone, Copy)]
+struct GraduationCell<'a> {
+    seed: u64,
+    steps: usize,
+    fault_mode: FaultModeLabel,
+    boundary: Option<Boundary>,
+    seam_touched: &'a str,
+    assurance_level: &'a str,
+    oracle: CorpusOracle,
+    import_kind: Option<ImportReapplyKind>,
 }
 
 /// Replay one committed corpus row by identity fields and assert the live digest
@@ -298,7 +433,15 @@ pub fn verify_corpus_row(
     fault_mode: &str,
     expected_digest: u64,
 ) -> Result<(), String> {
-    verify_corpus_row_cell(seed, steps, fault_mode, None, None, expected_digest)
+    verify_corpus_row_cell(
+        seed,
+        steps,
+        fault_mode,
+        None,
+        None,
+        "StoreRecovery",
+        expected_digest,
+    )
 }
 
 /// Boundary/lying-disk-aware variant of [`verify_corpus_row`]: replays the cell
@@ -316,13 +459,28 @@ pub fn verify_corpus_row_cell(
     fault_mode: &str,
     boundary: Option<&str>,
     one_in: Option<u32>,
+    oracle: &str,
     expected_digest: u64,
 ) -> Result<(), String> {
+    let oracle = CorpusOracle::parse(oracle)
+        .ok_or_else(|| format!("corpus row (seed=0x{seed:X}): unknown oracle `{oracle}`"))?;
     let mode = FaultModeLabel::parse_with_rate(fault_mode, one_in).ok_or_else(|| {
         format!("corpus row (seed=0x{seed:X}): unknown fault_mode `{fault_mode}`")
     })?;
-    let boundary = parse_boundary(seed, boundary)?;
-    let live = replay_cell(seed, steps, mode, boundary)?;
+    let (boundary, import_kind) = parse_row_labels(seed, oracle, boundary)?;
+    let entry = CorpusEntry {
+        seed,
+        oracle,
+        fault_mode: mode,
+        boundary,
+        import_kind,
+        seam_touched: String::new(),
+        assurance_level: String::new(),
+        steps,
+        op_trace_digest: expected_digest,
+        outcome: CorpusOutcome::CommittedPrefix,
+    };
+    let live = replay_entry(&entry)?;
     if live.digest != expected_digest {
         return Err(format!(
             "corpus currency (seed=0x{seed:X}): expected digest 0x{expected_digest:X}, replay 0x{:X}",
@@ -330,6 +488,26 @@ pub fn verify_corpus_row_cell(
         ));
     }
     Ok(())
+}
+
+/// Replay one fork-isolation corpus cell and return its digest + outcome.
+///
+/// # Errors
+/// Seed-tagged violation when the fork oracle fails.
+pub fn run_fork_isolation_corpus_cell(seed: u64) -> Result<CorpusReplayPublic, String> {
+    replay_fork_isolation_cell(seed).map(Into::into)
+}
+
+/// Replay one import-reapply corpus cell and return its digest + outcome.
+///
+/// # Errors
+/// Seed-tagged violation when the import oracle fails.
+pub fn run_import_reapply_corpus_cell(
+    seed: u64,
+    boundary: Option<&str>,
+) -> Result<CorpusReplayPublic, String> {
+    let kind = parse_import_kind(boundary);
+    replay_import_reapply_cell(seed, kind).map(Into::into)
 }
 
 /// Parse an optional corpus boundary label into the typed [`Boundary`].
@@ -340,6 +518,35 @@ fn parse_boundary(seed: u64, boundary: Option<&str>) -> Result<Option<Boundary>,
                 .ok_or_else(|| format!("corpus row (seed=0x{seed:X}): unknown boundary `{raw}`"))
         })
         .transpose()
+}
+
+/// Parse boundary/import labels for one row, honoring the declared oracle.
+fn parse_row_labels(
+    seed: u64,
+    oracle: CorpusOracle,
+    boundary: Option<&str>,
+) -> Result<(Option<Boundary>, Option<ImportReapplyKind>), String> {
+    match oracle {
+        CorpusOracle::StoreRecovery => Ok((parse_boundary(seed, boundary)?, None)),
+        CorpusOracle::ForkIsolation => {
+            if boundary.is_some() {
+                return Err(format!(
+                    "corpus row (seed=0x{seed:X}): ForkIsolation must leave boundary null"
+                ));
+            }
+            Ok((None, None))
+        }
+        CorpusOracle::ImportReapply => {
+            let kind = parse_import_kind(boundary);
+            if let (ImportReapplyKind::UnderFault, Some(boundary)) = (kind, boundary) {
+                return Err(format!(
+                    "corpus row (seed=0x{seed:X}): unknown import boundary `{}`",
+                    boundary
+                ));
+            }
+            Ok((None, Some(kind)))
+        }
+    }
 }
 
 /// Graduate a single honest-disk candidate seed and return its op-trace digest.
@@ -366,6 +573,7 @@ pub fn graduate_corpus_seed(
         one_in: None,
         seam_touched,
         assurance_level,
+        oracle: "StoreRecovery",
     })
 }
 
@@ -387,6 +595,8 @@ pub struct GraduationRequest<'a> {
     pub seam_touched: &'a str,
     /// Assurance level at graduation (`L3`/`L4`).
     pub assurance_level: &'a str,
+    /// Replay oracle label (`StoreRecovery` / `ForkIsolation` / `ImportReapply`).
+    pub oracle: &'a str,
 }
 
 /// Boundary/lying-disk-aware graduation: drives the full graduation engine for an
@@ -397,21 +607,29 @@ pub struct GraduationRequest<'a> {
 /// Returns the refusal string when the labels are unknown or the seed fails
 /// determinism, legality, or names an empty seam.
 pub fn graduate_corpus_cell(req: &GraduationRequest<'_>) -> Result<u64, String> {
+    let oracle = CorpusOracle::parse(req.oracle).ok_or_else(|| {
+        format!(
+            "corpus row (seed=0x{:X}): unknown oracle `{}`",
+            req.seed, req.oracle
+        )
+    })?;
     let mode = FaultModeLabel::parse_with_rate(req.fault_mode, req.one_in).ok_or_else(|| {
         format!(
             "corpus row (seed=0x{:X}): unknown fault_mode `{}`",
             req.seed, req.fault_mode
         )
     })?;
-    let boundary = parse_boundary(req.seed, req.boundary)?;
-    let candidate = check_graduation_for(
-        req.seed,
-        req.steps,
-        mode,
+    let (boundary, import_kind) = parse_row_labels(req.seed, oracle, req.boundary)?;
+    let candidate = check_graduation_for(GraduationCell {
+        seed: req.seed,
+        steps: req.steps,
+        fault_mode: mode,
         boundary,
-        req.seam_touched,
-        req.assurance_level,
-    )
+        seam_touched: req.seam_touched,
+        assurance_level: req.assurance_level,
+        oracle,
+        import_kind,
+    })
     .map_err(|r| r.to_string())?;
     Ok(candidate.entry.op_trace_digest)
 }
@@ -430,6 +648,12 @@ pub fn graduate_corpus_cell(req: &GraduationRequest<'_>) -> Result<u64, String> 
 pub fn assert_corpus_rows_current(rows: &[CorpusRowDescriptor<'_>]) -> Result<(), String> {
     let mut entries = Vec::with_capacity(rows.len());
     for row in rows {
+        let oracle = CorpusOracle::parse(row.oracle).ok_or_else(|| {
+            format!(
+                "corpus row (seed=0x{:X}): unknown oracle `{}`",
+                row.seed, row.oracle
+            )
+        })?;
         let fault_mode =
             FaultModeLabel::parse_with_rate(row.fault_mode, row.one_in).ok_or_else(|| {
                 format!(
@@ -437,7 +661,7 @@ pub fn assert_corpus_rows_current(rows: &[CorpusRowDescriptor<'_>]) -> Result<()
                     row.seed, row.fault_mode
                 )
             })?;
-        let boundary = parse_boundary(row.seed, row.boundary)?;
+        let (boundary, import_kind) = parse_row_labels(row.seed, oracle, row.boundary)?;
         let outcome = CorpusOutcome::parse(row.outcome).ok_or_else(|| {
             format!(
                 "corpus row (seed=0x{:X}): unknown outcome `{}`",
@@ -452,8 +676,10 @@ pub fn assert_corpus_rows_current(rows: &[CorpusRowDescriptor<'_>]) -> Result<()
         })?;
         entries.push(CorpusEntry {
             seed: row.seed,
+            oracle,
             fault_mode,
             boundary,
+            import_kind,
             seam_touched: String::new(),
             assurance_level: String::new(),
             steps,
@@ -473,6 +699,8 @@ pub struct CorpusRowDescriptor<'a> {
     pub seed: u64,
     /// Op-plan length.
     pub steps: u32,
+    /// Replay oracle label.
+    pub oracle: &'a str,
     /// Fault-mode label (`HonestDiskCrash` / `LyingDiskFsyncDrop` / `CrashBeforeFsync`).
     pub fault_mode: &'a str,
     /// Durability boundary label, when `fault_mode == CrashBeforeFsync`.
@@ -494,14 +722,16 @@ pub(crate) fn check_graduation(
     seam_touched: &str,
     assurance_level: &str,
 ) -> Result<GraduationCandidate, GraduationRefusal> {
-    check_graduation_for(
+    check_graduation_for(GraduationCell {
         seed,
         steps,
-        FaultModeLabel::HonestDiskCrash,
-        None,
+        fault_mode: FaultModeLabel::HonestDiskCrash,
+        boundary: None,
         seam_touched,
         assurance_level,
-    )
+        oracle: CorpusOracle::StoreRecovery,
+        import_kind: None,
+    })
 }
 
 /// Sweep `seeds` (honest-disk) and emit graduation candidates for those that pass
@@ -557,153 +787,5 @@ pub(crate) fn assert_corpus_currency(entries: &[CorpusEntry]) -> Result<(), Stri
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fault_mode_label_round_trips_through_serialized_form() {
-        // The corpus YAML is the wire form; `as_str`/`parse` are its (de)serializer.
-        // A drift here would silently mis-route a corpus row to the wrong oracle.
-        for (label, expect) in [
-            (FaultModeLabel::HonestDiskCrash, "HonestDiskCrash"),
-            (
-                FaultModeLabel::LyingDiskFsyncDrop { one_in: 3 },
-                "LyingDiskFsyncDrop",
-            ),
-            (FaultModeLabel::CrashBeforeFsync, "CrashBeforeFsync"),
-        ] {
-            assert_eq!(label.as_str(), expect, "label must serialize stably");
-            // Bare-label parse drops the rate (carried in its own column); compare
-            // by serialized identity rather than struct equality.
-            let parsed = FaultModeLabel::parse(label.as_str()).expect("label must re-parse");
-            assert_eq!(
-                parsed.as_str(),
-                label.as_str(),
-                "parse∘as_str must be identity on the label"
-            );
-        }
-        assert!(
-            FaultModeLabel::parse("NotARealMode").is_none(),
-            "unknown labels must not parse"
-        );
-        // `parse_with_rate` re-attaches and clamps the lying-disk rate.
-        assert_eq!(
-            FaultModeLabel::parse_with_rate("LyingDiskFsyncDrop", Some(0)),
-            Some(FaultModeLabel::LyingDiskFsyncDrop { one_in: 1 }),
-            "a zero drop-rate must clamp to the legal floor of 1"
-        );
-        assert!(
-            FaultModeLabel::parse_with_rate("LyingDiskFsyncDrop", None).is_none(),
-            "a lying-disk row without a drop-rate column must be rejected"
-        );
-    }
-
-    #[test]
-    fn boundary_round_trips_through_serialized_form() {
-        for boundary in Boundary::ALL {
-            let parsed = Boundary::parse(boundary.as_str()).expect("boundary must re-parse");
-            assert_eq!(
-                parsed, boundary,
-                "parse∘as_str must be identity on every boundary"
-            );
-        }
-        assert!(
-            Boundary::parse("NotABoundary").is_none(),
-            "unknown boundary labels must not parse"
-        );
-    }
-
-    #[test]
-    fn graduation_refuses_nondeterministic_seed() -> Result<(), Box<dyn std::error::Error>> {
-        // Two different step counts from the same seed produce different digests;
-        // model non-determinism by comparing against a forged second run.
-        let seed = 0xC000_0001;
-        let steps = 48;
-        let first = run(seed, steps).map_err(std::io::Error::other)?;
-        let mismatched = run(seed, steps + 1).map_err(std::io::Error::other)?;
-        if first.digest == mismatched.digest {
-            return Err(std::io::Error::other(
-                "PROPERTY: distinct step counts should diverge for this fixture",
-            )
-            .into());
-        }
-        // Directly construct the refusal shape the gate relies on.
-        let refusal = GraduationRefusal::NonDeterministic {
-            seed,
-            first: first.digest,
-            second: mismatched.digest,
-        };
-        assert!(
-            refusal.to_string().contains("non-deterministic"),
-            "refusal must name non-determinism: {refusal}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn graduation_accepts_deterministic_legal_seed() -> Result<(), Box<dyn std::error::Error>> {
-        let candidate = check_graduation(0xC000_0002, 64, "writer-commit", "L4").map_err(|r| {
-            std::io::Error::other(format!("PROPERTY: legal seed must graduate: {r}"))
-        })?;
-        assert_eq!(candidate.entry.seam_touched, "writer-commit");
-        assert_eq!(candidate.entry.assurance_level, "L4");
-        let again = check_graduation(0xC000_0002, 64, "writer-commit", "L4").map_err(|r| {
-            std::io::Error::other(format!("PROPERTY: replay must re-graduate: {r}"))
-        })?;
-        assert_eq!(
-            candidate.entry.op_trace_digest, again.entry.op_trace_digest,
-            "PROPERTY: digest must be stable across graduation calls"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn committed_corpus_seed_digest_is_stable() -> Result<(), Box<dyn std::error::Error>> {
-        let candidate = check_graduation(48104590831, 96, "writer-commit", "L4").map_err(|r| {
-            std::io::Error::other(format!(
-                "PROPERTY: committed corpus seed must graduate: {r}"
-            ))
-        })?;
-        // Pin the graduated digest to the value committed in
-        // `traceability/dst_corpus.yaml`: a drift here means the recovery oracle
-        // changed and the corpus row must be re-graduated.
-        assert_eq!(
-            candidate.entry.op_trace_digest, 101_395_256_710_529_115,
-            "PROPERTY: committed corpus digest for seed 48104590831 / 96 steps must be stable"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn sweep_emits_candidates_for_legal_seeds() -> Result<(), Box<dyn std::error::Error>> {
-        let (ok, bad) = run_corpus_sweep(&[0xC000_0003, 0xC000_0004], 48, "writer-commit", "L4");
-        if ok.len() != 2 {
-            return Err(std::io::Error::other(format!(
-                "PROPERTY: expected two graduates, got {} ok and {} refused",
-                ok.len(),
-                bad.len()
-            ))
-            .into());
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn empty_seam_is_refused() -> Result<(), Box<dyn std::error::Error>> {
-        match check_graduation(0xC000_0005, 32, "", "L4") {
-            Ok(_) => {
-                return Err(
-                    std::io::Error::other("PROPERTY: empty seam_touched must be refused").into(),
-                )
-            }
-            Err(GraduationRefusal::EmptySeam { .. }) => {}
-            Err(other) => {
-                return Err(std::io::Error::other(format!(
-                    "PROPERTY: expected EmptySeam refusal, got {other}"
-                ))
-                .into())
-            }
-        }
-        Ok(())
-    }
-}
+#[path = "corpus_tests.rs"]
+mod tests;

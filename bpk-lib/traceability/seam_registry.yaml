@@ -121,13 +121,13 @@
 
 - slug: fork-isolation
   assurance_level: L4
-  dst_coverage: false
+  dst_coverage: true
   globs:
     - crates/core/src/store/file_classification.rs
     - crates/core/src/store/fork_report.rs
 
 - slug: import-reapply
   assurance_level: L4
-  dst_coverage: false
+  dst_coverage: true
   globs:
     - crates/core/src/store/import.rs

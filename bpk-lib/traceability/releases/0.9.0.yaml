@@ -74,15 +74,17 @@ rows:
 
   - id: STORE-DST-FORK-IMPORT-CORPUS
     title: Graduated corpus covers fork-isolation and import-reapply seams
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: batpak
     witness_seams:
       - fork-isolation
       - import-reapply
-    blocked_by:
-      - seam_registry.yaml dst_coverage false for fork/import
-    notes: Add corpus seeds + flip dst_coverage when replay proofs exist.
+    witness_tests:
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_covers_committed_rows
+    proof_commands:
+      - just inspect
 
   - id: STORE-68-EXAMPLE-DEDUP
     title: Full #68 example dedup (one canonical runnable per concept)
