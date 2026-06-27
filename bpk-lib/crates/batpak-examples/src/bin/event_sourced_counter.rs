@@ -19,7 +19,7 @@
 //! with `raw_projection_counter`, which uses the same derive on the
 //! raw-msgpack lane via `input = RawMsgpackInput`.
 //!
-//! Run: `cargo run --example event_sourced_counter`
+//! Run: `cargo run -p batpak-examples --bin event_sourced_counter`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};

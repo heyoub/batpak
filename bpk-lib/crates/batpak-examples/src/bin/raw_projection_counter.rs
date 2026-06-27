@@ -16,7 +16,7 @@
 //! in this repo consistently shows this pattern ahead of the JSON replay lane
 //! on the 1k-event counter-shaped workload.
 //!
-//! Run: `cargo run --example raw_projection_counter`
+//! Run: `cargo run -p batpak-examples --bin raw_projection_counter`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};

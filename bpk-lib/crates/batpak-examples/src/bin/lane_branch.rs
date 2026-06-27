@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** append on independent DAG lanes for the same entity.
 //!
-//! Run: `cargo run --example lane_branch`
+//! Run: `cargo run -p batpak-examples --bin lane_branch`
 
 use batpak::prelude::*;
 use batpak::store::{AppendOptions, AppendPositionHint, Store, StoreConfig};

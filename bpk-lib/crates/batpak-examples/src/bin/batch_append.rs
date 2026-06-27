@@ -6,7 +6,7 @@
 //! with intra-batch causation linking. All events become visible together or
 //! none are visible (crash-safe two-part commit protocol).
 //!
-//! Run: `cargo run --example batch_append`
+//! Run: `cargo run -p batpak-examples --bin batch_append`
 
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef};

@@ -128,7 +128,7 @@ pub(crate) fn check_readme_counts(repo_root: &Path, invariant_count: usize) -> R
 /// Anti-rot gate: every `crates/.../<file>.rs` path the COOKBOOK and the root README
 /// cite must resolve to a real source file. This is the lint that would have caught the
 /// 6 stale cookbook example paths (and the stale README `eight_jobs.rs` path) when
-/// `crates/core/examples/*` was hoisted to `crates/examples/examples/*`.
+/// `crates/core/examples/*` was hoisted to `crates/batpak-examples/src/bin/*`.
 pub(crate) fn check_cookbook_citations(repo_root: &Path) -> Result<()> {
     let root = project_root(repo_root);
     cookbook_citations_resolve(repo_root, &root.join("cookbook"), &root.join("README.md"))

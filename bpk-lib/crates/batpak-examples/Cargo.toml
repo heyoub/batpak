@@ -4,7 +4,7 @@ version = "0.8.3"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
-description = "Runnable usage examples for the batpak family (not published). Family-wide demo home — no per-crate examples/ folders."
+description = "Runnable usage demos for the batpak family (not published). Family-wide demo home — binaries under src/bin/, no per-crate examples/ folders."
 publish = false
 
 [lib]

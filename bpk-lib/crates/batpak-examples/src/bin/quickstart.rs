@@ -5,7 +5,7 @@
 //! For the full 0.8 store path (query, walk, verify, project, lifecycle), see
 //! `eight_jobs`.
 //!
-//! Run: `cargo run --example quickstart`
+//! Run: `cargo run -p batpak-examples --bin quickstart`
 
 use batpak::prelude::*;
 

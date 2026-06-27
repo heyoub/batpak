@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** re-apply events from a source store into a destination with import provenance.
 //!
-//! Run: `cargo run --example import_events`
+//! Run: `cargo run -p batpak-examples --bin import_events`
 
 use batpak::prelude::*;
 use batpak::store::{

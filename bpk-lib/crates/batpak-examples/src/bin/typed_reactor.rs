@@ -19,7 +19,7 @@
 //!   * User handler returns `Err` → `ReactorError::User` surfaced via
 //!     `handle.join()`; the `ReactionBatch` is dropped (no partial commits).
 //!
-//! Run: `cargo run --example typed_reactor`
+//! Run: `cargo run -p batpak-examples --bin typed_reactor`
 
 use batpak::event::{StoredEvent, TypedReactive};
 use batpak::prelude::*;

@@ -7,7 +7,7 @@ Problem: read store entries through a substrate boundary that callers can audit.
 Correct API: `Region::scope`, `Region::entity`, `Store::query`, typed query
 helpers when the payload type owns the kind.
 
-Minimal code is mirrored by `bpk-lib/crates/examples/examples/read_only.rs`.
+Minimal code is mirrored by `bpk-lib/crates/batpak-examples/src/bin/read_only.rs`.
 
 Wrong tempting move: add a public unbounded scan because it is shorter in the
 first caller.

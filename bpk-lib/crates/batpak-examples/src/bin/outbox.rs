@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** typed outbox staging for pre-commit item collection.
 //!
-//! Run: `cargo run --example outbox`
+//! Run: `cargo run -p batpak-examples --bin outbox`
 
 use batpak::prelude::*;
 

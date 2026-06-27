@@ -124,7 +124,7 @@ fn scan_family_cargo_versions(
         "bpk-lib/crates/bench-support",
         "bpk-lib/crates/bvisor",
         "bpk-lib/crates/core",
-        "bpk-lib/crates/examples",
+        "bpk-lib/crates/batpak-examples",
         "bpk-lib/crates/hostbat",
         "bpk-lib/crates/macros-support",
         "bpk-lib/crates/macros",

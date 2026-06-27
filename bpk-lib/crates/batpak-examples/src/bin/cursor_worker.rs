@@ -8,7 +8,7 @@
 //! the main thread waits on that observable state (`processed >= 3`) instead
 //! of sleeping before calling `stop_and_join`.
 //!
-//! Run: `cargo run --example cursor_worker`
+//! Run: `cargo run -p batpak-examples --bin cursor_worker`
 
 use batpak::prelude::*;
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig};

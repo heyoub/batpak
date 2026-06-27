@@ -14,7 +14,7 @@
 //! This is "making illegal states unrepresentable" — if it compiles, the
 //! state machine is correct by construction.
 //!
-//! Run: `cargo run --example dungeon_typestate`
+//! Run: `cargo run -p batpak-examples --bin dungeon_typestate`
 
 use batpak::prelude::*;
 use batpak::typestate::Transition;

@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** read-only store reopening after graceful close.
 //!
-//! Run: `cargo run --example read_only`
+//! Run: `cargo run -p batpak-examples --bin read_only`
 
 use batpak::prelude::*;
 

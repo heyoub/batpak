@@ -53,7 +53,7 @@ fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
             || rel.starts_with("tests/")
             || rel.starts_with("crates/core/benches/")
             || rel.starts_with("benches/")
-            || rel.starts_with("crates/examples/examples/")
+            || rel.starts_with("crates/batpak-examples/src/bin/")
             || rel.starts_with("examples/")
             || rel.starts_with("traceability/")
             || rel.starts_with("cookbook/");
@@ -127,7 +127,7 @@ fn check_no_legacy_topology_or_replay_names(
             || rel == "12_CONFORMANCE.md"
             || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
-            || rel.starts_with("crates/examples/examples/")
+            || rel.starts_with("crates/batpak-examples/src/bin/")
             || rel.starts_with("examples/")
             || rel.starts_with("crates/core/tests/")
             || rel.starts_with("tests/");

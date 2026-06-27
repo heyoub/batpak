@@ -177,10 +177,10 @@ fn readme_count_mismatch_is_rejected() {
 
 #[test]
 fn extract_crate_rs_paths_finds_files_and_truncates_fn_suffix() {
-    let md = "see `crates/examples/examples/quickstart.rs` and \
+    let md = "see `crates/batpak-examples/src/bin/quickstart.rs` and \
               crates/core/tests/foo.rs::some_test plus crates/core/src/lib.rs.";
     let paths = extract_crate_rs_paths(md);
-    assert!(paths.contains("crates/examples/examples/quickstart.rs"));
+    assert!(paths.contains("crates/batpak-examples/src/bin/quickstart.rs"));
     assert!(
         paths.contains("crates/core/tests/foo.rs"),
         "path::fn truncates to the file"
@@ -203,15 +203,15 @@ fn cookbook_citation_to_a_missing_file_is_rejected() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&cookbook).expect("create temp cookbook");
     // A real file the cookbook also cites (proves the gate is not vacuously failing).
-    std::fs::create_dir_all(root.join("crates/examples/examples")).expect("tree");
+    std::fs::create_dir_all(root.join("crates/batpak-examples/src/bin")).expect("tree");
     std::fs::write(
-        root.join("crates/examples/examples/real.rs"),
+        root.join("crates/batpak-examples/src/bin/real.rs"),
         "fn main() {}\n",
     )
     .expect("real");
     std::fs::write(
         cookbook.join("100_X.md"),
-        "uses `crates/examples/examples/real.rs` and `crates/examples/examples/ghost.rs`.",
+        "uses `crates/batpak-examples/src/bin/real.rs` and `crates/batpak-examples/src/bin/ghost.rs`.",
     )
     .expect("write md");
 

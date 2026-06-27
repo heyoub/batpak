@@ -14,7 +14,7 @@
 //! For the intentionally hand-written raw counterpoint (showing the pattern
 //! the derive replaces), see `raw_projection_counter.rs`.
 //!
-//! Run: `cargo run --example raw_projection_counter_derived`
+//! Run: `cargo run -p batpak-examples --bin raw_projection_counter_derived`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};

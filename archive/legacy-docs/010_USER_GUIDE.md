@@ -9,7 +9,7 @@ invariants.
 
 ```bash
 cargo xtask setup --install-tools
-cargo run --example quickstart
+cargo run -p batpak-examples --bin quickstart
 ```
 
 If you just want the crate:

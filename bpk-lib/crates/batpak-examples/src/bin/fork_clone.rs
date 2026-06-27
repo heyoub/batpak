@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** fork a store into an isolated directory and reopen it read-only.
 //!
-//! Run: `cargo run --example fork_clone`
+//! Run: `cargo run -p batpak-examples --bin fork_clone`
 
 use batpak::prelude::*;
 use batpak::store::{ForkOptions, ReadOnly, Store, StoreConfig};

@@ -20,82 +20,82 @@
 concepts:
   # --- Typed append + the store path. ---
   - concept_id: typed-append-basic
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: basic typed append + retrieval (thin release-smoke entry; see store-path-full)
   - concept_id: store-path-full
-    canonical_example: crates/examples/examples/eight_jobs.rs
+    canonical_example: crates/batpak-examples/src/bin/eight_jobs.rs
     summary: canonical full 0.8 store path including lifecycle open observation
   - concept_id: batch-append-atomic
-    canonical_example: crates/examples/examples/batch_append.rs
+    canonical_example: crates/batpak-examples/src/bin/batch_append.rs
     summary: atomic batch commit with causation refs
   - concept_id: event-sourced-derive
-    canonical_example: crates/examples/examples/event_sourced_counter.rs
+    canonical_example: crates/batpak-examples/src/bin/event_sourced_counter.rs
     summary: "#[derive(EventSourced)] with JsonValueInput replay lane"
 
   # --- Durability / gates / receipts (max two `example_family: durability` runnables). ---
   - concept_id: durability-gate-append
-    canonical_example: crates/examples/examples/append_with_gate.rs
+    canonical_example: crates/batpak-examples/src/bin/append_with_gate.rs
     example_family: durability
     summary: append-time gates, explicit durable waits, and visibility-fence publish
   - concept_id: caller-defined-gate-pipeline
-    canonical_example: crates/examples/examples/caller_defined_gates.rs
+    canonical_example: crates/batpak-examples/src/bin/caller_defined_gates.rs
     summary: gate-based propose -> evaluate -> commit pipeline with caller-defined gates
   - concept_id: signed-receipts
-    canonical_example: crates/examples/examples/signed_receipts.rs
+    canonical_example: crates/batpak-examples/src/bin/signed_receipts.rs
     example_family: durability
     summary: opt-in receipt signing + append/denial receipt verification
   - concept_id: idempotent-append
-    canonical_example: crates/examples/examples/idempotent_pass.rs
+    canonical_example: crates/batpak-examples/src/bin/idempotent_pass.rs
     summary: a re-runnable, durable idempotent append pass
 
   # --- Delivery: cursors, subscriptions, reactors. ---
   - concept_id: subscriptions-vs-cursors
-    canonical_example: crates/examples/examples/chat_room.rs
+    canonical_example: crates/batpak-examples/src/bin/chat_room.rs
     summary: push subscriptions (lossy) vs pull cursors (ordered replay)
   - concept_id: cursor-worker
-    canonical_example: crates/examples/examples/cursor_worker.rs
+    canonical_example: crates/batpak-examples/src/bin/cursor_worker.rs
     summary: cursor-based worker with ordered pull replay and observable progress
   - concept_id: typed-reactor
-    canonical_example: crates/examples/examples/typed_reactor.rs
+    canonical_example: crates/batpak-examples/src/bin/typed_reactor.rs
     summary: react_loop_typed with matched-kind decode failure handling
   - concept_id: typed-reactor-multi
-    canonical_example: crates/examples/examples/typed_reactor_multi.rs
+    canonical_example: crates/batpak-examples/src/bin/typed_reactor_multi.rs
     summary: react_loop_multi with multi-event dispatch
 
   # --- Projection lanes. ---
   - concept_id: raw-projection-handwritten
-    canonical_example: crates/examples/examples/raw_projection_counter.rs
+    canonical_example: crates/batpak-examples/src/bin/raw_projection_counter.rs
     summary: hand-written raw projection replay for performance-sensitive folds
   - concept_id: raw-projection-derived
-    canonical_example: crates/examples/examples/raw_projection_counter_derived.rs
+    canonical_example: crates/batpak-examples/src/bin/raw_projection_counter_derived.rs
     summary: derive with input = RawMsgpackInput (raw msgpack replay lane)
 
   # --- Typestate / lifecycle / locking. ---
   - concept_id: typestate-state-machine
-    canonical_example: crates/examples/examples/dungeon_typestate.rs
+    canonical_example: crates/batpak-examples/src/bin/dungeon_typestate.rs
     summary: compile-time state machine enforcement via typestate transitions
   - concept_id: read-only-reopen
-    canonical_example: crates/examples/examples/read_only.rs
+    canonical_example: crates/batpak-examples/src/bin/read_only.rs
     summary: read-only store reopening after graceful close
   - concept_id: store-lock-helper
-    canonical_example: crates/examples/examples/store_lock_helper.rs
+    canonical_example: crates/batpak-examples/src/bin/store_lock_helper.rs
     summary: cooperative store directory lock helper
 
   # --- Pipelines / outbox / async submit. ---
   - concept_id: outbox-staging
-    canonical_example: crates/examples/examples/outbox.rs
+    canonical_example: crates/batpak-examples/src/bin/outbox.rs
     summary: typed outbox staging for pre-commit item collection
   - concept_id: submit-pipeline
-    canonical_example: crates/examples/examples/submit_pipeline.rs
+    canonical_example: crates/batpak-examples/src/bin/submit_pipeline.rs
     summary: async submit ticket with blocking wait
 
   # --- 0.9.0 headline features (fork / import / lane). ---
   - concept_id: fork-clone
-    canonical_example: crates/examples/examples/fork_clone.rs
+    canonical_example: crates/batpak-examples/src/bin/fork_clone.rs
     summary: fork a store into an isolated directory and reopen it read-only
   - concept_id: import-events
-    canonical_example: crates/examples/examples/import_events.rs
+    canonical_example: crates/batpak-examples/src/bin/import_events.rs
     summary: re-apply events from a source store into a destination with import provenance
   - concept_id: lane-branch
-    canonical_example: crates/examples/examples/lane_branch.rs
+    canonical_example: crates/batpak-examples/src/bin/lane_branch.rs
     summary: append on independent DAG lanes for the same entity

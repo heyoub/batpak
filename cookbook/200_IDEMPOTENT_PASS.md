@@ -10,7 +10,7 @@ store has cold-started.
 Correct API: `IdempotencyKey::for_operation`, `AppendOptions::with_idempotency`,
 `StoreConfig::with_idempotency_retention`.
 
-Minimal code is mirrored by `bpk-lib/crates/examples/examples/idempotent_pass.rs`.
+Minimal code is mirrored by `bpk-lib/crates/batpak-examples/src/bin/idempotent_pass.rs`.
 
 Derive the key from OPERATION IDENTITY, not payload bytes:
 `IdempotencyKey::for_operation("account.credit", &[account, request_id])` hashes

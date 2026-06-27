@@ -261,7 +261,7 @@ fn check_concept_canonical(repo_root: &Path, artifacts: &[ArtifactRecord]) -> Re
     let registered: BTreeSet<&str> = examples_artifact
         .paths
         .iter()
-        .filter(|path| path.starts_with("crates/examples/examples/") && path.ends_with(".rs"))
+        .filter(|path| path.starts_with("crates/batpak-examples/src/bin/") && path.ends_with(".rs"))
         .map(String::as_str)
         .collect();
     check_concept_canonical_over(repo_root, &catalog, &registered)
@@ -370,7 +370,7 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     let declared = examples_artifact
         .paths
         .iter()
-        .filter(|path| path.starts_with("crates/examples/examples/") && path.ends_with(".rs"))
+        .filter(|path| path.starts_with("crates/batpak-examples/src/bin/") && path.ends_with(".rs"))
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut actual = BTreeSet::new();
@@ -386,7 +386,7 @@ fn check_examples_artifact_complete(repo_root: &Path, artifacts: &[ArtifactRecor
     ensure(
         declared == actual,
         format!(
-            "ART-EXAMPLES must list every runnable crates/examples/examples/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
+            "ART-EXAMPLES must list every runnable crates/batpak-examples/src/bin/*.rs file exactly once; declared={declared:?}, actual={actual:?}"
         ),
     )
 }
@@ -497,16 +497,16 @@ mod concept_canonical_tests {
             r#"
 concepts:
   - concept_id: dup
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: a
   - concept_id: dup
-    canonical_example: crates/examples/examples/eight_jobs.rs
+    canonical_example: crates/batpak-examples/src/bin/eight_jobs.rs
     summary: b
 "#,
         );
         let registered: BTreeSet<&str> = [
-            "crates/examples/examples/quickstart.rs",
-            "crates/examples/examples/eight_jobs.rs",
+            "crates/batpak-examples/src/bin/quickstart.rs",
+            "crates/batpak-examples/src/bin/eight_jobs.rs",
         ]
         .into_iter()
         .collect();
@@ -523,14 +523,14 @@ concepts:
             r#"
 concepts:
   - concept_id: a
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: a
   - concept_id: b
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: b
 "#,
         );
-        let registered: BTreeSet<&str> = ["crates/examples/examples/quickstart.rs"]
+        let registered: BTreeSet<&str> = ["crates/batpak-examples/src/bin/quickstart.rs"]
             .into_iter()
             .collect();
         let err = check_concept_canonical_over(&repo, &c, &registered)
@@ -546,7 +546,7 @@ concepts:
             r#"
 concepts:
   - concept_id: a
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: a
 "#,
         );
@@ -565,13 +565,13 @@ concepts:
             r#"
 concepts:
   - concept_id: a
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     summary: a
 "#,
         );
         let registered: BTreeSet<&str> = [
-            "crates/examples/examples/quickstart.rs",
-            "crates/examples/examples/eight_jobs.rs",
+            "crates/batpak-examples/src/bin/quickstart.rs",
+            "crates/batpak-examples/src/bin/eight_jobs.rs",
         ]
         .into_iter()
         .collect();
@@ -588,11 +588,11 @@ concepts:
             r#"
 concepts:
   - concept_id: a
-    canonical_example: crates/examples/examples/does_not_exist.rs
+    canonical_example: crates/batpak-examples/src/bin/does_not_exist.rs
     summary: a
 "#,
         );
-        let registered: BTreeSet<&str> = ["crates/examples/examples/does_not_exist.rs"]
+        let registered: BTreeSet<&str> = ["crates/batpak-examples/src/bin/does_not_exist.rs"]
             .into_iter()
             .collect();
         let err = check_concept_canonical_over(&repo, &c, &registered)
@@ -608,23 +608,23 @@ concepts:
             r#"
 concepts:
   - concept_id: a
-    canonical_example: crates/examples/examples/append_with_gate.rs
+    canonical_example: crates/batpak-examples/src/bin/append_with_gate.rs
     example_family: durability
     summary: a
   - concept_id: b
-    canonical_example: crates/examples/examples/signed_receipts.rs
+    canonical_example: crates/batpak-examples/src/bin/signed_receipts.rs
     example_family: durability
     summary: b
   - concept_id: c
-    canonical_example: crates/examples/examples/quickstart.rs
+    canonical_example: crates/batpak-examples/src/bin/quickstart.rs
     example_family: durability
     summary: c
 "#,
         );
         let registered: BTreeSet<&str> = [
-            "crates/examples/examples/append_with_gate.rs",
-            "crates/examples/examples/signed_receipts.rs",
-            "crates/examples/examples/quickstart.rs",
+            "crates/batpak-examples/src/bin/append_with_gate.rs",
+            "crates/batpak-examples/src/bin/signed_receipts.rs",
+            "crates/batpak-examples/src/bin/quickstart.rs",
         ]
         .into_iter()
         .collect();

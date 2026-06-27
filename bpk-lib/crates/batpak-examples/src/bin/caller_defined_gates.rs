@@ -3,7 +3,7 @@
 //! **Teaches:** gate-based propose -> evaluate -> commit pipeline with
 //! `CommitMetadata::validate`.
 //!
-//! Run: `cargo run --example caller_defined_gates`
+//! Run: `cargo run -p batpak-examples --bin caller_defined_gates`
 
 use batpak::guard::{Denial, Gate, GateSet};
 use batpak::id::EntityIdType;
