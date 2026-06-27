@@ -509,6 +509,18 @@ impl SubscriptionSessionFactory for CompositeSubscriptionRuntime {
                 )?;
                 Ok(Box::new(session))
             }
+            SubscriptionRoute::ReceiptStream { .. } => {
+                let session = super::receipt_stream::ReceiptStreamSession::open_from_registry(
+                    self.store.clone(),
+                    &self.registry,
+                    self.config,
+                    subscription_id,
+                    resume_cursor,
+                    client_window,
+                    control_rx,
+                )?;
+                Ok(Box::new(session))
+            }
         }
     }
 }

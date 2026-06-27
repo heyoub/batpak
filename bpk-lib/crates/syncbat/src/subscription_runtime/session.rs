@@ -211,6 +211,22 @@ pub fn slow_consumer_error(
     }
 }
 
+/// Build a receipt-decode terminal error for an active session.
+#[must_use]
+pub fn receipt_decode_failed_error(
+    subscription_id: &str,
+    last_delivered_cursor: Option<RuntimeCursor>,
+    last_acked_cursor: Option<RuntimeCursor>,
+) -> SessionError {
+    SessionError {
+        subscription_id: Some(subscription_id.to_owned()),
+        code: stream_code::RECEIPT_DECODE_FAILED,
+        last_delivered_cursor,
+        last_acked_cursor,
+        message: b"syncbat receipt event payload decode failed".to_vec(),
+    }
+}
+
 /// Build a client-cancel terminal end frame.
 #[must_use]
 pub fn client_cancel_end(

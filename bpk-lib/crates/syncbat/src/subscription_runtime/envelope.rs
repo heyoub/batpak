@@ -240,3 +240,104 @@ impl OperationStatusStreamEnvelopeV1 {
             .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
     }
 }
+
+/// Canonical receipt-stream payload envelope encoded with `batpak::canonical::to_bytes`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReceiptStreamEnvelopeV1 {
+    /// Envelope schema version.
+    pub schema_version: u32,
+    /// Globally unique subscription id.
+    pub subscription_id: String,
+    /// Route-declared receipt kind filter.
+    pub receipt_kind: String,
+    /// Stable operation descriptor name from the receipt envelope.
+    pub descriptor_name: String,
+    /// Stable outcome class from the receipt envelope.
+    pub outcome_class: String,
+    /// Committed event id.
+    pub event_id: u128,
+    /// Correlation id from the event header.
+    pub correlation_id: u128,
+    /// Optional causation id from the event header.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub causation_id: Option<u128>,
+    /// Entity coordinate string.
+    pub entity: String,
+    /// Scope coordinate string.
+    pub scope: String,
+    /// Payload schema version stamped on the event header.
+    pub payload_version: u16,
+    /// Event header timestamp in microseconds.
+    pub timestamp_us: i64,
+    /// HLC wall milliseconds from the index entry.
+    pub hlc_wall_ms: u64,
+    /// Commit-order sequence for the receipt event.
+    pub global_sequence: u64,
+    /// Payload content hash from the event header.
+    pub content_hash: [u8; 32],
+    /// Previous hash from the entity hash chain, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_hash: Option<[u8; 32]>,
+    /// Event hash from the entity hash chain, if present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_hash: Option<[u8; 32]>,
+    /// Optional inner receipt schema ref declared by the route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inner_receipt_schema_ref: Option<String>,
+    /// Blake3 digest of the canonical receipt envelope bytes.
+    pub receipt_hash: [u8; 32],
+    /// Canonical bytes of the typed [`crate::ReceiptEnvelope`].
+    pub receipt: Vec<u8>,
+}
+
+impl ReceiptStreamEnvelopeV1 {
+    /// Build and canonically encode an envelope for one committed receipt event.
+    ///
+    /// # Errors
+    /// [`SubscriptionRuntimeError::Store`], [`SubscriptionRuntimeError::EnvelopeEncoding`],
+    /// or receipt payload decode failures surfaced as envelope encoding errors.
+    pub fn encode_for_entry(
+        store: &batpak::store::Store<batpak::store::Open>,
+        subscription_id: &str,
+        route_receipt_kind: &str,
+        entry: &IndexEntry,
+        inner_receipt_schema_ref: Option<&str>,
+    ) -> Result<(Self, Vec<u8>), SubscriptionRuntimeError> {
+        let stored = store.read_raw(entry.event_id())?;
+        let receipt: crate::ReceiptEnvelope = batpak::canonical::from_bytes(&stored.event.payload)
+            .map_err(|error| {
+                SubscriptionRuntimeError::EnvelopeEncoding(format!(
+                    "receipt payload decode failed: {error}"
+                ))
+            })?;
+        let receipt_bytes = batpak::canonical::to_bytes(&receipt)
+            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
+        let receipt_hash = blake3_state_hash(&receipt_bytes);
+        let (prev_hash, event_hash) = hash_chain_parts(stored.event.hash_chain.as_ref());
+        let envelope = Self {
+            schema_version: 1,
+            subscription_id: subscription_id.to_owned(),
+            receipt_kind: route_receipt_kind.to_owned(),
+            descriptor_name: receipt.descriptor_name.clone(),
+            outcome_class: receipt.outcome.class().to_owned(),
+            event_id: entry.event_id().as_u128(),
+            correlation_id: entry.correlation_id(),
+            causation_id: entry.causation_id(),
+            entity: stored.coordinate.entity().to_owned(),
+            scope: stored.coordinate.scope().to_owned(),
+            payload_version: stored.event.header.payload_version,
+            timestamp_us: stored.event.header.timestamp_us,
+            hlc_wall_ms: entry.wall_ms(),
+            global_sequence: entry.global_sequence(),
+            content_hash: stored.event.header.content_hash,
+            prev_hash,
+            event_hash,
+            inner_receipt_schema_ref: inner_receipt_schema_ref.map(str::to_owned),
+            receipt_hash,
+            receipt: receipt_bytes,
+        };
+        let envelope_bytes = batpak::canonical::to_bytes(&envelope)
+            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
+        Ok((envelope, envelope_bytes))
+    }
+}

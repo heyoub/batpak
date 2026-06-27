@@ -15,6 +15,8 @@ pub mod stream_code {
     pub const MALFORMED_STREAM_FRAME: &str = "malformed_stream_frame";
     /// Client cancelled the subscription stream.
     pub const CLIENT_CANCELLED: &str = "client_cancelled";
+    /// A persisted syncbat receipt event failed canonical decode.
+    pub const RECEIPT_DECODE_FAILED: &str = "receipt_decode_failed";
 }
 
 /// Error returned by the subscription runtime engine.

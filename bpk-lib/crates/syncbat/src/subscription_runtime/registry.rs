@@ -4,6 +4,7 @@ use std::sync::Arc;
 use batpak::coordinate::EventCategory;
 use batpak::store::Freshness;
 
+use crate::operation::MAX_DESCRIPTOR_REF_BYTES;
 use crate::operation_name::OperationName;
 use crate::operation_status_sink::operation_status_entity;
 
@@ -27,6 +28,21 @@ pub struct OperationStatusRouteBinding {
     pub inner_status_schema_ref: Option<String>,
     /// Freshness mode for status materialization.
     pub freshness: Freshness,
+    /// Optional route-specific queue clamp.
+    pub backpressure_capacity: Option<usize>,
+}
+
+/// Binding fields needed to open a receipt-stream subscription session.
+#[derive(Clone, Debug)]
+pub struct ReceiptStreamRouteBinding {
+    /// Globally unique subscription id.
+    pub subscription_id: String,
+    /// Route-declared receipt kind filter.
+    pub receipt_kind: String,
+    /// Wire payload schema ref token.
+    pub wire_payload_schema_ref: String,
+    /// Optional inner receipt schema ref.
+    pub inner_receipt_schema_ref: Option<String>,
     /// Optional route-specific queue clamp.
     pub backpressure_capacity: Option<usize>,
 }
@@ -100,6 +116,17 @@ pub enum SubscriptionRoute {
         /// Optional route-specific queue clamp.
         backpressure_capacity: Option<usize>,
     },
+    /// Receipt-kind filtered append stream.
+    ReceiptStream {
+        /// Receipt kind whose durable append events form the stream.
+        receipt_kind: String,
+        /// Wire `payload_schema_ref` token for stream envelopes.
+        wire_payload_schema_ref: String,
+        /// Optional inner receipt schema ref carried inside the envelope.
+        inner_receipt_schema_ref: Option<String>,
+        /// Optional route-specific queue clamp.
+        backpressure_capacity: Option<usize>,
+    },
 }
 
 impl SubscriptionRoute {
@@ -108,7 +135,9 @@ impl SubscriptionRoute {
     pub fn event_category(&self) -> Option<u8> {
         match self {
             Self::EventCategory { category, .. } => Some(*category),
-            Self::Projection { .. } | Self::OperationStatus { .. } => None,
+            Self::Projection { .. } | Self::OperationStatus { .. } | Self::ReceiptStream { .. } => {
+                None
+            }
         }
     }
 
@@ -134,7 +163,7 @@ impl SubscriptionRoute {
                 backpressure_capacity: *backpressure_capacity,
             }),
             Self::EventCategory { .. } => None,
-            Self::OperationStatus { .. } => None,
+            Self::OperationStatus { .. } | Self::ReceiptStream { .. } => None,
         }
     }
 
@@ -161,7 +190,34 @@ impl SubscriptionRoute {
                 freshness: freshness.clone(),
                 backpressure_capacity: *backpressure_capacity,
             }),
-            Self::EventCategory { .. } | Self::Projection { .. } => None,
+            Self::EventCategory { .. } | Self::Projection { .. } | Self::ReceiptStream { .. } => {
+                None
+            }
+        }
+    }
+
+    /// Build a receipt-stream route binding for session open.
+    #[must_use]
+    pub fn receipt_stream_binding(
+        &self,
+        subscription_id: &str,
+    ) -> Option<ReceiptStreamRouteBinding> {
+        match self {
+            Self::ReceiptStream {
+                receipt_kind,
+                wire_payload_schema_ref,
+                inner_receipt_schema_ref,
+                backpressure_capacity,
+            } => Some(ReceiptStreamRouteBinding {
+                subscription_id: subscription_id.to_owned(),
+                receipt_kind: receipt_kind.clone(),
+                wire_payload_schema_ref: wire_payload_schema_ref.clone(),
+                inner_receipt_schema_ref: inner_receipt_schema_ref.clone(),
+                backpressure_capacity: *backpressure_capacity,
+            }),
+            Self::EventCategory { .. } | Self::Projection { .. } | Self::OperationStatus { .. } => {
+                None
+            }
         }
     }
 }
@@ -218,12 +274,35 @@ impl std::fmt::Debug for SubscriptionRoute {
                 .field("freshness", freshness)
                 .field("backpressure_capacity", backpressure_capacity)
                 .finish(),
+            Self::ReceiptStream {
+                receipt_kind,
+                wire_payload_schema_ref,
+                inner_receipt_schema_ref,
+                backpressure_capacity,
+            } => f
+                .debug_struct("ReceiptStream")
+                .field("receipt_kind", receipt_kind)
+                .field("wire_payload_schema_ref", wire_payload_schema_ref)
+                .field("inner_receipt_schema_ref", inner_receipt_schema_ref)
+                .field("backpressure_capacity", backpressure_capacity)
+                .finish(),
         }
     }
 }
 
 impl PartialEq for SubscriptionRoute {
     fn eq(&self, other: &Self) -> bool {
+        self.event_category_eq(other)
+            || self.projection_eq(other)
+            || self.operation_status_eq(other)
+            || self.receipt_stream_eq(other)
+    }
+}
+
+impl Eq for SubscriptionRoute {}
+
+impl SubscriptionRoute {
+    fn event_category_eq(&self, other: &Self) -> bool {
         match (self, other) {
             (
                 Self::EventCategory {
@@ -244,6 +323,12 @@ impl PartialEq for SubscriptionRoute {
                     && left_inner == right_inner
                     && left_cap == right_cap
             }
+            _ => false,
+        }
+    }
+
+    fn projection_eq(&self, other: &Self) -> bool {
+        match (self, other) {
             (
                 Self::Projection {
                     projection_id: left_projection,
@@ -271,6 +356,12 @@ impl PartialEq for SubscriptionRoute {
                     && freshness_same(left_freshness, right_freshness)
                     && left_cap == right_cap
             }
+            _ => false,
+        }
+    }
+
+    fn operation_status_eq(&self, other: &Self) -> bool {
+        match (self, other) {
             (
                 Self::OperationStatus {
                     operation: left_operation,
@@ -299,9 +390,32 @@ impl PartialEq for SubscriptionRoute {
             _ => false,
         }
     }
-}
 
-impl Eq for SubscriptionRoute {}
+    fn receipt_stream_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::ReceiptStream {
+                    receipt_kind: left_kind,
+                    wire_payload_schema_ref: left_wire,
+                    inner_receipt_schema_ref: left_inner,
+                    backpressure_capacity: left_cap,
+                },
+                Self::ReceiptStream {
+                    receipt_kind: right_kind,
+                    wire_payload_schema_ref: right_wire,
+                    inner_receipt_schema_ref: right_inner,
+                    backpressure_capacity: right_cap,
+                },
+            ) => {
+                left_kind == right_kind
+                    && left_wire == right_wire
+                    && left_inner == right_inner
+                    && left_cap == right_cap
+            }
+            _ => false,
+        }
+    }
+}
 
 fn freshness_same(left: &Freshness, right: &Freshness) -> bool {
     match (left, right) {
@@ -444,7 +558,53 @@ fn validate_route(route: &SubscriptionRoute) -> Result<(), SubscriptionRuntimeEr
             }
             Ok(())
         }
+        SubscriptionRoute::ReceiptStream {
+            receipt_kind,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+            ..
+        } => {
+            validate_receipt_kind(receipt_kind)?;
+            if wire_payload_schema_ref.is_empty() {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "wire payload schema ref is empty",
+                });
+            }
+            if matches!(backpressure_capacity, Some(0)) {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "backpressure capacity is zero",
+                });
+            }
+            Ok(())
+        }
     }
+}
+
+fn validate_receipt_kind(value: &str) -> Result<(), SubscriptionRuntimeError> {
+    if value.is_empty() {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "receipt kind is empty",
+        });
+    }
+    if value.len() > MAX_DESCRIPTOR_REF_BYTES {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "receipt kind is too long",
+        });
+    }
+    if value
+        .bytes()
+        .any(|byte| !matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+    {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "receipt kind has invalid characters",
+        });
+    }
+    if value.starts_with('.') || value.ends_with('.') || value.contains("..") {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "receipt kind has invalid dot placement",
+        });
+    }
+    Ok(())
 }
 
 /// Validate subscription id grammar:

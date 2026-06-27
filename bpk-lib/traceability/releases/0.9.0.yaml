@@ -287,11 +287,30 @@ rows:
 
   - id: S12-SUBSCRIPTION-RUNTIME-RECEIPTS
     title: Subscription runtime receipt stream delivery
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: netbat
-    blocked_by:
-      - operation-status runtime is PROVEN; receipt source runtime is not implemented yet
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_unknown_route_rejected_at_open
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_replay_delivers_matching_receipt_kind
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_live_delivery_after_core_checkout_receipt
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_wrong_receipt_kind_skipped
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_malformed_receipt_payload_emits_receipt_decode_failed
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_watermark_after_filtered_stream_catches_up
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cancel_emits_client_cancelled
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_disconnect_without_cancel_ends_session
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_tcp_maps_receipt_sub_event_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat --lib subscription_runtime_receipt
+      - just cargo test -p netbat stream_runtime_receipt
 
   - id: S12-SUBSCRIPTION-RUNTIME-ENTITY
     title: Subscription runtime entity stream delivery
