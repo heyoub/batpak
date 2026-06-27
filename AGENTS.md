@@ -132,7 +132,7 @@ but are about *different* `async`es:
 - Public docs stay flat at root. The canonical reading surface is `README.md` plus the factory docs listed above; historical numbered docs are migration inputs until archived.
 - Tool-standard config paths live where their tools require them: `bpk-lib/.cargo/` and `bpk-lib/.config/` for the Cargo workspace; root `.devcontainer/`, `.github/`, and `.githooks/` for repo/CI entrypoints.
 - Tracked repo-wide agent doctrine may live under `.cursor/rules/`; `.cursor/plans` and other IDE session state (`.claude/`, `.codex/`, `.agents/`, `bpk-lib/target/`) are local and not substrate source.
-- Optional local code graph via [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (`.cbmignore`, `.codebase-memory.json`). Index with **`mode: full`** — default moderate skips `tools/`, `bin/`, and `fixtures/` by directory name and would hide `bpk-lib/tools/` and `batpak-examples/src/bin/`. Graph output is navigation only; `traceability/` and `just inspect` remain machine law.
+- Optional local code graph via [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) (`.cbmignore`, `.codebase-memory.json`). Index with **`mode: full`** — default moderate skips `tools/`, `bin/`, and `fixtures/` by directory name and would hide `bpk-lib/tools/` and `batpak-examples/src/bin/`. Graph output is navigation only; `traceability/` and `just inspect` remain machine law. CLI uses **`project`** (from `list_projects`), not `repo_path`, for queries: `search_graph` takes **`name_pattern`**; `search_code` takes **`pattern`**; `delete_project` takes **`project`**.
 
 ## Canonical Commands
 
