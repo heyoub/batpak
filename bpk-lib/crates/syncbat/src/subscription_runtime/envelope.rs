@@ -107,3 +107,79 @@ fn hash_chain_parts(chain: Option<&HashChain>) -> (Option<[u8; 32]>, Option<[u8;
         .map(|chain| (Some(chain.prev_hash), Some(chain.event_hash)))
         .unwrap_or((None, None))
 }
+
+/// Canonical projection-stream payload envelope encoded with `batpak::canonical::to_bytes`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProjectionStreamEnvelopeV1 {
+    /// Envelope schema version.
+    pub schema_version: u32,
+    /// Globally unique subscription id.
+    pub subscription_id: String,
+    /// Route-declared projection id.
+    pub projection_id: String,
+    /// Entity coordinate watched by the projection.
+    pub entity: String,
+    /// Entity generation at which the state was materialized.
+    pub entity_generation: u64,
+    /// Freshness mode used to materialize the projection.
+    pub freshness: String,
+    /// Optional inner projection schema ref declared by the route.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inner_projection_schema_ref: Option<String>,
+    /// Blake3 digest of the canonical projection state bytes.
+    pub state_hash: [u8; 32],
+    /// Canonical bytes of the typed projection state.
+    pub state: Vec<u8>,
+}
+
+impl ProjectionStreamEnvelopeV1 {
+    /// Build and canonically encode an envelope for one projection update.
+    ///
+    /// # Errors
+    /// [`SubscriptionRuntimeError::EnvelopeEncoding`].
+    pub fn encode<T>(
+        subscription_id: &str,
+        projection_id: &str,
+        entity: &str,
+        entity_generation: u64,
+        freshness: &batpak::store::Freshness,
+        inner_projection_schema_ref: Option<&str>,
+        state: &T,
+    ) -> Result<Vec<u8>, SubscriptionRuntimeError>
+    where
+        T: serde::Serialize,
+    {
+        let state_bytes = batpak::canonical::to_bytes(state)
+            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
+        let state_hash = blake3_state_hash(&state_bytes);
+        let envelope = Self {
+            schema_version: 1,
+            subscription_id: subscription_id.to_owned(),
+            projection_id: projection_id.to_owned(),
+            entity: entity.to_owned(),
+            entity_generation,
+            freshness: freshness_label(freshness)?,
+            inner_projection_schema_ref: inner_projection_schema_ref.map(str::to_owned),
+            state_hash,
+            state: state_bytes,
+        };
+        batpak::canonical::to_bytes(&envelope)
+            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
+    }
+}
+
+fn blake3_state_hash(state_bytes: &[u8]) -> [u8; 32] {
+    *blake3::hash(state_bytes).as_bytes()
+}
+
+fn freshness_label(
+    freshness: &batpak::store::Freshness,
+) -> Result<String, SubscriptionRuntimeError> {
+    match freshness {
+        batpak::store::Freshness::Consistent => Ok("consistent".to_owned()),
+        batpak::store::Freshness::MaybeStale { .. } => Ok("maybe_stale".to_owned()),
+        _ => Err(SubscriptionRuntimeError::EnvelopeEncoding(
+            "unsupported projection freshness mode".to_owned(),
+        )),
+    }
+}

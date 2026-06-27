@@ -11,9 +11,16 @@ use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 
+use batpak::store::ReplayInput;
 use batpak_testkit::prelude::*;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+#[test]
+fn replay_input_is_public_for_projection_watchers() {
+    fn assert_replay_input<T: ReplayInput>() {}
+    assert_replay_input::<JsonValueInput>();
+}
 
 #[test]
 fn watch_projection_emits_on_new_events() {

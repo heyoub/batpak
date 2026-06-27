@@ -59,6 +59,8 @@ pub enum SubscriptionRuntimeError {
     Store(batpak::store::StoreError),
     /// Canonical envelope encoding failed.
     EnvelopeEncoding(String),
+    /// Runtime worker thread could not be started or stopped unexpectedly.
+    Worker(String),
     /// Cumulative ACK referenced an unknown delivery index or cursor.
     AckInvalid {
         /// Stable reason token.
@@ -82,6 +84,7 @@ impl fmt::Display for SubscriptionRuntimeError {
             Self::CursorMismatch { reason } => write!(f, "cursor mismatch: {reason}"),
             Self::Store(error) => write!(f, "store error: {error}"),
             Self::EnvelopeEncoding(detail) => write!(f, "envelope encoding failed: {detail}"),
+            Self::Worker(detail) => write!(f, "subscription worker failed: {detail}"),
             Self::AckInvalid { reason } => write!(f, "ack invalid: {reason}"),
         }
     }

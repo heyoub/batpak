@@ -235,11 +235,27 @@ rows:
 
   - id: S12-SUBSCRIPTION-RUNTIME-PROJECTIONS
     title: Subscription runtime projection stream delivery
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: netbat
-    blocked_by:
-      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_catch_up_snapshot_and_live_update
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_watermark_for_empty_fold
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cancel_emits_client_cancelled_end
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_unknown_route_rejected_at_open
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_resume_honors_cursor_after_entity_generation
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_tcp_maps_snapshot_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat subscription_runtime_projection
+      - just cargo test -p netbat stream_runtime_projection
 
   - id: S12-SUBSCRIPTION-RUNTIME-OPERATION-STATUS
     title: Subscription runtime operation-status stream delivery
@@ -247,7 +263,7 @@ rows:
     terminal_required: true
     surface: netbat
     blocked_by:
-      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+      - event runtime is PROVEN; operation-status depends on projection runtime plus OperationStatusView
 
   - id: S12-SUBSCRIPTION-RUNTIME-RECEIPTS
     title: Subscription runtime receipt stream delivery
@@ -255,7 +271,7 @@ rows:
     terminal_required: true
     surface: netbat
     blocked_by:
-      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+      - event runtime is PROVEN; receipt source runtime is not implemented yet
 
   - id: S12-SUBSCRIPTION-RUNTIME-ENTITY
     title: Subscription runtime entity stream delivery
@@ -263,7 +279,7 @@ rows:
     terminal_required: true
     surface: netbat
     blocked_by:
-      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+      - event runtime is PROVEN; entity source runtime is not implemented yet
 
   # ── Cloud-only proof batch ───────────────────────────────────────────────────
 
