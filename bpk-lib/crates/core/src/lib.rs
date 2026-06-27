@@ -142,8 +142,9 @@ pub mod __fuzz;
 #[doc(hidden)]
 pub mod __sim {
     pub use crate::store::sim::corpus::{
-        assert_corpus_rows_current, graduate_corpus_cell, graduate_corpus_seed, verify_corpus_row,
-        verify_corpus_row_cell, CorpusRowDescriptor, GraduationRequest,
+        assert_corpus_rows_current, graduate_corpus_cell, graduate_corpus_seed,
+        run_fork_isolation_corpus_cell, run_import_reapply_corpus_cell, verify_corpus_row,
+        verify_corpus_row_cell, CorpusReplayPublic, CorpusRowDescriptor, GraduationRequest,
     };
     pub use crate::store::sim::fork_hostile::{
         run_fork_dest_equals_source, run_fork_enospc_mid_copy, run_fork_stale_dest,

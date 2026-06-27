@@ -181,3 +181,105 @@ pub fn run_seeded_import_fault_public(seed: u64) -> Result<ImportFaultOutcomePub
 pub fn import_fault_replay_seed(default: u64) -> u64 {
     super::seed_from_env(default)
 }
+
+/// Outcome of one seeded same-store import ceiling scenario (no runaway re-import).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ImportCeilingOutcome {
+    pub(crate) digest: u64,
+    pub(crate) imported: u64,
+    pub(crate) replay_deduplicated: u64,
+    pub(crate) final_event_count: usize,
+}
+
+fn ceiling_outcome_digest(
+    seed: u64,
+    imported: u64,
+    replay_deduplicated: u64,
+    final_event_count: usize,
+) -> u64 {
+    let mut d = fold(FNV_OFFSET, seed);
+    d = fold(d, imported);
+    d = fold(d, replay_deduplicated);
+    fold(d, final_event_count as u64)
+}
+
+/// Same-store import must terminate at the call-time frontier even under segment
+/// rotation — it must never re-import its own freshly-appended output.
+pub(crate) fn run_seeded_import_same_store_ceiling(
+    seed: u64,
+) -> Result<ImportCeilingOutcome, String> {
+    let dir = tempfile::tempdir().map_err(|e| format!("seed=0x{seed:X}: tmpdir: {e}"))?;
+    let count = 8 + (seed % 17) as usize;
+    let chunk = 1 + (seed % 4) as usize;
+    let blob_len = 200 + (seed % 80) as usize;
+    let entity = "entity:import:rotate";
+    let kind = EventKind::custom(0xF, 0x77);
+    let blob = "x".repeat(blob_len);
+
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_segment_max_bytes(512)
+            .with_sync_every_n_events(1)
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .map_err(|e| format!("seed=0x{seed:X}: open store: {e}"))?;
+    let coord = Coordinate::new(entity, "scope:import")
+        .map_err(|e| format!("seed=0x{seed:X}: coord: {e}"))?;
+    for i in 0..count {
+        drop(
+            store
+                .append(&coord, kind, &serde_json::json!({ "i": i, "blob": blob }))
+                .map_err(|e| format!("seed=0x{seed:X}: append: {e}"))?,
+        );
+    }
+    let before = store.stats().event_count;
+
+    let options = ImportOptions::new("self-rotate")
+        .map_err(|e| format!("seed=0x{seed:X}: options: {e}"))?
+        .with_chunk_size(chunk);
+    let report = store
+        .import_events(&store, &ImportSelector::all(), &options)
+        .map_err(|e| format!("seed=0x{seed:X}: first import: {e}"))?;
+    if report.imported != count as u64 {
+        return Err(format!(
+            "seed=0x{seed:X}: imported {} != expected {count}",
+            report.imported
+        ));
+    }
+    let after_first = store.stats().event_count;
+    if after_first != before + count {
+        return Err(format!(
+            "seed=0x{seed:X}: event count after first import {after_first} != {before} + {count}"
+        ));
+    }
+
+    let replay = store
+        .import_events(&store, &ImportSelector::all(), &options)
+        .map_err(|e| format!("seed=0x{seed:X}: replay import: {e}"))?;
+    if replay.imported != 0 {
+        return Err(format!(
+            "seed=0x{seed:X}: replay imported {} events (expected 0)",
+            replay.imported
+        ));
+    }
+    if replay.deduplicated != count as u64 {
+        return Err(format!(
+            "seed=0x{seed:X}: replay deduplicated {} != {count}",
+            replay.deduplicated
+        ));
+    }
+    let final_count = store.stats().event_count;
+    if final_count != after_first {
+        return Err(format!(
+            "seed=0x{seed:X}: final event count {final_count} != {after_first}"
+        ));
+    }
+
+    Ok(ImportCeilingOutcome {
+        digest: ceiling_outcome_digest(seed, report.imported, replay.deduplicated, final_count),
+        imported: report.imported,
+        replay_deduplicated: replay.deduplicated,
+        final_event_count: final_count,
+    })
+}
