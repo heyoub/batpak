@@ -212,11 +212,26 @@ rows:
 
   - id: S12-SUBSCRIPTION-RUNTIME-EVENTS
     title: Subscription runtime event stream delivery (NETBAT/2 serving)
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: netbat
-    blocked_by:
-      - Packet C not started; frame layer only (NETBAT-2-STREAM-FRAMES)
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_replay_live_ack_and_watermark
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cancel_emits_client_cancelled_end
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_resume_honors_cursor_after_global_sequence
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_registry_rejects_duplicate_subscription_id
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_registry_rejects_invalid_event_route
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_open_rejects_zero_runtime_limits
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_tcp_maps_replay_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat subscription_runtime_event
+      - just cargo test -p netbat stream_runtime_event
 
   - id: S12-SUBSCRIPTION-RUNTIME-PROJECTIONS
     title: Subscription runtime projection stream delivery

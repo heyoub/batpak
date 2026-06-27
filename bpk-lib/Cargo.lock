@@ -964,6 +964,7 @@ name = "netbat"
 version = "0.8.3"
 dependencies = [
  "criterion",
+ "flume",
  "proptest",
  "syncbat",
  "tracing",
@@ -1514,9 +1515,12 @@ version = "0.8.3"
 dependencies = [
  "batpak",
  "batpak-macros",
+ "blake3",
  "criterion",
+ "flume",
  "proptest",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "trybuild",

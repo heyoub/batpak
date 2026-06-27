@@ -117,6 +117,7 @@ pub use import::{
     provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance, ImportReport,
     ImportSelector, SourceNamespace, IMPORT_PROVENANCE_SCHEMA_VERSION,
 };
+pub use index::IndexEntry;
 /// Test-only global-allocator shims. Re-exported so dedicated single-test
 /// binaries can install one as `#[global_allocator]`. Compiled out unless the
 /// `alloc-count` or `fault-alloc` feature is enabled.

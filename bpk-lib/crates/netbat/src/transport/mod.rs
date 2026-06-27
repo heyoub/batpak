@@ -3,6 +3,7 @@ mod frame;
 mod hex;
 mod limits;
 mod stream_frame;
+mod stream_tcp;
 mod tcp;
 
 pub use error::NetbatError;
@@ -22,6 +23,10 @@ pub use stream_frame::{
     decode_stream_line, encode_stream_frame, ClientWindow, CursorBytes, DeliveryIndex, MaybeCursor,
     PayloadSchemaRef, StreamFrame, StreamReasonCode, SubAckFrame, SubCancelFrame, SubEndFrame,
     SubErrFrame, SubEventFrame, SubWatermarkFrame, SubscribeFrame, SubscriptionToken,
+};
+pub use stream_tcp::{
+    serve_subscription_stream, serve_tcp_subscription_listener, TcpSubscriptionServeStats,
+    TcpSubscriptionServerConfig,
 };
 pub use tcp::{
     serve_stream, serve_tcp_listener, ShutdownHandle, TcpServeStats, TcpServerConfig,

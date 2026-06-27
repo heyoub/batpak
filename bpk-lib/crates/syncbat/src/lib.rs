@@ -76,6 +76,7 @@ pub mod register;
 pub mod register_store;
 pub mod store_effect;
 pub mod store_sink;
+pub mod subscription_runtime;
 
 pub use admission::{AdmissionDecision, AdmissionGuard};
 pub use batpak_macros::operation;
@@ -107,6 +108,13 @@ pub use register_store::{
 };
 pub use store_effect::StoreEffectBackend;
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
+pub use subscription_runtime::{
+    EventStreamCursorV1, EventStreamEnvelopeV1, EventStreamSession, EventSubscriptionRuntime,
+    SessionControl, SessionDelivery, SessionEnd, SessionError, SessionEventDelivery, SessionPoll,
+    SessionWatermarkDelivery, SubscriptionId, SubscriptionRegistry, SubscriptionRoute,
+    SubscriptionRuntimeConfig, SubscriptionRuntimeError, SubscriptionSession,
+    SubscriptionSessionFactory, SubscriptionStore, CURSOR_V1_LEN, SOURCE_KIND_EVENT_CATEGORY,
+};
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.
 pub const SYNCBAT_EXTENSION_NAMESPACE: &str = "syncbat";

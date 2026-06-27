@@ -340,13 +340,16 @@ fn serve_connection_loop<S: Read + Write>(
     Ok(())
 }
 
-fn apply_timeouts(stream: &TcpStream, timeouts: IoTimeouts) -> Result<(), NetbatError> {
+pub(crate) fn apply_timeouts(stream: &TcpStream, timeouts: IoTimeouts) -> Result<(), NetbatError> {
     stream.set_read_timeout(timeouts.read)?;
     stream.set_write_timeout(timeouts.write)?;
     Ok(())
 }
 
-fn read_line<R: Read>(reader: &mut R, max_line_bytes: usize) -> Result<Vec<u8>, NetbatError> {
+pub(crate) fn read_line<R: Read>(
+    reader: &mut R,
+    max_line_bytes: usize,
+) -> Result<Vec<u8>, NetbatError> {
     let mut line = Vec::new();
     let mut byte = [0_u8; 1];
 
