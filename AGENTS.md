@@ -105,7 +105,7 @@ but are about *different* `async`es:
     - Flat files: `append.rs` (`BatchAppendItem`, `CausationRef`, `AppendOptions`), `gate.rs` (`DurabilityGate`), `lifecycle.rs`, `hidden_ranges.rs`, `config.rs`, `error.rs`, `stats.rs`, `reactor_typed.rs`
     - `fault.rs` — fault injection (dangerous-test-hooks feature)
   - `bpk-lib/crates/core/tests/`: integration, property, compile-fail, and perf-gate tests
-  - `bpk-lib/crates/core/examples/`: runnable usage patterns
+  - `bpk-lib/crates/batpak-examples/src/bin/`: runnable usage demos
   - `bpk-lib/crates/core/benches/`: Criterion surfaces
   - `bpk-lib/crates/core/fixtures/`: downstream and cross-crate fixture packages
 - `bpk-lib/crates/macros/`, `bpk-lib/crates/macros-support/`, `bpk-lib/crates/bench-support/`: companion workspace crates
@@ -121,7 +121,7 @@ but are about *different* `async`es:
 
 - Canonical source lives under `bpk-lib/crates/core/` and companion `bpk-lib/crates/*` members.
 - Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, and `bpk-lib/traceability/` (including the machine-law testing ledger `bpk-lib/traceability/testing_ledger.yaml`). The testing doctrine itself lives in `12_CONFORMANCE.md`.
-- Package-owned Cargo examples live under the owning crate. Today that means `bpk-lib/crates/core/examples/` for `batpak`; do not add root `examples/`.
+- Runnable demos live in the family-wide `bpk-lib/crates/batpak-examples/` crate (`src/bin/` binary targets); do not add root `examples/` or per-crate `examples/` folders.
 - Runtime/network crates (`syncbat`, `netbat`) must have integration `tests/`. Proc-macro/support crates may be tested through their owning consumer crates instead of carrying empty `tests/` folders.
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.
 - Public docs stay flat at root. The canonical reading surface is `README.md` plus the factory docs listed above; historical numbered docs are migration inputs until archived.

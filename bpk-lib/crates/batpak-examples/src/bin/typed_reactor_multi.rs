@@ -22,7 +22,7 @@
 //!     hard correctness signal, never a silent skip.
 //!   * User handler errors surface as `ReactorError::User`.
 //!
-//! Run: `cargo run --example typed_reactor_multi`
+//! Run: `cargo run -p batpak-examples --bin typed_reactor_multi`
 
 use batpak::event::StoredEvent;
 use batpak::prelude::*;

@@ -110,24 +110,22 @@ fn wait_for_read_only_open_after_release(
 
 fn helper_command(data_dir: &Path, ready: &Path, release: &Path) -> Command {
     let current = std::env::current_exe().expect("current test binary");
-    let example_name = format!("store_lock_helper{}", std::env::consts::EXE_SUFFIX);
-    let example = current
+    let helper_name = format!("store_lock_helper{}", std::env::consts::EXE_SUFFIX);
+    let helper = current
         .parent()
-        .and_then(Path::parent)
         .expect("test binary lives under target profile")
-        .join("examples")
-        .join(example_name);
-    let mut cmd = if example.exists() {
-        Command::new(example)
+        .join(helper_name);
+    let mut cmd = if helper.exists() {
+        Command::new(helper)
     } else {
         let mut cargo = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
         cargo
             .arg("run")
             .arg("--quiet")
-            .arg("--example")
+            .arg("-p")
+            .arg("batpak-examples")
+            .arg("--bin")
             .arg("store_lock_helper")
-            .arg("--manifest-path")
-            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
             .arg("--");
         cargo
     };

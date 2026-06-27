@@ -347,9 +347,9 @@
 - id: ART-STORE-FORK-IMPORT-EXAMPLES
   kind: examples
   paths:
-    - crates/examples/examples/fork_clone.rs
-    - crates/examples/examples/import_events.rs
-    - crates/examples/examples/lane_branch.rs
+    - crates/batpak-examples/src/bin/fork_clone.rs
+    - crates/batpak-examples/src/bin/import_events.rs
+    - crates/batpak-examples/src/bin/lane_branch.rs
 - id: ART-STORE-LANE-BRANCH-SOURCE
   kind: source
   paths:
@@ -798,28 +798,28 @@
 - id: ART-EXAMPLES
   kind: examples
   paths:
-    - crates/examples/examples/batch_append.rs
-    - crates/examples/examples/chat_room.rs
-    - crates/examples/examples/cursor_worker.rs
-    - crates/examples/examples/dungeon_typestate.rs
-    - crates/examples/examples/eight_jobs.rs
-    - crates/examples/examples/event_sourced_counter.rs
-    - crates/examples/examples/fork_clone.rs
-    - crates/examples/examples/import_events.rs
-    - crates/examples/examples/lane_branch.rs
-    - crates/examples/examples/append_with_gate.rs
-    - crates/examples/examples/outbox.rs
-    - crates/examples/examples/caller_defined_gates.rs
-    - crates/examples/examples/quickstart.rs
-    - crates/examples/examples/raw_projection_counter.rs
-    - crates/examples/examples/raw_projection_counter_derived.rs
-    - crates/examples/examples/read_only.rs
-    - crates/examples/examples/signed_receipts.rs
-    - crates/examples/examples/store_lock_helper.rs
-    - crates/examples/examples/submit_pipeline.rs
-    - crates/examples/examples/typed_reactor.rs
-    - crates/examples/examples/typed_reactor_multi.rs
-    - crates/examples/examples/idempotent_pass.rs
+    - crates/batpak-examples/src/bin/batch_append.rs
+    - crates/batpak-examples/src/bin/chat_room.rs
+    - crates/batpak-examples/src/bin/cursor_worker.rs
+    - crates/batpak-examples/src/bin/dungeon_typestate.rs
+    - crates/batpak-examples/src/bin/eight_jobs.rs
+    - crates/batpak-examples/src/bin/event_sourced_counter.rs
+    - crates/batpak-examples/src/bin/fork_clone.rs
+    - crates/batpak-examples/src/bin/import_events.rs
+    - crates/batpak-examples/src/bin/lane_branch.rs
+    - crates/batpak-examples/src/bin/append_with_gate.rs
+    - crates/batpak-examples/src/bin/outbox.rs
+    - crates/batpak-examples/src/bin/caller_defined_gates.rs
+    - crates/batpak-examples/src/bin/quickstart.rs
+    - crates/batpak-examples/src/bin/raw_projection_counter.rs
+    - crates/batpak-examples/src/bin/raw_projection_counter_derived.rs
+    - crates/batpak-examples/src/bin/read_only.rs
+    - crates/batpak-examples/src/bin/signed_receipts.rs
+    - crates/batpak-examples/src/bin/store_lock_helper.rs
+    - crates/batpak-examples/src/bin/submit_pipeline.rs
+    - crates/batpak-examples/src/bin/typed_reactor.rs
+    - crates/batpak-examples/src/bin/typed_reactor_multi.rs
+    - crates/batpak-examples/src/bin/idempotent_pass.rs
 - id: ART-MACROS
   kind: source
   paths:

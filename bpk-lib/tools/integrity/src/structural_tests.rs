@@ -403,7 +403,7 @@ fn glob_matcher_handles_doublestar_and_single_star() {
 #[test]
 fn examples_observable_output_rejects_print_macros() {
     let repo = temp_repo("examples-output");
-    let rel = "crates/examples/examples/synthetic.rs";
+    let rel = "crates/batpak-examples/src/bin/synthetic.rs";
 
     let path = write_file(
         &repo,

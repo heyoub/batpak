@@ -2,7 +2,7 @@
 //!
 //! **Teaches:** async submit ticket with blocking wait.
 //!
-//! Run: `cargo run --example submit_pipeline`
+//! Run: `cargo run -p batpak-examples --bin submit_pipeline`
 
 use batpak::prelude::*;
 

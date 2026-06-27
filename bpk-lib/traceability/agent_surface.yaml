@@ -9,8 +9,8 @@ tasks:
       - "raw dynamic EventKind unless the kind is computed at runtime"
       - "serde_json for durable typed payload identity"
     examples:
-      - "crates/examples/examples/quickstart.rs"
-      - "crates/examples/examples/eight_jobs.rs"
+      - "crates/batpak-examples/src/bin/quickstart.rs"
+      - "crates/batpak-examples/src/bin/eight_jobs.rs"
     tests:
       - "crates/core/tests/event_payload_surface.rs"
       - "crates/core/tests/store_append_behavior.rs"
@@ -33,7 +33,7 @@ tasks:
       - "new unbounded public read helpers"
       - "manual string-prefix filtering outside the Region API"
     examples:
-      - "crates/examples/examples/read_only.rs"
+      - "crates/batpak-examples/src/bin/read_only.rs"
     tests:
       - "crates/core/tests/store_query_behavior.rs"
       - "crates/core/tests/scope_visibility.rs"
@@ -74,8 +74,8 @@ tasks:
       - "cache success without replay correctness"
       - "projection logic that owns store ordering"
     examples:
-      - "crates/examples/examples/raw_projection_counter.rs"
-      - "crates/examples/examples/raw_projection_counter_derived.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter_derived.rs"
     tests:
       - "crates/core/tests/projection_cache.rs"
       - "crates/core/tests/store_projection_wiring.rs"
@@ -96,8 +96,8 @@ tasks:
       - "sleep-based freshness claims"
       - "max frontier when global applied requires the min across projections"
     examples:
-      - "crates/examples/examples/eight_jobs.rs"
-      - "crates/examples/examples/raw_projection_counter.rs"
+      - "crates/batpak-examples/src/bin/eight_jobs.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter.rs"
     tests:
       - "crates/core/tests/projection_run_evidence_report.rs"
       - "crates/core/tests/unified_watch_red.rs"
@@ -117,8 +117,8 @@ tasks:
       - "lossy subscription when replay is required"
       - "manual event-id checkpoint files"
     examples:
-      - "crates/examples/examples/cursor_worker.rs"
-      - "crates/examples/examples/typed_reactor.rs"
+      - "crates/batpak-examples/src/bin/cursor_worker.rs"
+      - "crates/batpak-examples/src/bin/typed_reactor.rs"
     tests:
       - "crates/core/tests/cursor_at_least_once_witness.rs"
       - "crates/core/tests/store_cursor_behavior.rs"
@@ -140,7 +140,7 @@ tasks:
       - "subscription for durable replay"
       - "unknown loss precision represented as observed loss"
     examples:
-      - "crates/examples/examples/outbox.rs"
+      - "crates/batpak-examples/src/bin/outbox.rs"
     tests:
       - "crates/core/tests/store_subscription_behavior.rs"
       - "crates/core/tests/subscriber_frontier_observations.rs"
@@ -200,7 +200,7 @@ tasks:
       - "loss findings for Unknown precision"
       - "subscription state as durable replay proof"
     examples:
-      - "crates/examples/examples/outbox.rs"
+      - "crates/batpak-examples/src/bin/outbox.rs"
     tests:
       - "crates/core/tests/subscriber_frontier_observations.rs"
       - "crates/core/tests/evidence_report_family.rs"
@@ -365,7 +365,7 @@ tasks:
       - "role, workflow, studio, or delegated-mode vocabulary as public substrate API"
     examples:
       - "crates/netbat/tests/stream_runtime_event.rs"
-      - "crates/examples/examples/event_sourced_counter.rs"
+      - "crates/batpak-examples/src/bin/event_sourced_counter.rs"
     tests:
       - "crates/core/tests/read_api_pagination.rs"
     invariants:
@@ -387,7 +387,7 @@ tasks:
       - "treating for_operation as a payload content hash"
       - "assuming dedup only survives the event retention window"
     examples:
-      - "crates/examples/examples/idempotent_pass.rs"
+      - "crates/batpak-examples/src/bin/idempotent_pass.rs"
     tests:
       - "crates/core/tests/idempotency_durable_store.rs"
       - "crates/core/tests/idempotency_window_priority.rs"

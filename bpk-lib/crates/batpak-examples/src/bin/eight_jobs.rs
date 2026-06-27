@@ -7,7 +7,7 @@
 //! substrate jobs and leaves pipelines, reactors, delivery cursors, cache
 //! backends, and evidence reports to explicit advanced examples.
 //!
-//! Run: `cargo run --example eight_jobs`
+//! Run: `cargo run -p batpak-examples --bin eight_jobs`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};

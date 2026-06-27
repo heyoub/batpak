@@ -3,7 +3,7 @@
 //! **Teaches:** durability frontiers — append-time gates, explicit durable waits,
 //! and visibility fences with delayed publish.
 //!
-//! Run: `cargo run --example append_with_gate`
+//! Run: `cargo run -p batpak-examples --bin append_with_gate`
 
 use batpak::prelude::*;
 use batpak::store::{BatchAppendItem, CausationRef, DurabilityGate, HlcPoint, WatermarkKind};

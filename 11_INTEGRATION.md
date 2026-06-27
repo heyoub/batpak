@@ -88,7 +88,7 @@ stream runtime sessions, and bounded request/response paths against `syncbat`.
 vectors, and subscription descriptor wiring stay aligned with the H-interface.
 
 **Living loop:** use `event.query` + `event.get` replay from a persistent store
-in your embedder or the workspace examples under `crates/examples/examples/`.
+in your embedder or the workspace examples under `crates/batpak-examples/src/bin/`.
 Seed app-owned events, rebuild a rendered view from commit-order query pages,
 restart on the same store, and prove substrate replay without relying on commit
 acks alone.

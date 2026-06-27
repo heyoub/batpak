@@ -11,7 +11,7 @@
 //!
 //! No async. No tokio. Just threads and flume channels.
 //!
-//! Run: `cargo run --example chat_room`
+//! Run: `cargo run -p batpak-examples --bin chat_room`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};

@@ -22,8 +22,8 @@ pub(crate) fn core_tests_root(repo_root: &Path) -> PathBuf {
 }
 
 pub(crate) fn core_examples_root(repo_root: &Path) -> PathBuf {
-    // Family-wide demo home: examples live in `crates/examples`, not per-crate.
-    repo_root.join("crates/examples/examples")
+    // Family-wide demo home: examples live in `crates/batpak-examples`, not per-crate.
+    repo_root.join("crates/batpak-examples/src/bin")
 }
 
 pub(crate) fn core_benches_root(repo_root: &Path) -> PathBuf {

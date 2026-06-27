@@ -1065,7 +1065,7 @@ fn walk_dead_code_checked_rs_files(
         core_root.join("build.rs"),
         core_root.join("src"),
         core_root.join("tests"),
-        repo_root.join("crates/examples"),
+        repo_root.join("crates/batpak-examples"),
         core_root.join("benches"),
         repo_root.join("tools/xtask/src"),
         repo_root.join("tools/integrity/src"),

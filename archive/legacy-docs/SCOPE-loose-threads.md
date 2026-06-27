@@ -277,7 +277,7 @@ fn check(repo_root: &Path) -> Result<GateWork> {
 
 ### Scope / why
 Three parallel artifact families teach overlapping concepts with both **duplication** and **gaps**:
-- **23 examples** (`crates/examples/examples/`), **18 cookbook docs** (`cookbook/`), **10 templates** (`bpk-lib/templates/`).
+- **23 examples** (`crates/batpak-examples/src/bin/`), **18 cookbook docs** (`cookbook/`), **10 templates** (`bpk-lib/templates/`).
 - **Duplication:** typed-append taught 3× (`quickstart.rs`, `cross_crate_payloads.rs`, `eight_jobs.rs`); durability/gates/receipts taught 5× (`append_with_gate.rs`, `wait_for_durable.rs`, `signed_receipts.rs`, `visibility_fence.rs`, `lifecycle_observer.rs`).
 - **Gaps (cookbook+template but NO runnable example):** fork-clone, import-fork, lane-branch, artifact-envelope, attested-registry, backup-envelope, state-transition, reservation-ledger, platform-evidence, read-evidence. The headline 0.9.0 features (**fork/import/lane**) have docs but **no runnable example** — embarrassing for the cut.
 
@@ -287,7 +287,7 @@ Goal: **one canonical, lock-gated runnable per concept**, with cookbook + templa
 **L1** (examples are illustrative), but the **lock-gate is L2-ish** (the registry that guarantees every concept has exactly one runnable canonical).
 
 ### Files (`path:line`)
-- Examples: `bpk-lib/crates/examples/examples/*.rs` (23 files), manifest `crates/examples/Cargo.toml`
+- Examples: `bpk-lib/crates/batpak-examples/src/bin/*.rs` (23 files), manifest `crates/batpak-examples/Cargo.toml`
 - Cookbook: `/home/heyoub/Code/batpak/cookbook/*.md` (18 files), index `cookbook/README.md`
 - Templates: `bpk-lib/templates/*/` (10 dirs)
 - Lock-gate today (three layers):

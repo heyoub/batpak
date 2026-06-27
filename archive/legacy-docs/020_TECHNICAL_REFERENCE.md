@@ -51,7 +51,7 @@ workspace layers.
 - `bpk-lib/crates/core/` is the primary `batpak` package and owns package
   examples, benches, fixtures, and integration tests.
 - `bpk-lib/crates/core/examples/` stays inside the crate because Cargo treats
-  those as package examples (`cargo run -p batpak --example ...`) and package
+  those as package examples (`cargo run -p batpak --bin ...`) and package
   docs/smokes understand that shape.
 - `syncbat` and `netbat` are public stack layers, so each carries integration
   tests in its own `tests/` directory.

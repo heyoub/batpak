@@ -7,7 +7,7 @@ Problem: observe live events when push delivery is allowed to be lossy.
 Correct API: `Store::subscribe_lossy`, subscription delivery state, and
 `SubscriberFrontierEvidenceReport`.
 
-Minimal code is mirrored by `bpk-lib/crates/examples/examples/outbox.rs`.
+Minimal code is mirrored by `bpk-lib/crates/batpak-examples/src/bin/outbox.rs`.
 
 Wrong tempting move: use subscription state as durable replay proof.
 

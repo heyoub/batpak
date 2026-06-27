@@ -12,7 +12,7 @@
 //! the pass recomputes the SAME key, so the second append returns the original
 //! receipt instead of writing a duplicate.
 //!
-//! Run: `cargo run --example idempotent_pass`
+//! Run: `cargo run -p batpak-examples --bin idempotent_pass`
 
 use batpak::id::IdempotencyKey;
 use batpak::prelude::*;

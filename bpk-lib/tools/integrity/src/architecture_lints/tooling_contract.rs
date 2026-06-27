@@ -431,7 +431,7 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
     for dir in [
         "crates/core/src",
         "crates/core/tests",
-        "crates/examples/examples",
+        "crates/batpak-examples/src/bin",
         "crates/core/benches",
         "crates/core/fixtures",
         "crates/syncbat/src",
@@ -459,20 +459,22 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
 
-    // Demos live ONLY in the family-wide `crates/examples` crate — no per-crate
+    ensure(
+        !repo_root.join("crates/examples").exists(),
+        "legacy `crates/examples` path retired; demos live in `crates/batpak-examples/src/bin/`",
+    )?;
+
+    // Demos live ONLY in the family-wide `crates/batpak-examples` crate — no per-crate
     // `examples/` folder anywhere else (locks the examples-out-of-core hoist).
     // Generalized over every crate so a future `crates/<x>/examples/` is caught.
     if let Ok(entries) = fs::read_dir(repo_root.join("crates")) {
         for entry in entries.flatten() {
-            if entry.file_name() == "examples" {
-                continue;
-            }
             if entry.path().join("examples").is_dir() {
                 let name = entry.file_name().to_string_lossy().into_owned();
                 ensure(
                     false,
                     format!(
-                        "`crates/{name}/examples` blurs ownership; demos live in the family-wide `crates/examples` crate"
+                        "`crates/{name}/examples` blurs ownership; demos live in the family-wide `crates/batpak-examples` crate"
                     ),
                 )?;
             }

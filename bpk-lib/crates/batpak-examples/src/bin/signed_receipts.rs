@@ -3,7 +3,7 @@
 //! **Teaches:** opt-in receipt signing, append receipt verification, and
 //! persisted denial receipt verification.
 //!
-//! Run: `cargo run --example signed_receipts`
+//! Run: `cargo run -p batpak-examples --bin signed_receipts`
 
 use batpak::guard::{Denial, Gate, GateSet};
 use batpak::pipeline::Proposal;

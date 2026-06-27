@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub(crate) fn quickstart() -> Result<()> {
-    cargo(["run", "-p", "batpak-examples", "--example", "quickstart"])
+    cargo(["run", "-p", "batpak-examples", "--bin", "quickstart"])
 }
 
 pub(crate) fn consumer_smoke() -> Result<()> {
