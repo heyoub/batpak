@@ -82,16 +82,13 @@ Use circuits and terminals to connect batteries. Do not hide ownership by lettin
 
 ## Local Host Loop
 
-**Calibration pulse:** `just host-dev` mirrors the CI ts-parity lane: export
-manifest, codegen, build and test the workspace, boot refbat on an ephemeral
-store, run heartbeat-spike (heartbeat, commit, query, get), and verify committed
-generated sources stay deterministic. heartbeat-spike proves the live heartbeat
-+ commit/query/get + ERR calibration path; `receipt.verify`, `event.walk`, and
-the four `evidence.*` ops round out the ten-op host profile and are covered by
-manifest/parity and refbat tests.
+**Calibration pulse:** `cargo test -p netbat` exercises NETBAT/1 wire goldens,
+stream runtime sessions, and bounded request/response paths against `syncbat`.
+`cargo test -p hostbat` proves the `ClientManifest` projection, schema golden
+vectors, and subscription descriptor wiring stay aligned with the H-interface.
 
-**Living loop:** `just host-loop` runs the audit-loop example against a
-persistent store under `target/host-loop/store/`. It seeds app-owned events
-(`kind_category = 0x01`), rebuilds the rendered audit view from `event.query` +
-`event.get` (not commit acks), kills refbat, restarts on the same store, and
-runs `--replay-only` to prove substrate replay.
+**Living loop:** use `event.query` + `event.get` replay from a persistent store
+in your embedder or the workspace examples under `crates/examples/examples/`.
+Seed app-owned events, rebuild a rendered view from commit-order query pages,
+restart on the same store, and prove substrate replay without relying on commit
+acks alone.

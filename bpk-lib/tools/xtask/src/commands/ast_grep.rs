@@ -31,7 +31,7 @@ fn ast_grep_store() -> Result<()> {
         "!**/fixtures/**",
     ]);
     run(command).with_context(|| {
-        "run store ast-grep calipers; install `sg` via `npm install -g @ast-grep/cli` or `cargo install ast-grep --locked`"
+        "run store ast-grep calipers; install `sg` via `cargo xtask setup --install-tools` or `cargo install ast-grep --locked`"
     })
 }
 

@@ -16,12 +16,10 @@ just seal
 just ship dry
 ```
 
-Raw `cargo`, `npm`, and `pnpm` commands are implementation details unless routed through an explicit escape hatch:
+Raw `cargo` commands are implementation details unless routed through the explicit escape hatch:
 
 ```sh
 just cargo -- <args>
-just pnpm -- <args>
-just npm -- <args>
 ```
 
 Repeated raw commands should become named `just` recipes.
@@ -46,7 +44,8 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Tier | Human face | Policy face (xtask) | Blocks merge? | Meaning |
 | --- | --- | --- | --- | --- |
 | Inspect | `just inspect` | structural, boundary, architecture IR, ast-grep | Optional/path-based | Fast shape checks before expensive proof. |
-| Host profile | `just host-dev` | `host-dev` | No | Local end-to-end host proof: manifest → codegen → TS build/test → refbat boot → heartbeat-spike → deterministic regeneration. |
+| Host contract | `cargo test -p hostbat` | hostbat tests | No | `ClientManifest` projection, schema golden vectors, subscription descriptors. |
+| NETBAT wire | `cargo test -p netbat` | netbat tests | No | NETBAT/1 goldens, stream runtime sessions, bounded request/response paths. |
 | Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
 | Context packet | `just context` | `context` | No | Opt-in PCP-aligned handoff artifact under `target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
 | Doctrine audit | traceability/docs artifact | traceability metadata | No | Records the substrate/product semantic firewall; not a CI or release gate unless promoted to an explicit command later. |

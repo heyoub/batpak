@@ -37,8 +37,7 @@
   summary: evidence.* ops adapt Store evidence reports to NETBAT/1 with canonical report_hex + body_hash identity and bounded Region selectors.
   artifacts:
     - ART-STORE-EVIDENCE-REPORTS
-    - ART-BPK-TS-MANIFEST
-    - ART-BPK-TS-CODEGEN
+    - ART-HOSTBAT-CLIENT-MANIFEST
 - id: FLOW-APPEND-OPTIONS
   summary: Append with CAS/idempotency/correlation options, receipt extensions, and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control; committed extension bytes are copied into append and denial receipts before signing, persisted in .fbat frame metadata, and reconstructed for idempotency replay after cold start.
   artifacts:

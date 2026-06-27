@@ -85,7 +85,7 @@ sserting `Err` or canonical refusal.
 **C. Equivalence-mutant audit.** Confirm the 5 registered equivalent mutants (`lanes.rs:186-191`, `:220-222`) still hold after the new fixtures land (the new tests may *kill* a previously-equivalent mutant, which is good — de-register it). Update `GAUNTLET_MUTATION_DEBT.md` if cloud smoke surfaces new survivors in `import.rs`/`file_classification.rs`/`fork_report.rs`.
 
 **D. The bump/seal/tag.** Only after A–C are green on cloud:
-1. `0.8.3 → 0.9.0` in every member `Cargo.toml` + `bpk-ts` manifests.
+1. `0.8.3 → 0.9.0` in every member `Cargo.toml`.
 2. `CHANGELOG.md`: promote `[Unreleased]` → `[0.9.0] - <date>`.
 3. Re-seal public surface: regenerate `traceability/public_api/batpak.txt` (the fork/import/lane APIs are the headline of the cut; the seal must match).
 4. Per memory `batpak-release-flow`: manual chain-order `cargo publish`; npm needs the bypass-2FA granular token. Tag after publish.
@@ -243,7 +243,7 @@ fn check(repo_root: &Path) -> Result<GateWork> {
 
 ### Scope / why
 Three parallel artifact families teach overlapping concepts with both **duplication** and **gaps**:
-- **23 examples** (`crates/examples/examples/`), **18 cookbook docs** (`cookbook/`), **10 templates** (`bpk-lib/templates/`), **2 TS examples** (`bpk-ts/examples/`).
+- **23 examples** (`crates/examples/examples/`), **18 cookbook docs** (`cookbook/`), **10 templates** (`bpk-lib/templates/`).
 - **Duplication:** typed-append taught 3× (`quickstart.rs`, `cross_crate_payloads.rs`, `eight_jobs.rs`); durability/gates/receipts taught 5× (`append_with_gate.rs`, `wait_for_durable.rs`, `signed_receipts.rs`, `visibility_fence.rs`, `lifecycle_observer.rs`).
 - **Gaps (cookbook+template but NO runnable example):** fork-clone, import-fork, lane-branch, artifact-envelope, attested-registry, backup-envelope, state-transition, reservation-ledger, platform-evidence, read-evidence. The headline 0.9.0 features (**fork/import/lane**) have docs but **no runnable example** — embarrassing for the cut.
 
@@ -256,7 +256,6 @@ Goal: **one canonical, lock-gated runnable per concept**, with cookbook + templa
 - Examples: `bpk-lib/crates/examples/examples/*.rs` (23 files), manifest `crates/examples/Cargo.toml`
 - Cookbook: `/home/heyoub/Code/batpak/cookbook/*.md` (18 files), index `cookbook/README.md`
 - Templates: `bpk-lib/templates/*/` (10 dirs)
-- TS: `bpk-ts/examples/{audit-loop,heartbeat-spike}/`
 - Lock-gate today (three layers):
   - `ART-EXAMPLES` registry: `traceability/artifacts.yaml:768-793` (every `.rs` must be listed)
   - Gate: `tools/integrity/src/traceability.rs:230-257` (`check_examples_artifact_complete` — fails on drift either direction)

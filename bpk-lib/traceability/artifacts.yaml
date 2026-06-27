@@ -206,18 +206,12 @@
     - crates/core/tests/projection_run_evidence_report.rs
     - crates/core/src/store/read_walk.rs
     - crates/core/src/store/projection_run.rs
-- id: ART-BPK-TS-MANIFEST
-  kind: generated
+- id: ART-HOSTBAT-CLIENT-MANIFEST
+  kind: source
   paths:
-    - ../bpk-ts/batpak.manifest.json
-    - ../bpk-ts/packages/generated/src/events.ts
-    - ../bpk-ts/packages/generated/src/operations.ts
-    - ../bpk-ts/packages/generated/src/manifest.ts
-- id: ART-BPK-TS-CODEGEN
-  kind: tool
-  paths:
-    - ../bpk-ts/packages/codegen/src/index.ts
-    - ../bpk-ts/packages/codegen/test/codegen.test.ts
+    - crates/hostbat/src/client_manifest.rs
+    - crates/hostbat/src/composition_tests.rs
+    - crates/hostbat/src/subscription_tests.rs
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:

@@ -5,7 +5,7 @@ use std::process::Command;
 
 /// Version-coupled surfaces that must track `batpak`'s workspace release line.
 ///
-/// Uses ast-grep for Rust/JSON/YAML/TypeScript literals and a text scan for
+/// Uses ast-grep for traceability semver checklist literals and a text scan for
 /// family `Cargo.toml` files (ast-grep has no built-in TOML support).
 pub(crate) fn ast_grep_family_version() -> Result<()> {
     let root = project_root()?;
@@ -16,44 +16,9 @@ pub(crate) fn ast_grep_family_version() -> Result<()> {
         return Ok(());
     }
 
-    let stale_json_alt = stale
-        .iter()
-        .map(|version| escape_regex(version))
-        .collect::<Vec<_>>()
-        .join("|");
     let stale_yaml_alt = stale.join("|");
 
     let mut inline_rules = String::new();
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-npm
-message: Stale @batpak/* package version in package.json; sync to the workspace release line ({current}).
-severity: error
-language: Json
-rule:
-  kind: pair
-  regex: "^version$"
-  has:
-    kind: string
-    regex: '^({stale_json_alt})$'"#
-    )
-    .expect("writing to an in-memory String is infallible");
-    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-manifest-json
-message: Stale batpakVersion in batpak.manifest.json; sync to the workspace release line ({current}).
-severity: error
-language: Json
-rule:
-  kind: pair
-  regex: "^batpakVersion$"
-  has:
-    kind: string
-    regex: '^({stale_json_alt})$'"#
-    )
-    .expect("writing to an in-memory String is infallible");
-    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
     writeln!(
         inline_rules,
         r#"id: stale-family-version-traceability
@@ -63,46 +28,6 @@ language: Yaml
 rule:
   kind: plain_scalar
   regex: '^current_version: ({stale_yaml_alt})$'"#
-    )
-    .expect("writing to an in-memory String is infallible");
-    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
-    let mut ts_any = String::new();
-    for (index, version) in stale.iter().enumerate() {
-        if index > 0 {
-            ts_any.push_str("\n    - ");
-        } else {
-            ts_any.push_str("    - ");
-        }
-        ts_any.push_str(&format!(
-            "pattern: 'export const BATPAK_VERSION = \"{version}\" as const;'"
-        ));
-    }
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-generated-ts
-message: Stale BATPAK_VERSION in generated manifest.ts; run export-ts-manifest and pnpm generate ({current}).
-severity: error
-language: TypeScript
-rule:
-  any:
-{ts_any}"#
-    )
-    .expect("writing to an in-memory String is infallible");
-    writeln!(inline_rules, "---").expect("writing to an in-memory String is infallible");
-    let rust_any = stale
-        .iter()
-        .map(|version| format!("    - pattern: 'const BATPAK_VERSION: &str = \"{version}\";'"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-rust-const
-message: Stale BATPAK_VERSION const; sync to the workspace release line ({current}).
-severity: error
-language: Rust
-rule:
-  any:
-{rust_any}"#
     )
     .expect("writing to an in-memory String is infallible");
 
@@ -115,20 +40,6 @@ rule:
         &inline_rules,
         "--report-style",
         "short",
-        "--globs",
-        "bpk-ts/packages/canonical/package.json",
-        "--globs",
-        "bpk-ts/packages/client/package.json",
-        "--globs",
-        "bpk-ts/packages/schema/package.json",
-        "--globs",
-        "bpk-ts/packages/generated/package.json",
-        "--globs",
-        "bpk-ts/packages/sdk/package.json",
-        "--globs",
-        "bpk-ts/batpak.manifest.json",
-        "--globs",
-        "bpk-ts/packages/generated/src/manifest.ts",
         "--globs",
         "bpk-lib/traceability/public_api/*_semver_checklist.yaml",
     ]);
@@ -165,10 +76,6 @@ fn stale_patch_versions(current: &str) -> Result<Vec<String>> {
         bail!("ast-grep-family-version: unsupported family version line `{current}`");
     }
     Ok((0..patch).map(|value| format!("0.8.{value}")).collect())
-}
-
-fn escape_regex(input: &str) -> String {
-    input.replace('.', r"\.")
 }
 
 fn parse_family_version(version: &str) -> Result<(u64, u64, u64)> {

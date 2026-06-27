@@ -9,8 +9,7 @@ Free Battery Factory is the workshop. Each battery is a bounded component that s
 | `batpak` | Core battery pack format and embedded event substrate. |
 | `syncbat` | Sync-first runtime contracts and dispatch surfaces. |
 | `netbat` | Server and network boundary surfaces for explicit IO. |
-| `refbat` | Live operation handling surface in the current workspace. |
-| `@batpak/sdk` / [bpk-ts/](bpk-ts/README.md) | NETBAT/1 wire client, canonical codec, manifest-generated types. |
+| `hostbat` | Host contract projection: client manifest, H-interface fingerprints, subscription descriptors. |
 | `batpak-macros` | Derive macro support for the core substrate. |
 | `syncbat-macros` | Derive macro support for syncbat. |
 | `batpak-bench-support` | Shared benchmark support for workspace surfaces. |
@@ -39,9 +38,8 @@ Need sync-first runtime behavior? Use `syncbat`.
 
 Need explicit network wiring? Use `netbat`.
 
-Need a live reference host? Use `refbat` and prove it with `just host-dev`.
-
-Need TypeScript against that host? Use `@batpak/sdk` — see [bpk-ts/README.md](bpk-ts/README.md).
+Need the live host contract as data? Use `hostbat` and prove it with `cargo test -p hostbat`.
 
 Need conformance or release checks? Use `just inspect`, `just verify`, and `just seal`.
 
+A non-Rust generated-client surface is intentionally out of scope for the 0.9/1.0 Rust-first line and deferred post-1.0.

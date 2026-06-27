@@ -8,9 +8,8 @@
 //! ([`HostError::SchemaCollision`]). The same schema declared identically by two
 //! modules is fine (it deduplicates).
 //!
-//! The composition manifest is what S12's TypeScript codegen consumes to
-//! generate only the mounted wire surface — replacing the deleted
-//! `refbat::*`-keyed manifest. Its digest seals the schema *set*, order- and
+//! The composition manifest is the Rust-side schema contract projection for a
+//! mounted host. Its digest seals the schema *set*, order- and
 //! mount-order-independent.
 //!
 //! [`SchemaDescriptor`]: crate::schema::SchemaDescriptor

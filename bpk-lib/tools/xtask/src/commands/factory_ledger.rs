@@ -825,14 +825,14 @@ mod tests {
             &mut store,
             FactoryLedgerRecordGateCompletedArgs {
                 run_id: "0123456789abcdef0123456789abcdef".to_owned(),
-                gate: "host-dev".to_owned(),
-                command: "cargo xtask host-dev".to_owned(),
+                gate: "verify".to_owned(),
+                command: "cargo xtask preflight".to_owned(),
                 status_code: 0,
                 duration_ms: 42,
                 completed_ms: Some(99),
                 branch: Some("factory/test".to_owned()),
                 head: Some("afb63dc".to_owned()),
-                summary: "host-dev ok @ afb63dc duration=42ms".to_owned(),
+                summary: "verify ok @ afb63dc duration=42ms".to_owned(),
             },
         )
         .expect("gate");
@@ -840,9 +840,9 @@ mod tests {
         store.close().expect("close");
         let gate_line = lines
             .iter()
-            .find(|line| line.contains("gate=host-dev"))
+            .find(|line| line.contains("gate=verify"))
             .expect("gate line");
-        assert!(gate_line.contains("summary=\"host-dev ok @ afb63dc duration=42ms\""));
+        assert!(gate_line.contains("summary=\"verify ok @ afb63dc duration=42ms\""));
         assert!(gate_line.contains("head=afb63dc"));
     }
 

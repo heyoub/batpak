@@ -21,10 +21,10 @@ const WIRE_ENCODING_CONTRACT_VERSION: &str = "v1";
 /// code generators and parity harnesses can treat committed Rust bytes as the
 /// source of truth.
 ///
-/// NOTE: this is the Rust-side projection of the interface contract. Wiring it
-/// into the `bpk-ts` code generator + byte-parity harness (re-pointing them off
-/// the legacy event-field manifest) is a deferred follow-up; until then the
-/// TypeScript client is not regenerated from this shape.
+/// NOTE: this is the Rust-side projection of the interface contract. Generated
+/// non-Rust client surfaces are deferred post-1.0; external consumers should
+/// treat this manifest and its golden vectors as the wire contract source of
+/// truth.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientManifest {

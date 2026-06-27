@@ -1,5 +1,0 @@
-**/dist/**
-**/node_modules/**
-**/coverage/**
-packages/generated/src/**
-pnpm-lock.yaml

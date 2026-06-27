@@ -5,9 +5,8 @@ the core battery: an embedded, sync-first append-only journal with typed
 payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
 replay, and derived projections.
 
-The family around it — `syncbat`, `netbat`, `refbat`, and `@batpak/sdk` — wires
-that journal into networked hosts and TypeScript clients through explicit
-terminals and circuits. See the
+The family around it — `syncbat`, `netbat`, and `hostbat` — wires
+the journal into larger Rust hosts through explicit terminals and circuits. See the
 [repository README](https://github.com/heyoub/batpak/blob/main/README.md) for
 the full family map, scale-out model, and host path.
 
@@ -81,10 +80,6 @@ task-shaped recipes, and
 [INVARIANTS](https://github.com/heyoub/batpak/blob/main/INVARIANTS.md) /
 [CONFORMANCE](https://github.com/heyoub/batpak/blob/main/CONFORMANCE.md)
 for the mental model and the guarantees.
-
-This is the substrate crate in the batpak family. TypeScript clients talk to
-a networked batpak host through
-[`@batpak/sdk`](https://www.npmjs.com/package/@batpak/sdk).
 
 ```text
 bp records.

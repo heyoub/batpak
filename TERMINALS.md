@@ -45,8 +45,8 @@ Push subscription is lossy awareness, not replay. Durable replay uses
 commit-order query pages, durable cursor pull surfaces, or projection-owned
 pull surfaces.
 
-Run `just host-dev` to prove the ten reference NETBAT operations through refbat
-and the TypeScript heartbeat-spike in one local motion.
+Run `cargo test -p netbat` to prove the ten reference NETBAT operations through
+the Rust wire and stream runtime surfaces.
 
 ## Terminal Versus Function
 

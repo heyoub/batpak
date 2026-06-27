@@ -17,8 +17,8 @@ entries:
       - receipts
       - examples and root command surface
     proof_commands:
-      - just host-dev
-      - just host-loop
+      - just verify
+      - cargo test -p netbat
     owning_layer: downstream product / Moonwalker
     explicit_non_goals:
       - pain intake
@@ -39,7 +39,6 @@ entries:
       - projection evidence
       - opaque extension bytes
     proof_commands:
-      - just host-loop
       - just inspect
     owning_layer: downstream agent framework / Moonwalker
     explicit_non_goals:
@@ -80,7 +79,6 @@ entries:
       - projection freshness and evidence reports
       - canonical substrate artifact envelopes
     proof_commands:
-      - just host-loop
       - just inspect
     owning_layer: product surface registry / Moonwalker
     explicit_non_goals:

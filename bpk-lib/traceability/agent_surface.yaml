@@ -363,8 +363,8 @@ tasks:
       - "PCP-Core validation without explicit codecs, tests, and traceability"
       - "role, workflow, studio, or delegated-mode vocabulary as public substrate API"
     examples:
-      - "bpk-ts/examples/heartbeat-spike"
-      - "bpk-ts/examples/audit-loop"
+      - "crates/netbat/tests/stream_runtime_event.rs"
+      - "crates/examples/examples/event_sourced_counter.rs"
     tests:
       - "crates/core/tests/read_api_pagination.rs"
     invariants:

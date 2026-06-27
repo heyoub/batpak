@@ -348,11 +348,11 @@ mod tests {
         let project = temp.path();
         let workspace = project.join("bpk-lib");
         fs::create_dir_all(workspace.join("target/debug")).expect("workspace target");
-        fs::create_dir_all(project.join("bpk-ts/target/debug")).expect("sibling target");
+        fs::create_dir_all(project.join("sibling-ws/target/debug")).expect("sibling target");
         fs::create_dir_all(project.join("node_modules/pkg/target")).expect("node target");
 
         let targets = nested_targets(project, &workspace.join("target")).expect("scan targets");
-        assert_eq!(targets, vec![project.join("bpk-ts/target")]);
+        assert_eq!(targets, vec![project.join("sibling-ws/target")]);
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
         let root = project.join("bpk-lib");
         fs::create_dir_all(root.join("crates/core/target/debug")).expect("target");
         fs::create_dir_all(root.join("templates/demo")).expect("template");
-        fs::create_dir_all(project.join("bpk-ts/target/debug")).expect("sibling target");
+        fs::create_dir_all(project.join("sibling-ws/target/debug")).expect("sibling target");
         fs::write(project.join("root.profraw"), "").expect("root profile");
         fs::create_dir_all(project.join("target")).expect("project target");
         fs::write(root.join("templates/demo/Cargo.lock"), "").expect("lock");
@@ -390,8 +390,8 @@ mod tests {
                 GeneratedArtifact::TemplateLockfile(
                     root.join("templates").join("demo").join("Cargo.lock")
                 ),
-                GeneratedArtifact::NestedTarget(project.join("bpk-ts").join("target")),
                 GeneratedArtifact::RawProfile(project.join("root.profraw")),
+                GeneratedArtifact::NestedTarget(project.join("sibling-ws").join("target")),
                 GeneratedArtifact::ProjectTarget(project.join("target")),
             ]
         );

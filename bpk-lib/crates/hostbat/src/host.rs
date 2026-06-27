@@ -152,7 +152,7 @@ impl Host {
 
     /// The content-addressed composition schema manifest aggregating every
     /// mounted module's schema descriptors (collision-checked at build). This is
-    /// the surface S12's TypeScript codegen consumes.
+    /// the Rust-side schema contract projection for mounted host interfaces.
     #[must_use]
     pub fn composition_schemas(&self) -> &HostCompositionManifest {
         &self.composition_schemas

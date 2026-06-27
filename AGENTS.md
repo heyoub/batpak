@@ -130,12 +130,10 @@ but are about *different* `async`es:
 
 ## Canonical Commands
 
-At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementation details unless routed through an explicit escape hatch.
+At repo root, agents use `just`. Raw `cargo` is an implementation detail unless routed through the explicit escape hatch.
 
 - `just list` — show the command surface
 - `just inspect` — structural doctrine, boundary checks, architecture IR, and ast-grep calipers
-- `just host-dev` — host profile end-to-end proof after refbat, manifest, or TS changes
-- `just host-loop` — living audit-loop proof after audit-loop example changes
 - `just ledger-list` — list recent factory command proof events from the opt-in ledger store
 - `just ledger-run -- <command>` — run a command through the opt-in factory ledger wrapper
 - `just ci-fast` — early PR signal (format, clippy, checks, tests, dependency gates, traceability, structural)
@@ -146,14 +144,11 @@ At repo root, agents use `just`. Raw `cargo`, `npm`, and `pnpm` are implementati
 - `just seal` — release-readiness checks for a clean tree
 - `just ship dry` — release dry run
 - `just cargo -- <args>` — explicit Cargo escape hatch
-- `just pnpm -- <args>` — explicit pnpm escape hatch
-- `just npm -- <args>` — explicit npm escape hatch
 
 Implementation commands still live under `bpk-lib/` and remain valid when a task specifically needs the machinery layer:
 
 - `cd bpk-lib && cargo xtask doctor`
 - `cd bpk-lib && cargo xtask install-hooks`
-- `cd bpk-lib && cargo xtask host-loop`
 - `cd bpk-lib && cargo xtask factory-ledger list`
 - `cd bpk-lib && cargo xtask factory-ledger run -- <command> [args...]`
 - `cd bpk-lib && cargo xtask factory-ledger run --gate <name> -- <command> [args...]` — on success, records command completed + named gate completed
@@ -206,10 +201,12 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   - run `just verify` when the change affects store behavior, xtask itself, or CI config
   - run the relevant perf surface
   - inspect `bpk-lib/crates/core/tests/perf_gates.rs` and the relevant factory root doc
-- refbat, manifest, or TypeScript SDK change:
-  - run `just host-dev`
-- audit-loop / living-loop example change:
-  - run `just host-loop`
+- hostbat manifest or subscription descriptor change:
+  - run `cargo test -p hostbat`
+  - run `just verify` when wire or host contract surfaces change
+- netbat stream runtime or NETBAT wire change:
+  - run `cargo test -p netbat`
+  - run `just verify` when the change affects CI-facing proof
 - Benchmark harness change:
   - update `cargo xtask bench` surfaces in `bpk-lib/tools/xtask/src/bench.rs`
   - refresh baselines intentionally

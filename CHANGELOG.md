@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- Retired the in-repo `bpk-ts` workspace and TypeScript client gates (`just
+  verify-ts`, `just verify-all`, `cargo xtask verify-ts`). The 0.9/1.0 line is
+  Rust-first; `hostbat::ClientManifest` is the live host-contract projection.
+
+### Migration
+- TypeScript/npm consumers must use an external archive of the retired `bpk-ts`
+  workspace or wait for the post-1.0 client line. In-repo host proof is
+  `cargo test -p hostbat`, `cargo test -p netbat`, and `just verify`.
+
 ### Added
 - Added PR1 surfaces for the 0.9.0 line: `Store::fork_with_evidence` /
   `Store::fork` materialize a self-contained store directory without opening

@@ -13,9 +13,8 @@ The Free Battery Factory makes batteries for software boundaries.
 typed payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
 replay, and derived projections. The **family** around it wires that journal into
 larger hosts — `syncbat` for runtime dispatch, `netbat` for NETBAT/1 network
-terminals, `refbat` as the reference host, and `@batpak/sdk` for TypeScript clients
-on the other side of the wire. Circuits connect batteries without one owning
-another's state.
+terminals, and `hostbat` for manifest-owned host contracts. Circuits connect
+batteries without one owning another's state.
 
 Use it when you need a tamper-evident, replayable record of what happened:
 agent action audit trails, local-first app logs, compliance evidence,
@@ -32,12 +31,10 @@ placement, runtime integration, network boundaries, and application authority.
 | Core journal | `batpak` | Append-only store, HLC frontier, receipts, replay, projections |
 | Runtime dispatch | `syncbat` | Operation descriptors, handler registration, runtime receipts |
 | Network terminal | `netbat` | NETBAT/1 frames, bounded request/response |
-| Reference host | `refbat` | Live operation handling (manifest-owned) |
-| TypeScript clients | `@batpak/sdk` | Wire client, canonical codec, generated types |
+| Host contract | `hostbat` | Client manifest, H-interface fingerprints, subscription descriptors |
 
 See [BATTERIES.md](BATTERIES.md) for the full battery map and
-[bpk-ts/README.md](bpk-ts/README.md) for npm install and the ten-op NETBAT
-profile.
+[TERMINALS.md](TERMINALS.md) for the ten-op NETBAT profile.
 
 ## Two Doors
 
@@ -48,19 +45,18 @@ directory you own:
 cargo add batpak
 ```
 
-**Door B — Networked host.** Install the TypeScript SDK and prove the live
-host loop against `refbat`:
+**Door B — Networked host.** Add the runtime and wire crates, then prove the
+NETBAT surface with integration tests:
 
 ```sh
-npm install @batpak/sdk
-just host-dev
+cargo add syncbat netbat
+cargo test -p netbat
 ```
 
-`just host-dev` exports the manifest, builds the workspace, boots `refbat` on an
-ephemeral store, and runs the heartbeat-spike through commit, query, and get.
 The ten reference NETBAT terminals — `bank.commit`, `event.query`, `event.get`,
 `receipt.verify`, `event.walk`, and the four `evidence.*` ops — are documented
-in [TERMINALS.md](TERMINALS.md).
+in [TERMINALS.md](TERMINALS.md). The Rust `hostbat` crate projects the live
+host contract through `ClientManifest`.
 
 ## First Shape
 
@@ -139,8 +135,9 @@ SQLite gives you durable rows. batpak gives you durable rows plus proof:
   committed store, and against an Ed25519 signature when keys are configured.
 - Projections are derived views rebuilt from the log by construction, so
   read models can never silently drift from source truth.
-- Canonical bytes are stable across languages: the TypeScript codec is
-  byte-for-byte parity-tested against the Rust encoder in CI.
+- Canonical bytes are stable inside the Rust substrate and sealed by Rust
+  golden vectors; non-Rust clients are intentionally deferred until after the
+  Rust host/schema contracts settle.
 
 When batpak is the wrong tool:
 
@@ -161,7 +158,7 @@ Judge the evidence, not the version number:
 - Property-based tests over hash-chain integrity and canonical encoding.
 - Chaos testing with fault injection, including disk-fault integration.
 - Mutation testing on critical seams, so the tests are themselves tested.
-- 101 named invariants traced to 150 concrete artifacts, enforced by an
+- 101 named invariants traced to 149 concrete artifacts, enforced by an
   integrity gate that fails CI on orphaned or stale claims —
   see [INVARIANTS.md](INVARIANTS.md) and [CONFORMANCE.md](CONFORMANCE.md).
 
@@ -224,7 +221,6 @@ Use the root `justfile`.
 just list
 just inspect
 just verify
-just host-dev
 just perf-gates
 just loom
 just seal
@@ -236,13 +232,11 @@ inspects structural doctrine. Tests inspect behavior. Receipts preserve
 evidence. `perf-gates` and `loom` are manual release-confidence proofs, not
 part of `just verify`.
 
-Raw `cargo`, `npm`, and `pnpm` are implementation details unless routed
-through an explicit escape hatch:
+Raw `cargo` is an implementation detail unless routed through the explicit
+escape hatch:
 
 ```sh
 just cargo -- <args>
-just pnpm -- <args>
-just npm -- <args>
 ```
 
 ## License

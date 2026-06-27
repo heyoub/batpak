@@ -176,19 +176,13 @@ fn check_justfile_stays_thin(repo_root: &Path) -> Result<()> {
             current_recipe = trimmed.split(':').next();
         }
         if line.starts_with(' ') || line.starts_with('\t') {
-            let is_escape_hatch = matches!(
-                current_recipe,
-                Some("cargo +args") | Some("pnpm +args") | Some("npm +args")
-            );
+            let is_escape_hatch = matches!(current_recipe, Some("cargo +args"));
             ensure(
                 trimmed.starts_with("cd bpk-lib; cargo xtask ")
                     || trimmed.starts_with("cd bpk-lib && cargo xtask ")
                     || trimmed.starts_with("cargo xtask ")
                     || trimmed.starts_with("just ")
-                    || (is_escape_hatch
-                        && (trimmed.starts_with("cd bpk-lib; cargo ")
-                            || trimmed.starts_with("pnpm ")
-                            || trimmed.starts_with("npm "))),
+                    || (is_escape_hatch && trimmed.starts_with("cd bpk-lib; cargo ")),
                 format!(
                     "justfile command at line {} must stay a thin alias over cargo xtask or just",
                     index + 1

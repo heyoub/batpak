@@ -45,7 +45,7 @@ Facts that govern scale-out:
 - append path from host input to event receipt
 - replay path from event history to projection
 - cursor delivery from durable checkpoint to ordered observation
-- NETBAT route: `@batpak/sdk` → `netbat` → `syncbat` → `refbat` → `Store`
+- NETBAT route: `netbat` → `syncbat` → embedder host → `Store`
 - multi-journal observation: journal B records a witness of journal A's event or receipt
 - netbat route from network frame to operation handling
 - release path from `just seal` to manifest evidence

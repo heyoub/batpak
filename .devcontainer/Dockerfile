@@ -15,8 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dmsetup \
     e2fsprogs \
     git \
-    nodejs \
-    npm \
     pkg-config \
     ca-certificates \
     sudo \
@@ -56,7 +54,6 @@ RUN cargo binstall --no-confirm ast-grep@0.43.0 || cargo install --locked ast-gr
 # cargo-fuzz drives the Gauntlet Phase 0B libFuzzer smoke lane (frame_decode).
 # Pinned in lock-step with the ci.yml fuzz-smoke job and xtask setup.
 RUN cargo binstall --no-confirm cargo-fuzz@0.13.2 || cargo install --locked cargo-fuzz@0.13.2
-RUN npm install -g pnpm@10.33.0
 # The published GNU binary currently requires a newer glibc than bookworm ships,
 # so install cargo-mutants from source in the canonical container.
 RUN cargo install --locked cargo-mutants@27.0.0

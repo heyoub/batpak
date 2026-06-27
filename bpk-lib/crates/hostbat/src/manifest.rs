@@ -244,7 +244,7 @@ impl HostModuleManifest {
 
     /// Schema descriptors this module owns, in canonical `(id, version, role)`
     /// order. These are the language-neutral wire-shape declarations the
-    /// composition aggregates and S12's TypeScript codegen consumes.
+    /// composition aggregates for the Rust host contract.
     pub fn schemas(&self) -> impl Iterator<Item = &SchemaDescriptor> {
         self.schemas.iter()
     }

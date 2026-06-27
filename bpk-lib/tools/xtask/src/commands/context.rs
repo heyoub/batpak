@@ -19,9 +19,9 @@ use crate::ContextArgs;
 const SCHEMA_VERSION: u32 = 2;
 
 const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
-    ("factory/host-dev-profile", "factory/ordnance-cut"),
-    ("factory/audit-loop", "factory/host-dev-profile"),
-    ("factory/descriptor-inventory", "factory/audit-loop"),
+    ("factory/rust-host-profile", "factory/ordnance-cut"),
+    ("factory/runtime-proof-loop", "factory/rust-host-profile"),
+    ("factory/descriptor-inventory", "factory/runtime-proof-loop"),
     ("factory/factory-ledger", "factory/descriptor-inventory"),
     ("factory/host-proof-verbs", "factory/factory-ledger"),
     ("factory/context-packets", "factory/host-proof-verbs"),
@@ -35,7 +35,7 @@ const BOUNDARY_REMINDERS: &[&str] = &[
     "event.walk is hash-chain ancestry only; event.query is commit-order pagination.",
 ];
 
-const PROOF_COMMAND_MARKERS: &[&str] = &["host-dev", "host-loop", "inspect", "verify"];
+const PROOF_COMMAND_MARKERS: &[&str] = &["inspect", "verify"];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ContextPacket {
@@ -816,11 +816,11 @@ mod tests {
             untracked_warnings: Vec::new(),
             verification_summary: VerificationSummary {
                 recent_gates: vec![GateHighlightRow {
-                    gate: "host-dev".to_owned(),
+                    gate: "verify".to_owned(),
                     status: "ok".to_owned(),
                     head: "afb63dc".to_owned(),
                     duration_ms: 1234,
-                    summary: "host-dev ok @ afb63dc duration=1234ms".to_owned(),
+                    summary: "verify ok @ afb63dc duration=1234ms".to_owned(),
                 }],
                 ledger_tail: Vec::new(),
                 operator_notes: None,
@@ -833,7 +833,7 @@ mod tests {
         };
         let rendered = render_context_markdown(&packet);
         assert!(rendered.contains("## Recent gates"));
-        assert!(rendered.contains("host-dev ok @ afb63dc duration=1234ms"));
+        assert!(rendered.contains("verify ok @ afb63dc duration=1234ms"));
     }
 
     #[test]
