@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 
 use crate::{MutantMode, MutantSurface, MutantsArgs};
 
+use super::dst_corpus::apply_graduated_dst_corpus_augmentation;
 use super::lanes::{
     critical_mutation_lanes, critical_mutation_smoke_lane_for_seam, critical_mutation_smoke_lanes,
     critical_seam_slugs, repo_wide_mutation_lanes, MutationBaseline, MutationLane,
@@ -85,6 +86,11 @@ pub(super) fn mutants_command(
         args.push(package.to_owned());
     }
 
+    for package in &lane.test_packages {
+        args.push("--test-package".to_owned());
+        args.push((*package).to_owned());
+    }
+
     match lane.surface {
         MutantSurface::AllFeatures => args.push("--all-features".to_owned()),
         MutantSurface::NoDefaultFeatures => args.push("--no-default-features".to_owned()),
@@ -120,6 +126,11 @@ pub(super) fn mutants_command(
     args
 }
 
+fn finish_run_plan(mut lanes: Vec<MutationLane>) -> Result<MutantExecutionPlan> {
+    apply_graduated_dst_corpus_augmentation(&mut lanes)?;
+    Ok(MutantExecutionPlan::Run(lanes))
+}
+
 pub(super) fn build_mutant_execution_plan(args: &MutantsArgs) -> Result<MutantExecutionPlan> {
     match args.mode {
         MutantMode::Policy => {
@@ -146,14 +157,14 @@ pub(super) fn build_mutant_execution_plan(args: &MutantsArgs) -> Result<MutantEx
                         bail!("unknown critical seam `{slug}`; valid slugs: {valid}");
                     }
                 };
-                return Ok(MutantExecutionPlan::Run(with_run_baseline(vec![lane])));
+                return finish_run_plan(with_run_baseline(vec![lane]));
             }
 
             if args.repo_wide_only {
-                return Ok(MutantExecutionPlan::Run(with_run_baseline(vec![
+                return finish_run_plan(with_run_baseline(vec![
                     MutationLane::repo_wide_smoke(MutantSurface::AllFeatures),
                     MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures),
-                ])));
+                ]));
             }
 
             let mut lanes = critical_mutation_smoke_lanes();
@@ -161,7 +172,7 @@ pub(super) fn build_mutant_execution_plan(args: &MutantsArgs) -> Result<MutantEx
                 MutationLane::repo_wide_smoke(MutantSurface::AllFeatures),
                 MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures),
             ]);
-            Ok(MutantExecutionPlan::Run(with_batched_baseline(lanes)))
+            finish_run_plan(with_batched_baseline(lanes))
         }
         MutantMode::Full => {
             if args.seam.is_some() || args.repo_wide_only {
@@ -177,15 +188,12 @@ pub(super) fn build_mutant_execution_plan(args: &MutantsArgs) -> Result<MutantEx
             );
 
             if args.surface.is_some() || args.shard.is_some() {
-                return Ok(MutantExecutionPlan::Run(repo_wide_mutation_lanes(
-                    surfaces,
-                    args.shard.as_deref(),
-                )));
+                return finish_run_plan(repo_wide_mutation_lanes(surfaces, args.shard.as_deref()));
             }
 
             let mut lanes = critical_mutation_lanes();
             lanes.extend(repo_wide_mutation_lanes(surfaces, None));
-            Ok(MutantExecutionPlan::Run(with_batched_baseline(lanes)))
+            finish_run_plan(with_batched_baseline(lanes))
         }
     }
 }

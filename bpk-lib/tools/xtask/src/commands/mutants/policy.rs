@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use std::path::Path;
 
+use super::dst_corpus::{load_dst_coverage_seams, DST_CORPUS_TEST_PACKAGE};
 use super::lanes::{
     critical_mutation_seams, critical_mutation_smoke_lanes, surface_name,
     CRITICAL_SEAM_MIN_CATCH_PCT, MUTANTS_OUTPUT_ROOT_LABEL, MUTANT_EXCLUDE_RES,
@@ -204,6 +205,15 @@ pub(super) fn print_mutation_policy() {
         CRITICAL_SEAM_MIN_CATCH_PCT,
         REPO_WIDE_SMOKE_SHARD,
     );
+    outln!(
+        "- Critical seams with `dst_coverage: true` in traceability/seam_registry.yaml also run the graduated DST corpus additively in the per-mutant workload via `--test-package {DST_CORPUS_TEST_PACKAGE}` (including `dst_corpus_currency`); the normal seam mutation files and tests remain in the lane."
+    );
+    if let Ok(dst_seams) = load_dst_coverage_seams() {
+        outln!(
+            "- DST corpus-backed critical seams today: {}.",
+            dst_seams.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
     outln!(
         "- `cargo xtask mutants full`: with no overrides, run the full policy; with `--surface` and/or `--shard`, run only the requested repo-wide ratchet lane."
     );

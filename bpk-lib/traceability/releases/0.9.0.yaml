@@ -60,17 +60,23 @@ rows:
 
   - id: STORE-64C-HYBRID-MUTATION
     title: L4 mutation kill-test uses graduated DST corpus sweep (#64-C)
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: batpak
     witness_seams:
       - fork-isolation
       - import-reapply
       - writer-commit
-    blocked_by:
-      - lanes.rs HYBRID MODE HOOK still deferred
-      - dst_coverage false for fork/import seams
-    notes: Corpus engine exists; hybrid mutation lane not wired.
+    witness_tests:
+      - tools/xtask/src/commands/mutants/mod.rs::dst_coverage_seams_get_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::non_dst_coverage_seams_do_not_get_corpus_augmented
+      - tools/xtask/src/commands/mutants/mod.rs::dst_coverage_unknown_seam_fails_closed
+      - tools/xtask/src/commands/mutants/mod.rs::fork_isolation_command_includes_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::cursor_delivery_command_omits_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::no_primary_lane_narrows_to_dst_corpus_only
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
+    proof_commands:
+      - just inspect
 
   - id: STORE-DST-FORK-IMPORT-CORPUS
     title: Graduated corpus covers fork-isolation and import-reapply seams

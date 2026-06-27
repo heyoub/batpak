@@ -311,6 +311,12 @@ pub(super) struct CriticalMutationSeam {
     pub(super) paths: &'static [&'static str],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum MutationTestAugment {
+    /// Additive per-mutant workload: BatPak graduated DST corpus tests.
+    GraduatedDstCorpus,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct MutationLane {
     pub(super) label: String,
@@ -331,6 +337,10 @@ pub(super) struct MutationLane {
     pub(super) paths: &'static [&'static str],
     pub(super) excludes: &'static [&'static str],
     pub(super) exclude_res: &'static [&'static str],
+    /// Additive per-mutant test workload beyond the lane's normal seam tests.
+    pub(super) test_augments: Vec<MutationTestAugment>,
+    /// Extra `--test-package` values cargo-mutants runs per mutant.
+    pub(super) test_packages: Vec<&'static str>,
 }
 
 impl MutationLane {
@@ -352,6 +362,8 @@ impl MutationLane {
             paths: seam.paths,
             excludes: &[],
             exclude_res: critical_seam_exclude_res(seam.slug),
+            test_augments: Vec::new(),
+            test_packages: Vec::new(),
         }
     }
 
@@ -381,6 +393,8 @@ impl MutationLane {
             paths: seam.paths,
             excludes: &[],
             exclude_res: critical_seam_exclude_res(seam.slug),
+            test_augments: Vec::new(),
+            test_packages: Vec::new(),
         }
     }
 
@@ -403,6 +417,8 @@ impl MutationLane {
             paths: repo_wide_paths(surface),
             excludes: surface_excludes(surface),
             exclude_res: surface_exclude_res(surface),
+            test_augments: Vec::new(),
+            test_packages: Vec::new(),
         }
     }
 
@@ -425,6 +441,8 @@ impl MutationLane {
             paths: repo_wide_paths(surface),
             excludes: surface_excludes(surface),
             exclude_res: surface_exclude_res(surface),
+            test_augments: Vec::new(),
+            test_packages: Vec::new(),
         }
     }
 
@@ -531,13 +549,6 @@ fn critical_seam_exclude_res(slug: &str) -> &'static [&'static str] {
 }
 
 pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
-    // HYBRID MODE HOOK (#64-C, deferred): for L4 seams (`writer-commit`,
-    // `segment-scan`, `hash-chain-replay`, `frontier-wait-durable`,
-    // `fork-isolation`, `import-reapply`), a future mutation-lane mode should
-    // use `store::sim::corpus::run_corpus_sweep` over `traceability/dst_corpus.yaml`
-    // as the kill-test — a mutant surviving the whole graduated corpus is a true
-    // divergence finding. Wire when SIM-2b broadens DST routing beyond the
-    // honest-disk recovery surface the corpus covers today.
     &[
         CriticalMutationSeam {
             slug: "writer-commit",

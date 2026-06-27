@@ -1,3 +1,4 @@
+mod dst_corpus;
 mod lanes;
 mod plan;
 mod policy;
@@ -28,9 +29,13 @@ pub(crate) fn mutants(args: &MutantsArgs) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::dst_corpus::{
+        apply_graduated_dst_corpus_augmentation, load_dst_coverage_seams,
+        validate_dst_corpus_wiring, DST_CORPUS_TEST_PACKAGE,
+    };
     use super::lanes::{
         critical_mutation_lanes, critical_mutation_smoke_lanes, surface_excludes, MutationBaseline,
-        MutationLane, MutationScope, MutationSharding, CURSOR_MUTANT_FILES,
+        MutationLane, MutationScope, MutationSharding, MutationTestAugment, CURSOR_MUTANT_FILES,
         EVENT_PAYLOAD_REGISTRY_MUTANT_FILES, FRONTIER_APPEND_GATE_MUTANT_FILES,
         FRONTIER_WAIT_MUTANT_FILES, INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
         NETBAT_BOUNDARY_MUTANT_FILES, PLATFORM_BACKEND_MUTANT_FILES, PROJECTION_MUTANT_FILES,
@@ -47,6 +52,7 @@ mod tests {
         cargo_mutants_receipt_path, cargo_mutants_results_dir, mutation_score, MutationScore,
     };
     use crate::{MutantMode, MutantSurface, MutantsArgs};
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -81,6 +87,7 @@ mod tests {
             MutationLane::repo_wide_smoke(MutantSurface::NoDefaultFeatures)
                 .with_baseline(MutationBaseline::Skip),
         ]);
+        apply_graduated_dst_corpus_augmentation(&mut expected).expect("registry wiring");
 
         assert_eq!(plan, MutantExecutionPlan::Run(expected));
     }
@@ -107,10 +114,12 @@ mod tests {
 
     #[test]
     fn mutants_writer_commit_surface_stays_xtask_owned() {
-        let lane = critical_mutation_lanes()
+        let mut lane = critical_mutation_lanes()
             .into_iter()
             .find(|lane| lane.slug == "writer-commit")
             .expect("writer commit seam");
+        apply_graduated_dst_corpus_augmentation(std::slice::from_mut(&mut lane))
+            .expect("writer-commit is dst_coverage-backed");
         assert_eq!(
             mutants_command(
                 &lane,
@@ -132,6 +141,8 @@ mod tests {
                 lane.exclude_res[0],
                 "--exclude-re",
                 lane.exclude_res[1],
+                "--test-package",
+                DST_CORPUS_TEST_PACKAGE,
                 "--all-features",
                 "--cargo-arg",
                 "--locked",
@@ -681,5 +692,143 @@ mod tests {
             err.to_string().contains(&missed_path),
             "threshold guidance must point at nested cargo-mutants receipts, got: {err:#}"
         );
+    }
+
+    fn augmented_lane(slug: &str) -> anyhow::Result<MutationLane> {
+        let mut lane = critical_mutation_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == slug)
+            .ok_or_else(|| anyhow::anyhow!("critical seam `{slug}` missing from registry"))?;
+        apply_graduated_dst_corpus_augmentation(std::slice::from_mut(&mut lane))?;
+        Ok(lane)
+    }
+
+    #[test]
+    fn dst_coverage_seams_get_batpak_test_package() -> anyhow::Result<()> {
+        let dst_seams = load_dst_coverage_seams()?;
+        for slug in ["writer-commit", "fork-isolation", "import-reapply"] {
+            assert!(
+                dst_seams.contains(slug),
+                "committed registry must mark `{slug}` dst_coverage: true"
+            );
+            let lane = augmented_lane(slug)?;
+            assert!(lane
+                .test_augments
+                .contains(&MutationTestAugment::GraduatedDstCorpus));
+            assert!(lane.test_packages.contains(&DST_CORPUS_TEST_PACKAGE));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn non_dst_coverage_seams_do_not_get_corpus_augmented() -> anyhow::Result<()> {
+        let dst_seams = load_dst_coverage_seams()?;
+        let mut lanes = critical_mutation_lanes();
+        apply_graduated_dst_corpus_augmentation(&mut lanes)?;
+        validate_dst_corpus_wiring(&lanes, &dst_seams)?;
+
+        let cursor = lanes
+            .iter()
+            .find(|lane| lane.slug == "cursor-delivery")
+            .expect("cursor lane");
+        assert!(!cursor
+            .test_augments
+            .contains(&MutationTestAugment::GraduatedDstCorpus));
+        assert!(!cursor.test_packages.contains(&DST_CORPUS_TEST_PACKAGE));
+        Ok(())
+    }
+
+    #[test]
+    fn dst_coverage_lane_missing_augmentation_fails_closed() -> anyhow::Result<()> {
+        let dst_seams = load_dst_coverage_seams()?;
+        let lanes = critical_mutation_lanes();
+        let err = validate_dst_corpus_wiring(&lanes, &dst_seams)
+            .expect_err("unaugmented dst_coverage lanes must fail closed");
+        assert!(
+            err.to_string().contains("writer-commit"),
+            "error must name an unaugmented dst_coverage seam, got: {err}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dst_coverage_unknown_seam_fails_closed() {
+        let ghost = BTreeSet::from(["no-such-seam".to_owned()]);
+        let critical_slugs: BTreeSet<String> = critical_mutation_lanes()
+            .iter()
+            .map(|lane| lane.slug.clone())
+            .collect();
+        let err = super::dst_corpus::assert_dst_seams_have_critical_lanes_for_test(
+            &ghost,
+            &critical_slugs,
+        )
+        .expect_err("unknown dst_coverage seam must fail closed");
+        assert!(
+            err.to_string().contains("no-such-seam"),
+            "error must name the uncovered seam, got: {err}"
+        );
+    }
+
+    #[test]
+    fn fork_isolation_command_includes_batpak_test_package() -> anyhow::Result<()> {
+        let lane = augmented_lane("fork-isolation")?;
+        let command = mutants_command(
+            &lane,
+            Path::new("/repo/bpk-lib/target/xtask-mutants/fork-isolation-all-features"),
+            None,
+        );
+        let test_package_index = command
+            .iter()
+            .position(|arg| arg == "--test-package")
+            .expect("--test-package");
+        assert_eq!(command[test_package_index + 1], DST_CORPUS_TEST_PACKAGE);
+        assert!(
+            command.iter().filter(|arg| *arg == "--file").count() >= 1,
+            "fork lane must keep its seam file globs"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cursor_delivery_command_omits_batpak_test_package() -> anyhow::Result<()> {
+        let mut lanes = critical_mutation_lanes();
+        apply_graduated_dst_corpus_augmentation(&mut lanes)?;
+        let lane = lanes
+            .iter()
+            .find(|lane| lane.slug == "cursor-delivery")
+            .expect("cursor lane");
+        let command = mutants_command(
+            lane,
+            Path::new("/repo/bpk-lib/target/xtask-mutants/cursor-delivery-all-features"),
+            None,
+        );
+        assert!(!command.iter().any(|arg| arg == "--test-package"));
+        Ok(())
+    }
+
+    #[test]
+    fn no_primary_lane_narrows_to_dst_corpus_only() -> anyhow::Result<()> {
+        let mut lanes = critical_mutation_lanes();
+        apply_graduated_dst_corpus_augmentation(&mut lanes)?;
+        for lane in lanes {
+            let command = mutants_command(
+                &lane,
+                Path::new("/repo/bpk-lib/target/xtask-mutants/example"),
+                None,
+            );
+            assert!(
+                !command
+                    .iter()
+                    .any(|arg| arg.contains("dst_corpus_currency")),
+                "primary lane `{slug}` must not narrow tests to dst_corpus_currency only",
+                slug = lane.slug
+            );
+            assert!(
+                command.iter().filter(|arg| *arg == "--file").count() >= 1,
+                "primary lane `{slug}` must retain seam file globs",
+                slug = lane.slug
+            );
+        }
+        Ok(())
     }
 }
