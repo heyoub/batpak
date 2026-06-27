@@ -97,6 +97,8 @@ pub(super) const SYNCBAT_CATALOG_MUTANT_FILES: &[&str] = &[
     "crates/syncbat/src/register.rs",
     "crates/syncbat/src/register_store/**/*.rs",
 ];
+pub(super) const SYNCBAT_SUBSCRIPTION_RUNTIME_MUTANT_FILES: &[&str] =
+    &["crates/syncbat/src/subscription_runtime/**/*.rs"];
 pub(super) const NETBAT_BOUNDARY_MUTANT_FILES: &[&str] = &[
     "crates/netbat/src/lib.rs",
     "crates/netbat/src/route.rs",
@@ -645,6 +647,14 @@ pub(super) fn critical_mutation_seams() -> &'static [CriticalMutationSeam] {
             surface: MutantSurface::AllFeatures,
             package: Some("syncbat"),
             paths: SYNCBAT_CATALOG_MUTANT_FILES,
+        },
+        CriticalMutationSeam {
+            slug: "syncbat-subscription-runtime",
+            label: "syncbat subscription event stream runtime",
+            description: "syncbat subscription registry, cursor v1, replay/live wake, ACK/backpressure, watermark, and delivery envelopes",
+            surface: MutantSurface::AllFeatures,
+            package: Some("syncbat"),
+            paths: SYNCBAT_SUBSCRIPTION_RUNTIME_MUTANT_FILES,
         },
         CriticalMutationSeam {
             slug: "netbat-boundary-protocol",

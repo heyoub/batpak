@@ -103,6 +103,12 @@
     - crates/syncbat/src/register.rs
     - crates/syncbat/src/register_store/**/*.rs
 
+- slug: syncbat-subscription-runtime
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/syncbat/src/subscription_runtime/**/*.rs
+
 - slug: netbat-boundary-protocol
   assurance_level: L3
   dst_coverage: false

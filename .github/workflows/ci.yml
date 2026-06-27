@@ -392,6 +392,7 @@ jobs:
           - integrity-graders
           - syncbat-runtime-dispatch
           - syncbat-register-catalog
+          - syncbat-subscription-runtime
           - netbat-boundary-protocol
           - fork-isolation
           - import-reapply

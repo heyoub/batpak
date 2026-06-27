@@ -4,7 +4,7 @@
 # Gate DEPTH is a function of AL, not of which CI label happened to fire.
 #
 #   L0  hygiene/format/lint-only surfaces
-#   L1  normal library code (default for any unmatched production file)
+#   L1  normal library code (derived from Cargo production roots when no glob matches)
 #   L2  contracts: public API + on-disk / serialized / wire shapes
 #   L3  deterministic runtime: writer/visibility/projection/frontier/cold-start
 #   L4  "if it lies, downstream trusts a forged reality": durability,
@@ -122,6 +122,12 @@
   globs:
     - crates/syncbat/src/register.rs
     - crates/syncbat/src/register_store/**/*.rs
+
+- level: L3
+  seam: syncbat-subscription-runtime
+  rationale: "store-backed subscription replay/live delivery is deterministic runtime"
+  globs:
+    - crates/syncbat/src/subscription_runtime/**/*.rs
 
 - level: L3
   seam: netbat-boundary-protocol
