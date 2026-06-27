@@ -10,9 +10,9 @@ use std::thread;
 use std::time::Duration;
 
 use syncbat::{
-    cursor_invalid_error, cursor_mismatch_error, unknown_subscription_error, RuntimeCursor,
-    SessionControl, SessionDelivery, SessionEnd, SessionError, SessionPoll,
-    SubscriptionRuntimeError, SubscriptionSession, SubscriptionSessionFactory,
+    unknown_subscription_error, RuntimeCursor, SessionControl, SessionDelivery, SessionEnd,
+    SessionError, SessionPoll, SubscriptionRuntimeError, SubscriptionSession,
+    SubscriptionSessionFactory,
 };
 
 use super::error::NetbatError;
@@ -24,6 +24,9 @@ use super::stream_frame::{
     SubWatermarkFrame, SubscribeFrame, SubscriptionToken,
 };
 use super::tcp::{apply_timeouts, read_line, ShutdownHandle};
+
+const CURSOR_INVALID_CODE: &str = "cursor_invalid";
+const CURSOR_MISMATCH_CODE: &str = "cursor_mismatch";
 
 /// Summary returned after a NETBAT/2 subscription listener exits.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -371,21 +374,57 @@ fn map_open_error(subscription_id: &str, error: &SubscriptionRuntimeError) -> Se
         SubscriptionRuntimeError::UnknownSubscription { .. } => {
             unknown_subscription_error(subscription_id)
         }
-        SubscriptionRuntimeError::CursorInvalid { reason } => cursor_invalid_error(reason),
-        SubscriptionRuntimeError::CursorMismatch { reason } => cursor_mismatch_error(reason),
-        SubscriptionRuntimeError::InvalidSubscriptionId { reason } => cursor_invalid_error(reason),
-        SubscriptionRuntimeError::DuplicateSubscription { .. } => {
-            cursor_invalid_error("duplicate subscription route")
+        SubscriptionRuntimeError::CursorInvalid { reason } => {
+            open_error_for_subscription(subscription_id, CURSOR_INVALID_CODE, reason)
         }
+        SubscriptionRuntimeError::CursorMismatch { reason } => {
+            open_error_for_subscription(subscription_id, CURSOR_MISMATCH_CODE, reason)
+        }
+        SubscriptionRuntimeError::InvalidSubscriptionId { reason } => {
+            open_error_for_subscription(subscription_id, CURSOR_INVALID_CODE, reason)
+        }
+        SubscriptionRuntimeError::DuplicateSubscription { .. } => open_error_for_subscription(
+            subscription_id,
+            CURSOR_INVALID_CODE,
+            "duplicate subscription route",
+        ),
         SubscriptionRuntimeError::InvalidRoute { reason }
-        | SubscriptionRuntimeError::InvalidConfig { reason } => cursor_invalid_error(reason),
-        SubscriptionRuntimeError::Store(_) => cursor_invalid_error("store error during subscribe"),
-        SubscriptionRuntimeError::EnvelopeEncoding(_) => {
-            cursor_invalid_error("envelope encoding failed")
+        | SubscriptionRuntimeError::InvalidConfig { reason } => {
+            open_error_for_subscription(subscription_id, CURSOR_INVALID_CODE, reason)
         }
-        SubscriptionRuntimeError::Worker(_) => cursor_invalid_error("subscription worker failed"),
-        SubscriptionRuntimeError::AckInvalid { reason } => cursor_invalid_error(reason),
+        SubscriptionRuntimeError::Store(_) => open_error_for_subscription(
+            subscription_id,
+            CURSOR_INVALID_CODE,
+            "store error during subscribe",
+        ),
+        SubscriptionRuntimeError::EnvelopeEncoding(_) => open_error_for_subscription(
+            subscription_id,
+            CURSOR_INVALID_CODE,
+            "envelope encoding failed",
+        ),
+        SubscriptionRuntimeError::Worker(_) => open_error_for_subscription(
+            subscription_id,
+            CURSOR_INVALID_CODE,
+            "subscription worker failed",
+        ),
+        SubscriptionRuntimeError::AckInvalid { reason } => {
+            open_error_for_subscription(subscription_id, CURSOR_INVALID_CODE, reason)
+        }
     }
+}
+
+fn open_error_for_subscription(
+    subscription_id: &str,
+    code: &'static str,
+    reason: &'static str,
+) -> SessionDelivery {
+    SessionDelivery::Error(SessionError {
+        subscription_id: Some(subscription_id.to_owned()),
+        code,
+        last_delivered_cursor: None,
+        last_acked_cursor: None,
+        message: reason.as_bytes().to_vec(),
+    })
 }
 
 fn map_error_frame(error: &SessionError, limits: &Limits) -> Result<SubErrFrame, NetbatError> {

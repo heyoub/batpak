@@ -205,6 +205,14 @@ struct FileDiff {
     path: String,
     added: Vec<String>,
     removed: Vec<String>,
+    body: Vec<DiffLine>,
+}
+
+#[derive(Debug)]
+enum DiffLine {
+    Added(String),
+    Removed(String),
+    Context(String),
 }
 
 /// Parse a unified diff into per-file added/removed line sets. Robust to the
@@ -245,13 +253,21 @@ fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
             }
             continue;
         }
-        if line.starts_with("--- ") || line.starts_with("@@") {
+        if line.starts_with("--- ") {
+            continue;
+        }
+        if line.starts_with("@@") {
+            file.body.push(DiffLine::Context(String::new()));
             continue;
         }
         if let Some(content) = line.strip_prefix('+') {
             file.added.push(content.to_string());
+            file.body.push(DiffLine::Added(content.to_string()));
         } else if let Some(content) = line.strip_prefix('-') {
             file.removed.push(content.to_string());
+            file.body.push(DiffLine::Removed(content.to_string()));
+        } else if let Some(content) = line.strip_prefix(' ') {
+            file.body.push(DiffLine::Context(content.to_string()));
         }
     }
     if let Some(file) = current.take() {
@@ -559,42 +575,55 @@ fn waiver_blast_radius(file: &FileDiff) -> BlastRadius {
     }
 }
 
-/// Detect a new quoted-string / `r"..."` element added to one of the watched
-/// source allowlist arrays. Requires a context signal — an array marker present
-/// in any of the file's diff lines — then flags an added bare quoted list
-/// element as a new exclusion entry.
+/// Detect a new raw-regex element added to one of the watched source allowlist
+/// arrays. Requires a context signal — an array marker present in any of the
+/// file's diff lines — then flags an added raw-string list element as a new
+/// exclusion entry. Plain quoted file paths are intentionally ignored here:
+/// mutation lane include-lists also live in `lanes.rs`, and adding a covered
+/// source file strengthens the gate rather than weakening it.
 fn detect_source_array_entry(file: &FileDiff, findings: &mut Vec<Weakening>) {
-    let touches_allowlist_array = file
-        .added
-        .iter()
-        .chain(file.removed.iter())
-        .any(|l| SOURCE_ALLOWLIST_ARRAY_MARKERS.iter().any(|m| l.contains(m)));
-    if !touches_allowlist_array {
-        return;
-    }
-    for line in &file.added {
-        if is_quoted_list_element(line) {
-            findings.push(Weakening {
-                kind: WeakeningKind::WaiverEntryAdded,
-                detail: format!("new mutant-exclusion / allowlist entry: {}", line.trim()),
-                file: file.path.clone(),
-                blast_radius: BlastRadius::Standard,
-            });
-            break;
+    let mut in_allowlist_array = false;
+    for line in &file.body {
+        let content = match line {
+            DiffLine::Added(content) | DiffLine::Removed(content) | DiffLine::Context(content) => {
+                content
+            }
+        };
+        if SOURCE_ALLOWLIST_ARRAY_MARKERS
+            .iter()
+            .any(|marker| content.contains(marker))
+        {
+            in_allowlist_array = true;
+        }
+        if in_allowlist_array {
+            if let DiffLine::Added(added) = line {
+                if is_raw_regex_list_element(added) {
+                    findings.push(Weakening {
+                        kind: WeakeningKind::WaiverEntryAdded,
+                        detail: format!("new mutant-exclusion / allowlist entry: {}", added.trim()),
+                        file: file.path.clone(),
+                        blast_radius: BlastRadius::Standard,
+                    });
+                    break;
+                }
+            }
+            if content.trim() == "];" {
+                in_allowlist_array = false;
+            }
         }
     }
 }
 
-/// True for an added line that is a standalone quoted-string list element:
-/// `"..."` or `r"..."` optionally with a trailing comma. NOT a `const`
+/// True for an added line that is a standalone raw-string regex list element:
+/// `r"..."` or `r#"..."#` optionally with a trailing comma. NOT a `const`
 /// declaration line (that is the array itself, not an entry) and NOT a comment.
-fn is_quoted_list_element(line: &str) -> bool {
+fn is_raw_regex_list_element(line: &str) -> bool {
     let t = line.trim();
     if t.starts_with("//") || t.contains("const ") || t.contains('=') {
         return false;
     }
-    (t.starts_with('"') || t.starts_with("r\"") || t.starts_with("r#\""))
-        && (t.ends_with("\",") || t.ends_with('"') || t.ends_with("\"#,"))
+    (t.starts_with("r\"") && (t.ends_with("\",") || t.ends_with('"')))
+        || (t.starts_with("r#\"") && (t.ends_with("\"#,") || t.ends_with("\"#")))
 }
 
 /// An `assurance_levels.yaml` DOWNGRADE: fires when the max `level:` on the added

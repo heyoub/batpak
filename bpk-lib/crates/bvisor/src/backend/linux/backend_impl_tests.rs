@@ -271,9 +271,7 @@ fn cgroup_for_run_fails_closed_when_a_required_leaf_cannot_be_created() {
 #[test]
 fn linux_unimplemented_kinds_refuse_at_plan() {
     use crate::contract::capability::{Capability, FdPolicy};
-    use crate::contract::host_control::{
-        CommitDurability, HostControl, KillGuarantee, KillTarget, PathView,
-    };
+    use crate::contract::host_control::{CommitDurability, HostControl, PathView};
     use crate::contract::plan::{BoundarySpec, PlanError};
     use crate::contract::registry::{BackendRegistry, BoundaryPlanner};
     use std::sync::Arc;
@@ -309,7 +307,17 @@ fn linux_unimplemented_kinds_refuse_at_plan() {
                 }],
                 vec![],
             ),
-            _ => {
+            RequirementKind::Filesystem
+            | RequirementKind::NetworkDenyAll
+            | RequirementKind::NetworkAllowList
+            | RequirementKind::ChildSpawnDenyNewTasks
+            | RequirementKind::ChildSpawnAllowThreads
+            | RequirementKind::ChildSpawnAllowDescendants
+            | RequirementKind::Environment
+            | RequirementKind::InheritedFdsNone
+            | RequirementKind::LaunchWorkload
+            | RequirementKind::CaptureStreams
+            | RequirementKind::Kill => {
                 assert!(
                     std::hint::black_box(false),
                     "PROPERTY: unexpected kind in linux unimplemented refusal test"

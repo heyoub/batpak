@@ -55,6 +55,13 @@ pub(crate) fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> Result
         .to_owned())
 }
 
+pub(crate) fn git_output_lossy<const N: usize>(root: &Path, args: [&str; N]) -> Result<String> {
+    let mut command = Command::new("git");
+    command.current_dir(root).args(args);
+    let output = run_output(command)?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 pub(crate) fn command_succeeds<const N: usize>(program: &str, args: [&str; N]) -> bool {
     Command::new(program)
         .args(args)

@@ -7,7 +7,7 @@
 //! approval logic. All detection lives in the integrity crate so it is unit- and
 //! mutation-tested; this shell is intentionally I/O-only.
 
-use crate::util::{cargo_target_dir, git_output, repo_root};
+use crate::util::{cargo_target_dir, git_output, git_output_lossy, repo_root};
 use crate::MetaGateArgs;
 use anyhow::{Context, Result};
 use std::fs;
@@ -58,7 +58,7 @@ pub(crate) fn meta_gate(args: &MetaGateArgs) -> Result<()> {
 
     // The unified diff for the classifier. `--no-color`/no `--stat` so the text
     // is the raw unified-diff shape `parse_unified_diff` expects.
-    let diff = git_output(&root, ["diff", "--no-color", &format!("{base}..HEAD")])
+    let diff = git_output_lossy(&root, ["diff", "--no-color", &format!("{base}..HEAD")])
         .context("git diff base..HEAD for meta-gate")?;
     // Commit messages with author + body, record-separated so the integrity side
     // can attribute `GAUNTLET-WEAKEN-OK:` trailers to their commit author.

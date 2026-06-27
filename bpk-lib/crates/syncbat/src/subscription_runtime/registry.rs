@@ -715,15 +715,31 @@ fn validate_wire_and_backpressure(
     wire_payload_schema_ref: &str,
     backpressure_capacity: &Option<usize>,
 ) -> Result<(), SubscriptionRuntimeError> {
-    if wire_payload_schema_ref.is_empty() {
-        return Err(SubscriptionRuntimeError::InvalidRoute {
-            reason: "wire payload schema ref is empty",
-        });
+    if let Err(reason) = validate_wire_payload_schema_ref(wire_payload_schema_ref) {
+        return Err(SubscriptionRuntimeError::InvalidRoute { reason });
     }
     if matches!(backpressure_capacity, Some(0)) {
         return Err(SubscriptionRuntimeError::InvalidRoute {
             reason: "backpressure capacity is zero",
         });
+    }
+    Ok(())
+}
+
+fn validate_wire_payload_schema_ref(reference: &str) -> Result<(), &'static str> {
+    if reference.is_empty() {
+        return Err("wire payload schema ref is empty");
+    }
+    if reference.len() > MAX_DESCRIPTOR_REF_BYTES {
+        return Err("wire payload schema ref longer than 256 bytes");
+    }
+    if reference.contains(char::is_whitespace) {
+        return Err("wire payload schema ref contains whitespace");
+    }
+    if !reference.bytes().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
+    }) {
+        return Err("wire payload schema ref has characters outside [a-z0-9._-]");
     }
     Ok(())
 }

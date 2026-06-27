@@ -160,11 +160,11 @@ fn assert_plan_refuses(
 }
 
 fn scaffolding_refuses_representative_enforced_kinds(
-    backend: Arc<dyn Backend>,
+    backend: &Arc<dyn Backend>,
     kinds: &[RequirementKind],
 ) -> Result<(), String> {
     let id = backend.id();
-    let registry = registry_with(Arc::clone(&backend));
+    let registry = registry_with(Arc::clone(backend));
     let planner = BoundaryPlanner::new(&registry);
     for &kind in kinds {
         assert!(
@@ -196,24 +196,18 @@ const WASM_REPRESENTATIVE: &[RequirementKind] = &[
 
 #[test]
 fn windows_scaffolding_refuses_representative_enforced_kinds() -> Result<(), String> {
-    scaffolding_refuses_representative_enforced_kinds(
-        Arc::new(ScaffoldingBackend::windows()),
-        WINDOWS_REPRESENTATIVE,
-    )
+    let backend = Arc::new(ScaffoldingBackend::windows()) as Arc<dyn Backend>;
+    scaffolding_refuses_representative_enforced_kinds(&backend, WINDOWS_REPRESENTATIVE)
 }
 
 #[test]
 fn macos_scaffolding_refuses_representative_enforced_kinds() -> Result<(), String> {
-    scaffolding_refuses_representative_enforced_kinds(
-        Arc::new(ScaffoldingBackend::macos()),
-        MACOS_REPRESENTATIVE,
-    )
+    let backend = Arc::new(ScaffoldingBackend::macos()) as Arc<dyn Backend>;
+    scaffolding_refuses_representative_enforced_kinds(&backend, MACOS_REPRESENTATIVE)
 }
 
 #[test]
 fn wasm_scaffolding_refuses_representative_enforced_kinds() -> Result<(), String> {
-    scaffolding_refuses_representative_enforced_kinds(
-        Arc::new(ScaffoldingBackend::wasm()),
-        WASM_REPRESENTATIVE,
-    )
+    let backend = Arc::new(ScaffoldingBackend::wasm()) as Arc<dyn Backend>;
+    scaffolding_refuses_representative_enforced_kinds(&backend, WASM_REPRESENTATIVE)
 }

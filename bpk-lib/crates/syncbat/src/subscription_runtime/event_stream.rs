@@ -469,6 +469,8 @@ impl EventStreamSession {
         self.sent_cursors
             .insert(delivery_index, cursor_after_runtime.clone());
         self.last_delivered_cursor = Some(cursor_after_runtime.clone());
+        self.cursor_before_next = cursor_after;
+        self.resume_after = Some(visible.global_sequence);
         Ok(Some(SessionDelivery::Watermark(SessionWatermarkDelivery {
             subscription_id: self.subscription_id.clone(),
             delivery_index,

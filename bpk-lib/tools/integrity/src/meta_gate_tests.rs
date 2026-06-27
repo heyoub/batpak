@@ -241,6 +241,43 @@ diff --git a/traceability/typed_waivers.yaml b/traceability/typed_waivers.yaml
     );
 }
 
+#[test]
+fn adding_mutation_include_path_is_not_a_weakening() {
+    let diff = "\
+diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/commands/mutants/lanes.rs
+--- a/tools/xtask/src/commands/mutants/lanes.rs
++++ b/tools/xtask/src/commands/mutants/lanes.rs
+@@ -43,2 +43,6 @@
++pub(super) const PROJECTION_FUSION_MUTANT_FILES: &[&str] = &[
++    \"crates/core/src/store/projection/flow/fusion.rs\",
++];
+ const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
+     r\"crates/core/src/store/projection/flow/mod\\.rs:.*delete ! in execute_full_replay\",
+ ";
+    assert!(
+        classify_weakening(diff, &l4_manifest()).is_empty(),
+        "adding a mutation include-list path strengthens coverage and must not be flagged"
+    );
+}
+
+#[test]
+fn adding_mutation_exclusion_regex_without_approval_errs() {
+    let diff = "\
+diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/commands/mutants/lanes.rs
+--- a/tools/xtask/src/commands/mutants/lanes.rs
++++ b/tools/xtask/src/commands/mutants/lanes.rs
+@@ -240,2 +240,3 @@
+ const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
++    r\"crates/core/src/store/projection/flow/mod\\.rs:.*delete ! in execute_full_replay\",
+ ];
+";
+    assert_denied_for(
+        diff,
+        WeakeningKind::WaiverEntryAdded,
+        "adding a mutation exclusion regex must Err without approval",
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Mutation enforcement weakened
 // ---------------------------------------------------------------------------

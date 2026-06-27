@@ -184,6 +184,50 @@ fn subscription_runtime_event_registry_rejects_invalid_event_route(
 }
 
 #[test]
+fn subscription_runtime_event_registry_rejects_unencodable_wire_schema_ref(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = vec![
+        (
+            "batpak Event.v1".to_owned(),
+            "wire payload schema ref contains whitespace",
+        ),
+        (
+            "Batpak.event.v1".to_owned(),
+            "wire payload schema ref has characters outside [a-z0-9._-]",
+        ),
+        (
+            "a".repeat(257),
+            "wire payload schema ref longer than 256 bytes",
+        ),
+    ];
+    for (wire_payload_schema_ref, expected_reason) in cases {
+        let mut registry = SubscriptionRegistry::new();
+        let error = match registry.insert(
+            SubscriptionId::new(SUBSCRIPTION_ID)?,
+            SubscriptionRoute::EventCategory {
+                category: CATEGORY,
+                wire_payload_schema_ref,
+                inner_event_payload_schema_ref: None,
+                backpressure_capacity: None,
+            },
+        ) {
+            Ok(()) => {
+                return Err(std::io::Error::other(
+                    "PROPERTY: unencodable wire payload schema ref must be rejected",
+                )
+                .into())
+            }
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            SubscriptionRuntimeError::InvalidRoute { reason } if reason == expected_reason
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn subscription_runtime_event_open_rejects_zero_runtime_limits(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (store, _dir) = test_store()?;
@@ -289,6 +333,60 @@ fn subscription_runtime_event_replay_live_ack_and_watermark(
             .any(|delivery| matches!(delivery, SessionDelivery::Event(_))),
         "PROPERTY: live wake must deliver newly committed events"
     );
+    Ok(())
+}
+
+#[test]
+fn subscription_runtime_event_watermark_advances_cursor_chain_for_later_match(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (store, _dir) = test_store()?;
+    let coord = Coordinate::new("entity:orders", "scope:open")?;
+    let other_kind = EventKind::custom(0x0B, 1);
+    let matching_kind = EventKind::custom(CATEGORY, 1);
+    append_category_event(&store, &coord, other_kind, &serde_json::json!({"seq": 1}))?;
+
+    let (_control_tx, control_rx) = bounded(4);
+    let mut session = syncbat::EventStreamSession::open_from_registry(
+        SubscriptionStore::new(Arc::clone(&store)),
+        &test_registry()?,
+        SubscriptionRuntimeConfig::new(256, 64),
+        SUBSCRIPTION_ID,
+        None,
+        128,
+        control_rx,
+    )?;
+    let first_pass = collect_deliveries(&mut session, 2)?;
+    let watermark_cursor = first_pass
+        .iter()
+        .find_map(|delivery| match delivery {
+            SessionDelivery::Watermark(watermark) => Some(watermark.cursor_after.clone()),
+            SessionDelivery::Event(_) | SessionDelivery::Error(_) | SessionDelivery::End(_) => None,
+        })
+        .ok_or_else(|| std::io::Error::other("PROPERTY: nonmatching frontier must watermark"))?;
+    let watermark_decoded = EventStreamCursorV1::decode(watermark_cursor.as_bytes())?;
+    assert_eq!(watermark_decoded.resume_after_global_sequence(), Some(1));
+
+    append_category_event(
+        &store,
+        &coord,
+        matching_kind,
+        &serde_json::json!({"seq": 2}),
+    )?;
+    let second_pass = collect_deliveries(&mut session, 4)?;
+    let event = second_pass
+        .iter()
+        .find_map(|delivery| match delivery {
+            SessionDelivery::Event(event) => Some(event),
+            SessionDelivery::Watermark(_) | SessionDelivery::Error(_) | SessionDelivery::End(_) => {
+                None
+            }
+        })
+        .ok_or_else(|| std::io::Error::other("PROPERTY: later matching event must deliver"))?;
+    assert_eq!(
+        event.cursor_before, watermark_cursor,
+        "PROPERTY: event cursor_before must chain from prior watermark cursor"
+    );
+    assert_eq!(event_global_sequences(&second_pass)?, vec![2]);
     Ok(())
 }
 

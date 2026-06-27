@@ -24,6 +24,7 @@ enum FakeOpen {
         after_ack: Option<SessionDelivery>,
     },
     Unknown,
+    CursorInvalid,
 }
 
 struct FakeRuntime {
@@ -40,6 +41,12 @@ impl FakeRuntime {
     fn unknown() -> Self {
         Self {
             open: FakeOpen::Unknown,
+        }
+    }
+
+    fn cursor_invalid() -> Self {
+        Self {
+            open: FakeOpen::CursorInvalid,
         }
     }
 }
@@ -61,6 +68,9 @@ impl SubscriptionSessionFactory for FakeRuntime {
             })),
             FakeOpen::Unknown => Err(SubscriptionRuntimeError::UnknownSubscription {
                 id: subscription_id.to_owned(),
+            }),
+            FakeOpen::CursorInvalid => Err(SubscriptionRuntimeError::CursorInvalid {
+                reason: "cursor fixture invalid",
             }),
         }
     }
@@ -215,6 +225,39 @@ fn stream_runtime_event_unknown_subscription_emits_sub_err(
     assert!(
         lines[0].contains("SUB_ERR") && lines[0].contains("unknown_subscription"),
         "PROPERTY: unknown route must emit SUB_ERR unknown_subscription"
+    );
+    drop(client);
+    server
+        .join()
+        .map_err(|_| std::io::Error::other("PROPERTY: subscription server thread panicked"))??;
+    Ok(())
+}
+
+#[test]
+fn stream_runtime_event_invalid_resume_cursor_sub_err_uses_requested_subscription_id(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = FakeRuntime::cursor_invalid();
+    let listener = localhost_listener()?;
+    let addr = listener.local_addr()?;
+    let server = thread::Builder::new()
+        .name("netbat-test-sub-cursor-invalid".to_owned())
+        .spawn(move || {
+            let (stream, _) = listener.accept()?;
+            let reader = stream.try_clone()?;
+            nb::serve_subscription_stream(reader, stream, &runtime, &nb::Limits::default())
+        })?;
+    let mut client = TcpStream::connect(addr)?;
+    client.write_all(format!("NETBAT/2 SUBSCRIBE {SUBSCRIPTION_ID} 00 128\n").as_bytes())?;
+    let lines = read_lines(&mut client, 1)?;
+    assert!(
+        lines[0].contains("SUB_ERR")
+            && lines[0].contains(SUBSCRIPTION_ID)
+            && lines[0].contains("cursor_invalid"),
+        "PROPERTY: invalid resume cursor must emit SUB_ERR for requested subscription id"
+    );
+    assert!(
+        !lines[0].contains("unknown.invalid.v1"),
+        "PROPERTY: cursor errors after valid SUBSCRIBE must not use synthetic unknown id"
     );
     drop(client);
     server
