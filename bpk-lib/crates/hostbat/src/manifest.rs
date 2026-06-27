@@ -18,6 +18,7 @@ use syncbat::OperationDescriptor;
 
 use crate::descriptor::{GuardDescriptor, HookDescriptor, JobDescriptor};
 use crate::error::HostError;
+use crate::event_payload_binding::EventPayloadBinding;
 use crate::identity::{canonical_digest, ModuleDigest};
 use crate::schema::{SchemaDescriptor, SchemaManifestView};
 use crate::subscription::SubscriptionDescriptor;
@@ -41,6 +42,7 @@ pub struct HostModuleManifest {
     jobs: Vec<JobDescriptor>,
     schemas: Vec<SchemaDescriptor>,
     subscriptions: Vec<SubscriptionDescriptor>,
+    event_payload_bindings: Vec<EventPayloadBinding>,
     digest: ModuleDigest,
 }
 
@@ -84,6 +86,7 @@ struct ManifestView<'a> {
     // diagnostic Rust type is excluded so renaming/dropping it changes no digest.
     schemas: Vec<SchemaManifestView<'a>>,
     subscriptions: &'a [SubscriptionDescriptor],
+    event_payload_bindings: Vec<crate::event_payload_binding::EventPayloadBindingView<'a>>,
 }
 
 /// Borrowed view of the canonically ordered parts a manifest digest is sealed
@@ -99,6 +102,7 @@ struct ManifestParts<'a> {
     jobs: &'a [JobDescriptor],
     schemas: &'a [SchemaDescriptor],
     subscriptions: &'a [SubscriptionDescriptor],
+    event_payload_bindings: &'a [EventPayloadBinding],
 }
 
 fn compute_digest(parts: &ManifestParts<'_>) -> Result<ModuleDigest, HostError> {
@@ -117,6 +121,11 @@ fn compute_digest(parts: &ManifestParts<'_>) -> Result<ModuleDigest, HostError> 
             .map(SchemaDescriptor::manifest_view)
             .collect(),
         subscriptions: parts.subscriptions,
+        event_payload_bindings: parts
+            .event_payload_bindings
+            .iter()
+            .map(EventPayloadBinding::manifest_view)
+            .collect(),
     };
     canonical_digest(&view).map(ModuleDigest)
 }
@@ -132,6 +141,7 @@ pub(crate) struct SealedParts {
     pub(crate) jobs: Vec<JobDescriptor>,
     pub(crate) schemas: Vec<SchemaDescriptor>,
     pub(crate) subscriptions: Vec<SubscriptionDescriptor>,
+    pub(crate) event_payload_bindings: Vec<EventPayloadBinding>,
 }
 
 impl HostModuleManifest {
@@ -152,6 +162,7 @@ impl HostModuleManifest {
             jobs,
             schemas,
             subscriptions,
+            event_payload_bindings,
         } = parts;
         let digest = compute_digest(&ManifestParts {
             id: &id,
@@ -163,6 +174,7 @@ impl HostModuleManifest {
             jobs: &jobs,
             schemas: &schemas,
             subscriptions: &subscriptions,
+            event_payload_bindings: &event_payload_bindings,
         })?;
         Ok(Self {
             id,
@@ -174,6 +186,7 @@ impl HostModuleManifest {
             jobs,
             schemas,
             subscriptions,
+            event_payload_bindings,
             digest,
         })
     }
@@ -194,6 +207,7 @@ impl HostModuleManifest {
             jobs: &self.jobs,
             schemas: &self.schemas,
             subscriptions: &self.subscriptions,
+            event_payload_bindings: &self.event_payload_bindings,
         })?;
         Ok(recomputed == self.digest)
     }
@@ -252,6 +266,11 @@ impl HostModuleManifest {
     /// Subscription descriptors this module exports, in canonical (id) order.
     pub fn subscriptions(&self) -> impl Iterator<Item = &SubscriptionDescriptor> {
         self.subscriptions.iter()
+    }
+
+    /// Event payload bindings this module declares, in canonical (kind) order.
+    pub fn event_payload_bindings(&self) -> impl Iterator<Item = &EventPayloadBinding> {
+        self.event_payload_bindings.iter()
     }
 
     /// Replace the sealed digest with a corrupt value. **Test-only**, behind the

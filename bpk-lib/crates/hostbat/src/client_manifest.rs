@@ -5,9 +5,10 @@ use serde::Serialize;
 use crate::host::Host;
 use crate::schema::{GoldenVector, SchemaDescriptor};
 use crate::subscription::{SubscriptionDescriptor, SubscriptionSource, SUBSCRIPTION_WIRE_REQUIRES};
+use crate::EventPayloadBinding;
 use crate::SchemaShape;
 
-const CLIENT_MANIFEST_VERSION: u16 = 3;
+const CLIENT_MANIFEST_VERSION: u16 = 4;
 const NETBAT_VERSION: &str = "NETBAT/1";
 const CANONICAL_ENCODING_KIND: &str = "named-field-msgpack";
 /// Stable wire-encoding contract version — NOT the `rmp-serde` crate patch, so a
@@ -45,6 +46,8 @@ pub struct ClientManifest {
     pub operations: Vec<ClientManifestOperation>,
     /// Exported subscriptions in canonical `(module-id, subscription-id)` order.
     pub subscriptions: Vec<ClientManifestSubscription>,
+    /// Event payload bindings in canonical `(module-id, kind)` order.
+    pub event_payload_bindings: Vec<ClientManifestEventPayloadBinding>,
     /// Exported schemas in canonical `(id, version, role)` order.
     pub schemas: Vec<ClientManifestSchema>,
 }
@@ -69,6 +72,12 @@ impl ClientManifest {
                 ClientManifestSubscription::from_descriptor(module_id, descriptor)
             })
             .collect();
+        let event_payload_bindings = host
+            .event_payload_bindings()
+            .map(|(module_id, binding)| {
+                ClientManifestEventPayloadBinding::from_binding(module_id, binding)
+            })
+            .collect();
         let schemas = host
             .composition_schemas()
             .schemas()
@@ -86,6 +95,7 @@ impl ClientManifest {
             interface_fingerprint_hex: host.interface_fingerprint().to_hex(),
             operations,
             subscriptions,
+            event_payload_bindings,
             schemas,
         }
     }
@@ -156,6 +166,28 @@ impl ClientManifestSubscription {
             delivery: descriptor.delivery().as_str().to_owned(),
             backpressure_kind,
             backpressure_capacity,
+        }
+    }
+}
+
+/// Event payload binding exported to generated clients.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientManifestEventPayloadBinding {
+    /// Owning module id.
+    pub module_id: String,
+    /// Bound event kind (raw u16).
+    pub kind: u16,
+    /// Referenced event-payload schema id.
+    pub payload_schema_ref: String,
+}
+
+impl ClientManifestEventPayloadBinding {
+    fn from_binding(module_id: &str, binding: &EventPayloadBinding) -> Self {
+        Self {
+            module_id: module_id.to_owned(),
+            kind: binding.kind_raw(),
+            payload_schema_ref: binding.payload_schema_ref().to_owned(),
         }
     }
 }
