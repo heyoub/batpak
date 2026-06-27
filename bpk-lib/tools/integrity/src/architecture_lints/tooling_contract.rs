@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_project_layout_contract(repo_root)?;
+    check_supply_chain_boundary(repo_root)?;
     check_no_mdbook_dependency(repo_root)?;
     check_testing_doc_renames_stay_current(repo_root)?;
     check_justfile_stays_thin(repo_root)?;
@@ -195,6 +196,153 @@ fn check_no_unprefixed_factory_docs(project_root: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn check_supply_chain_boundary(repo_root: &Path) -> Result<()> {
+    let project_root = project_root(repo_root);
+    check_no_node_package_manager_surface(project_root)?;
+    check_workflow_authority_surface(project_root)?;
+    Ok(())
+}
+
+fn check_no_node_package_manager_surface(project_root: &Path) -> Result<()> {
+    let mut findings = Vec::new();
+    for entry in walkdir::WalkDir::new(project_root)
+        .into_iter()
+        .filter_entry(|entry| !is_generated_or_local_state_dir(entry.path()))
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if is_node_package_manager_surface(name) {
+            findings.push(relative(project_root, path));
+        }
+    }
+    ensure(
+        findings.is_empty(),
+        format!(
+            "supply-chain boundary: Node package-manager surface is retired from this repo; remove or explicitly redesign before adding: {}",
+            findings.join(", ")
+        ),
+    )
+}
+
+fn check_workflow_authority_surface(project_root: &Path) -> Result<()> {
+    let workflow_root = project_root.join(".github/workflows");
+    if !workflow_root.exists() {
+        return Ok(());
+    }
+
+    for path in files_with_extension(&workflow_root, "yml")
+        .into_iter()
+        .chain(files_with_extension(&workflow_root, "yaml"))
+    {
+        let rel = relative(project_root, &path);
+        let content = fs::read_to_string(&path).with_context(|| format!("read {rel}"))?;
+        for finding in workflow_authority_findings(&content) {
+            ensure(false, format!("supply-chain boundary: {rel}: {finding}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn workflow_authority_findings(content: &str) -> Vec<String> {
+    let mut findings = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if line_declares_workflow_trigger(trimmed, "pull_request_target") {
+            findings.push(format!(
+                "line {line_number}: `pull_request_target` may run untrusted PR code with privileged context"
+            ));
+        }
+        if line_declares_workflow_trigger(trimmed, "workflow_run") {
+            findings.push(format!(
+                "line {line_number}: `workflow_run` may bridge untrusted workflow output into privileged context"
+            ));
+        }
+        if let Some(action) = workflow_uses_value(trimmed) {
+            if let Some(reason) = external_action_pin_violation(action) {
+                findings.push(format!("line {line_number}: {reason}"));
+            }
+        }
+    }
+    findings
+}
+
+fn line_declares_workflow_trigger(line: &str, trigger: &str) -> bool {
+    line == trigger
+        || line == format!("- {trigger}")
+        || line.starts_with(&format!("{trigger}:"))
+        || line.starts_with(&format!("- {trigger}:"))
+}
+
+fn workflow_uses_value(line: &str) -> Option<&str> {
+    let after = line
+        .strip_prefix("uses:")
+        .or_else(|| line.strip_prefix("- uses:"))?;
+    Some(after.trim().trim_matches('"').trim_matches('\''))
+}
+
+fn external_action_pin_violation(action: &str) -> Option<String> {
+    if action.starts_with("./") || action.starts_with("../") {
+        return None;
+    }
+    let action = action.split('#').next().unwrap_or(action).trim();
+    let Some((name, reference)) = action.rsplit_once('@') else {
+        return Some(format!(
+            "external action `{action}` must be pinned by full 40-character commit SHA"
+        ));
+    };
+    let reference = reference.split_whitespace().next().unwrap_or(reference);
+    if reference.len() == 40 && reference.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!(
+        "external action `{name}` is pinned to `{reference}`, not a full 40-character commit SHA"
+    ))
+}
+
+fn is_node_package_manager_surface(name: &str) -> bool {
+    matches!(
+        name,
+        "package.json"
+            | "package-lock.json"
+            | "npm-shrinkwrap.json"
+            | "pnpm-lock.yaml"
+            | "yarn.lock"
+            | "bun.lock"
+            | "bun.lockb"
+            | ".npmrc"
+            | ".yarnrc"
+            | ".yarnrc.yml"
+    )
+}
+
+fn is_generated_or_local_state_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(
+                name,
+                ".git"
+                    | ".agents"
+                    | ".claude"
+                    | ".codex"
+                    | ".cursor"
+                    | "target"
+                    | "node_modules"
+                    | ".next"
+                    | "dist"
+                    | "build"
+            )
+        })
 }
 
 fn check_testing_doc_renames_stay_current(repo_root: &Path) -> Result<()> {
@@ -958,7 +1106,10 @@ fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::excluded_crate_target_dirs;
+    use super::{
+        excluded_crate_target_dirs, external_action_pin_violation, is_node_package_manager_surface,
+        workflow_authority_findings,
+    };
 
     #[test]
     fn excluded_crate_target_dirs_exempts_workspace_excludes() {
@@ -990,5 +1141,68 @@ resolver = "2"
     fn excluded_crate_target_dirs_empty_when_no_exclude_list() {
         let manifest = "[workspace]\nmembers = [\"crates/core\"]\nresolver = \"2\"\n";
         assert!(excluded_crate_target_dirs(manifest).is_empty());
+    }
+
+    #[test]
+    fn supply_chain_boundary_detects_dangerous_workflow_triggers() {
+        let workflow = r#"
+on:
+  pull_request_target:
+  workflow_run:
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+"#;
+        let findings = workflow_authority_findings(workflow);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.contains("pull_request_target")),
+            "expected pull_request_target finding, got {findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.contains("workflow_run")),
+            "expected workflow_run finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn supply_chain_boundary_requires_external_action_sha_pins() {
+        assert!(
+            external_action_pin_violation("actions/checkout@v6").is_some(),
+            "tag-pinned external actions must be rejected"
+        );
+        assert!(
+            external_action_pin_violation(
+                "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"
+            )
+            .is_none(),
+            "full SHA-pinned external actions must pass"
+        );
+        assert!(
+            external_action_pin_violation("./.github/actions/setup-devcontainer").is_none(),
+            "local composite actions are repo-owned and do not need external SHA pins"
+        );
+    }
+
+    #[test]
+    fn supply_chain_boundary_recognizes_node_package_manager_surfaces() {
+        for name in [
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            ".npmrc",
+        ] {
+            assert!(
+                is_node_package_manager_surface(name),
+                "{name} must be treated as a Node package-manager surface"
+            );
+        }
+        assert!(!is_node_package_manager_surface("Cargo.toml"));
     }
 }
