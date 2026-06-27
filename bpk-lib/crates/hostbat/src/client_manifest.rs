@@ -5,8 +5,9 @@ use serde::Serialize;
 use crate::host::Host;
 use crate::schema::{GoldenVector, SchemaDescriptor};
 use crate::subscription::{SubscriptionDescriptor, SubscriptionSource, SUBSCRIPTION_WIRE_REQUIRES};
+use crate::SchemaShape;
 
-const CLIENT_MANIFEST_VERSION: u16 = 2;
+const CLIENT_MANIFEST_VERSION: u16 = 3;
 const NETBAT_VERSION: &str = "NETBAT/1";
 const CANONICAL_ENCODING_KIND: &str = "named-field-msgpack";
 /// Stable wire-encoding contract version — NOT the `rmp-serde` crate patch, so a
@@ -169,8 +170,10 @@ pub struct ClientManifestSchema {
     pub version: u32,
     /// Schema role spelling.
     pub role: String,
-    /// Content hash pinning the schema declaration and golden vectors.
+    /// Content hash pinning the schema declaration, golden vectors, and shape.
     pub encoding_hex: String,
+    /// Language-neutral structural shape when this schema is client-visible.
+    pub shape: Option<SchemaShape>,
     /// Informational Rust type path, if the schema recorded one.
     pub diagnostic_rust_type: Option<String>,
     /// Committed canonical bytes for this schema.
@@ -184,6 +187,7 @@ impl ClientManifestSchema {
             version: schema.version().get(),
             role: schema.role().as_str().to_owned(),
             encoding_hex: schema.encoding().to_hex(),
+            shape: schema.shape().cloned(),
             diagnostic_rust_type: schema
                 .diagnostic_rust_type()
                 .map(|rust_type| rust_type.as_str().to_owned()),

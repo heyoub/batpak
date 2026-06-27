@@ -208,6 +208,7 @@ impl HostBuilder {
         let fingerprint = compute_fingerprint(&self.modules)?;
         let composition_schemas = self.schemas.seal()?;
         validate_subscription_payload_schemas(&self.modules, &composition_schemas)?;
+        validate_client_visible_schema_shapes(&self.modules, &composition_schemas)?;
         let interface_fingerprint =
             compute_interface_fingerprint(&self.modules, &composition_schemas)?;
         let schema_registry = SchemaRegistry::from_descriptors(
@@ -336,6 +337,92 @@ fn validate_subscription_payload_schemas(
         }
     }
     Ok(())
+}
+
+fn validate_client_visible_schema_shapes(
+    modules: &[HostModuleParts],
+    composition_schemas: &crate::composition::HostCompositionManifest,
+) -> Result<(), HostError> {
+    for parts in modules {
+        let module_id = parts.manifest.id();
+        for descriptor in parts.manifest.operations() {
+            require_schema_shape(
+                composition_schemas,
+                module_id,
+                Some(descriptor.name()),
+                descriptor.input_schema_ref(),
+                SchemaRole::OperationInput,
+            )?;
+            require_schema_shape(
+                composition_schemas,
+                module_id,
+                Some(descriptor.name()),
+                descriptor.output_schema_ref(),
+                SchemaRole::OperationOutput,
+            )?;
+            require_schema_shape(
+                composition_schemas,
+                module_id,
+                Some(descriptor.name()),
+                descriptor.receipt_kind(),
+                SchemaRole::ReceiptPayload,
+            )?;
+        }
+        for descriptor in parts.manifest.subscriptions() {
+            require_schema_shape(
+                composition_schemas,
+                module_id,
+                None,
+                descriptor.payload_schema_ref(),
+                descriptor.required_payload_role(),
+            )?;
+        }
+    }
+    for entry in composition_schemas.schemas() {
+        let descriptor = entry.descriptor();
+        if descriptor.role() == SchemaRole::EventPayload && !descriptor.has_shape() {
+            return Err(HostError::SchemaShapeMissing {
+                module: entry.owner_module().to_owned(),
+                operation: None,
+                reference: descriptor.id().as_str().to_owned(),
+                role: descriptor.role().as_str().to_owned(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn require_schema_shape(
+    composition_schemas: &crate::composition::HostCompositionManifest,
+    module: &str,
+    operation: Option<&str>,
+    reference: &str,
+    role: SchemaRole,
+) -> Result<(), HostError> {
+    let matches = composition_schemas
+        .schemas()
+        .filter_map(|entry| {
+            let descriptor = entry.descriptor();
+            if descriptor.id().as_str() == reference && descriptor.role() == role {
+                Some(descriptor)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    let [descriptor] = matches.as_slice() else {
+        return Ok(());
+    };
+    if descriptor.has_shape() {
+        Ok(())
+    } else {
+        Err(HostError::SchemaShapeMissing {
+            module: module.to_owned(),
+            operation: operation.map(str::to_owned),
+            reference: reference.to_owned(),
+            role: role.to_string(),
+        })
+    }
 }
 
 struct SchemaValidatingHandler {

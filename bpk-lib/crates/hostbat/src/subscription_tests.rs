@@ -17,6 +17,7 @@ use crate::subscription::{
     SubscriptionDelivery, SubscriptionDescriptor, SubscriptionId, SubscriptionSource,
     SUBSCRIPTION_WIRE_REQUIRES,
 };
+use crate::SchemaShape;
 
 use super::{validate_subscription_id, EventCategory as SubEventCategory, SubscriptionId as SubId};
 
@@ -46,6 +47,8 @@ fn schema_with_role(id: &str, role: SchemaRole, bytes: &[u8]) -> SchemaDescripto
         vec![GoldenVector::new("c", bytes.to_vec())],
     )
     .expect("descriptor")
+    .with_shape(SchemaShape::string())
+    .expect("shape")
 }
 
 fn with_default_operation_schemas(builder: HostModuleBuilder) -> HostModuleBuilder {
@@ -397,7 +400,7 @@ fn client_manifest_includes_subscriptions_and_matches_h_interface() -> Result<()
         .expect("mount")
         .build()?;
     let manifest = ClientManifest::from_host(&host);
-    assert_eq!(manifest.manifest_version, 2);
+    assert_eq!(manifest.manifest_version, 3);
     assert_eq!(manifest.netbat_version, "NETBAT/1");
     assert_eq!(
         manifest.subscription_wire_requires,

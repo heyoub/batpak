@@ -12,6 +12,8 @@
 
 use super::*;
 
+use crate::{RecordField, RecordShape, RefShape, ScalarKind, ScalarShape, SchemaShape};
+
 fn id(s: &str) -> SchemaId {
     SchemaId::new(s).expect("valid schema id")
 }
@@ -352,6 +354,218 @@ fn duplicate_golden_case_is_rejected() {
         vec![
             GoldenVector::new("dup", b"a".to_vec()),
             GoldenVector::new("dup", b"b".to_vec()),
+        ],
+    );
+    assert!(matches!(outcome, Err(HostError::SchemaInvalid { .. })));
+}
+
+// ---- structural schema validation (D1) -----------------------------------
+
+fn shaped_string_descriptor(
+    id_str: &str,
+    role: SchemaRole,
+    golden_value: &str,
+) -> SchemaDescriptor {
+    descriptor(
+        id_str,
+        1,
+        role,
+        vec![GoldenVector::new("c", canonical_fixture(golden_value))],
+    )
+    .with_shape(SchemaShape::string())
+    .expect("shape")
+}
+
+fn record_fixture(fields: &[(&str, &str)]) -> Vec<u8> {
+    use std::collections::BTreeMap;
+
+    let mut map = BTreeMap::new();
+    for (key, value) in fields {
+        map.insert(*key, *value);
+    }
+    batpak::canonical::to_bytes(&map).expect("record fixture encodes")
+}
+
+#[test]
+fn structural_validation_accepts_matching_canonical_payload() {
+    let descriptor =
+        shaped_string_descriptor("hostbat.op.echo.in", SchemaRole::OperationInput, "golden");
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = canonical_fixture("payload");
+
+    registry
+        .validate("hostbat.op.echo.in", SchemaRole::OperationInput, &payload)
+        .expect("matching canonical payload validates");
+}
+
+#[test]
+fn structural_validation_rejects_wrong_scalar_type() {
+    let descriptor =
+        shaped_string_descriptor("hostbat.op.echo.in", SchemaRole::OperationInput, "golden");
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = batpak::canonical::to_bytes(&1_i64).expect("integer fixture encodes");
+    let outcome = registry.validate("hostbat.op.echo.in", SchemaRole::OperationInput, &payload);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "wrong scalar type must fail structural validation",
+    );
+}
+
+#[test]
+fn structural_validation_rejects_missing_required_record_field() {
+    let shape = SchemaShape::Record(
+        RecordShape::new(
+            "hostbat.op.record.in",
+            vec![RecordField::required("required", SchemaShape::string())],
+        )
+        .expect("record shape"),
+    );
+    let descriptor = descriptor(
+        "hostbat.op.record.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new(
+            "c",
+            record_fixture(&[("required", "ok")]),
+        )],
+    )
+    .with_shape(shape)
+    .expect("shape");
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = record_fixture(&[]);
+    let outcome = registry.validate("hostbat.op.record.in", SchemaRole::OperationInput, &payload);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "missing required field must fail structural validation",
+    );
+}
+
+#[test]
+fn structural_validation_rejects_unknown_record_field() {
+    let shape = SchemaShape::Record(
+        RecordShape::new(
+            "hostbat.op.record.in",
+            vec![RecordField::required("known", SchemaShape::string())],
+        )
+        .expect("record shape"),
+    );
+    let descriptor = descriptor(
+        "hostbat.op.record.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("c", record_fixture(&[("known", "ok")]))],
+    )
+    .with_shape(shape)
+    .expect("shape");
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = record_fixture(&[("known", "ok"), ("extra", "nope")]);
+    let outcome = registry.validate("hostbat.op.record.in", SchemaRole::OperationInput, &payload);
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "unknown record field must fail structural validation by default",
+    );
+}
+
+#[test]
+fn structural_validation_rejects_string_length_bounds() {
+    let shape = SchemaShape::Scalar(ScalarShape {
+        kind: ScalarKind::String,
+        nullable: false,
+        min_length: None,
+        max_length: Some(3),
+        min_i64: None,
+        max_i64: None,
+        min_u64: None,
+        max_u64: None,
+    });
+    let descriptor = descriptor(
+        "hostbat.op.bounded.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("c", canonical_fixture("abc"))],
+    )
+    .with_shape(shape)
+    .expect("shape");
+    let registry = SchemaRegistry::from_descriptors([descriptor]);
+    let payload = canonical_fixture("abcd");
+    let outcome = registry.validate(
+        "hostbat.op.bounded.in",
+        SchemaRole::OperationInput,
+        &payload,
+    );
+
+    assert!(
+        matches!(outcome, Err(HostError::SchemaValidation { .. })),
+        "bounds violations must fail structural validation",
+    );
+}
+
+#[test]
+fn nested_schema_ref_resolves_through_registry() {
+    let inner = shaped_string_descriptor("hostbat.inner.v1", SchemaRole::OperationInput, "inner");
+    let outer_shape = SchemaShape::Record(
+        RecordShape::new(
+            "hostbat.outer.in",
+            vec![RecordField::required(
+                "payload",
+                SchemaShape::Ref(RefShape::new(
+                    "hostbat.inner.v1",
+                    SchemaRole::OperationInput,
+                )),
+            )],
+        )
+        .expect("record shape"),
+    );
+    let outer_bare = descriptor(
+        "hostbat.outer.in",
+        1,
+        SchemaRole::OperationOutput,
+        vec![GoldenVector::new(
+            "c",
+            record_fixture(&[("payload", "nested")]),
+        )],
+    );
+    let outer = outer_bare
+        .with_shape_peers(outer_shape, std::slice::from_ref(&inner))
+        .expect("shape");
+    let registry = SchemaRegistry::from_descriptors([inner, outer]);
+    let payload = record_fixture(&[("payload", "nested")]);
+
+    registry
+        .validate("hostbat.outer.in", SchemaRole::OperationOutput, &payload)
+        .expect("nested ref resolution validates");
+}
+
+#[test]
+fn shape_change_changes_schema_encoding_at_fixed_version() {
+    let golden = canonical_fixture("same-bytes");
+    let bare = descriptor(
+        "hostbat.op.echo.in",
+        1,
+        SchemaRole::OperationInput,
+        vec![GoldenVector::new("c", golden.clone())],
+    );
+    let shaped = bare
+        .clone()
+        .with_shape(SchemaShape::string())
+        .expect("shape");
+    assert_ne!(
+        bare.encoding(),
+        shaped.encoding(),
+        "attaching structural shape must change the v2 schema encoding",
+    );
+}
+
+#[test]
+fn duplicate_record_field_is_rejected_at_shape_construction() {
+    let outcome = RecordShape::new(
+        "hostbat.op.record.in",
+        vec![
+            RecordField::required("dup", SchemaShape::string()),
+            RecordField::required("dup", SchemaShape::string()),
         ],
     );
     assert!(matches!(outcome, Err(HostError::SchemaInvalid { .. })));

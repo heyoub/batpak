@@ -1046,3 +1046,26 @@
     checks onto the IR (item 6.3), the YAML-authored fitness registry (item 3.4),
     and the syn symbol/call/type columns are DEFERRED and logged in
     GAUNTLET_ISSUES.md.
+
+- title: hostbat structural schema descriptors (S12-P3C)
+  section: Runtime And Boundary Harness
+  pattern: Runtime And Boundary Harness
+  status: green
+  invariants:
+    - INV-HOSTBAT-STRUCTURAL-SCHEMA
+  locations:
+    - bpk-lib/crates/hostbat/src/schema_shape.rs
+    - bpk-lib/crates/hostbat/src/schema.rs
+    - bpk-lib/crates/hostbat/src/schema_tests.rs
+    - bpk-lib/crates/hostbat/src/composition_interface_tests.rs
+  commands:
+    - cargo test -p hostbat schema
+    - cargo test -p hostbat composition
+  coverage_delta: >
+    D1 structural SchemaShape AST, hostbat.schema.v2 encoding, H_interface v3
+    shape identity, SchemaRegistry structural validation, and host-build shape
+    requirement are covered by dedicated red/green witnesses; exact delta not recorded.
+  mutation_delta: unmeasured
+  blind_spots: >
+    Append-time validation (D2) and effect-row backend mediation (D3) are out of
+    scope for this entry.

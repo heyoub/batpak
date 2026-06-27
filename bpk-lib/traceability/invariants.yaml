@@ -820,3 +820,12 @@
   artifacts:
     - ART-COMPLEXITY-EXPONENT-TESTS
   witness_test: crates/core/tests/complexity_exponent.rs::query_complexity_exponent_and_wcet_are_bounded
+- id: INV-HOSTBAT-STRUCTURAL-SCHEMA
+  statement: >-
+    Client-visible hostbat schemas carry a structural SchemaShape folded into the hostbat.schema.v2
+    encoding and H_interface (hostbat.interface.v3); SchemaRegistry::validate performs structural
+    checks when a shape is present; client-visible refs without shape fail host build closed; and
+    DiagnosticRustType never affects schema or interface identity.
+  artifacts:
+    - ART-HOSTBAT-SCHEMA-SHAPE
+  witness_test: crates/hostbat/src/composition_interface_tests.rs::red_client_visible_schema_without_shape_fails_host_build

@@ -178,11 +178,47 @@ rows:
 
   - id: S12-P3C-STRUCTURAL-SCHEMA
     title: Language-neutral structural schema validation descriptors
+    status: PROVEN
+    terminal_required: true
+    surface: hostbat
+    witness_tests:
+      - crates/hostbat/src/schema_tests.rs::structural_validation_accepts_matching_canonical_payload
+      - crates/hostbat/src/schema_tests.rs::structural_validation_rejects_wrong_scalar_type
+      - crates/hostbat/src/schema_tests.rs::structural_validation_rejects_missing_required_record_field
+      - crates/hostbat/src/schema_tests.rs::structural_validation_rejects_unknown_record_field
+      - crates/hostbat/src/schema_tests.rs::structural_validation_rejects_string_length_bounds
+      - crates/hostbat/src/schema_tests.rs::nested_schema_ref_resolves_through_registry
+      - crates/hostbat/src/composition_interface_tests.rs::interface_fingerprint_changes_when_structural_shape_changes
+      - crates/hostbat/src/composition_interface_tests.rs::interface_fingerprint_is_stable_for_diagnostic_rust_type_on_shaped_schema
+      - crates/hostbat/src/composition_interface_tests.rs::red_client_visible_schema_without_shape_fails_host_build
+    proof_commands:
+      - just cargo test -p hostbat schema
+      - just cargo test -p hostbat composition
+      - just cargo clippy -p hostbat --all-targets -- -D warnings
+
+  - id: S12-P3D-EVENT-PAYLOAD-BINDINGS
+    title: Hostbat event payload schema bindings for mediated appends
     status: INCOMPLETE
     terminal_required: true
     surface: hostbat
     blocked_by:
-      - Packet D not started
+      - Packet D2 not started
+
+  - id: S12-P3D-APPEND-SCHEMA-VALIDATION
+    title: Append-time schema validation on hostbat-mediated effect backends
+    status: INCOMPLETE
+    terminal_required: true
+    surface: hostbat
+    blocked_by:
+      - Packet D2 not started
+
+  - id: S12-P3E-EFFECT-ROW-COMPLETE
+    title: Real scoped handles and backends for projection reads, receipt emits, and host controls
+    status: INCOMPLETE
+    terminal_required: true
+    surface: hostbat
+    blocked_by:
+      - Packet D3 not started
 
   - id: NETBAT-2-STREAM-FRAMES
     title: NETBAT/2 subscription streaming frame layer

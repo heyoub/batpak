@@ -794,6 +794,7 @@ name = "hostbat"
 version = "0.8.3"
 dependencies = [
  "batpak",
+ "rmpv",
  "serde",
  "syncbat",
  "tempfile",

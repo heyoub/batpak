@@ -123,6 +123,7 @@ witnesses:
   - { id: INV-GROUP-COMMIT-IDEMPOTENCY, witnessed: true }
   - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: true }
   - { id: INV-HLC-JOIN-SEMILATTICE, witnessed: true }
+  - { id: INV-HOSTBAT-STRUCTURAL-SCHEMA, witnessed: true }
   - { id: INV-IDEMPOTENCY-DURABLE-WINDOW, witnessed: true }
   - { id: INV-IMPORT-CONTENT-ISOMORPHISM, witnessed: true }
   - { id: INV-IMPORT-CRASH-IDEMPOTENT, witnessed: true }

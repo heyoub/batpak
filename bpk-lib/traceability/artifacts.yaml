@@ -212,6 +212,15 @@
     - crates/hostbat/src/client_manifest.rs
     - crates/hostbat/src/composition_tests.rs
     - crates/hostbat/src/subscription_tests.rs
+- id: ART-HOSTBAT-SCHEMA-SHAPE
+  kind: source
+  paths:
+    - crates/hostbat/src/schema_shape.rs
+    - crates/hostbat/src/schema.rs
+    - crates/hostbat/src/schema_tests.rs
+    - crates/hostbat/src/composition_interface_tests.rs
+    - crates/hostbat/src/interface.rs
+    - crates/hostbat/src/client_manifest.rs
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:

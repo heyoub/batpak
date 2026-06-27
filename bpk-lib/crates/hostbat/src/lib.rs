@@ -33,6 +33,9 @@
 #[cfg(test)]
 mod composition_tests;
 
+#[cfg(test)]
+mod composition_interface_tests;
+
 pub mod builder;
 pub mod client_manifest;
 pub mod composition;
@@ -44,6 +47,7 @@ pub mod interface;
 pub mod manifest;
 pub mod module;
 pub mod schema;
+pub mod schema_shape;
 pub mod subscription;
 pub mod supervisor;
 
@@ -62,6 +66,10 @@ pub use module::{HostModule, HostModuleBuilder, JobBody, LifecycleHook};
 pub use schema::{
     CanonicalEncoding, DiagnosticRustType, GoldenVector, SchemaDescriptor, SchemaId,
     SchemaRegistry, SchemaRole, SchemaVersion,
+};
+pub use schema_shape::{
+    ListShape, MapShape, RecordField, RecordShape, RefShape, ScalarKind, ScalarShape, SchemaShape,
+    StringEnumShape, TupleShape,
 };
 pub use subscription::{
     BackpressurePolicy, EventCategory, OperationStatusSelector, ProjectionId, ReceiptFilter,
