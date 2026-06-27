@@ -14,6 +14,7 @@
 //! Inert reference backend.
 
 pub(crate) mod inert;
+pub mod scaffolding;
 
 // Per-platform honest support matrices (pure data, always compiled). The
 // OS-touching struct + unsafe basement inside each are feature/target gated.

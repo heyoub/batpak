@@ -267,3 +267,86 @@ fn cgroup_for_run_fails_closed_when_a_required_leaf_cannot_be_created() {
         "the refusal must record WHY it failed closed: {observed:?}"
     );
 }
+
+#[test]
+fn linux_unimplemented_kinds_refuse_at_plan() {
+    use crate::contract::capability::{Capability, FdPolicy};
+    use crate::contract::host_control::{
+        CommitDurability, HostControl, KillGuarantee, KillTarget, PathView,
+    };
+    use crate::contract::plan::{BoundarySpec, PlanError};
+    use crate::contract::registry::{BackendRegistry, BoundaryPlanner};
+    use std::sync::Arc;
+
+    fn spec_for_kind(kind: RequirementKind) -> BoundarySpec {
+        let (capabilities, controls) = match kind {
+            RequirementKind::TempRoot => (
+                vec![],
+                vec![HostControl::TempRoot {
+                    visibility: PathView::PrivateToBoundary,
+                }],
+            ),
+            RequirementKind::ExposePath => (
+                vec![],
+                vec![HostControl::ExposePath {
+                    source: String::new(),
+                    dest: String::new(),
+                    access: FsAccess::Read,
+                    view: PathView::PrivateToBoundary,
+                }],
+            ),
+            RequirementKind::CommitArtifact => (
+                vec![],
+                vec![HostControl::CommitArtifact {
+                    durability: CommitDurability::Atomic,
+                }],
+            ),
+            RequirementKind::DiscardArtifact => (vec![], vec![HostControl::DiscardArtifact]),
+            RequirementKind::ListOutputs => (vec![], vec![HostControl::ListOutputs]),
+            RequirementKind::InheritedFdsOnly => (
+                vec![Capability::InheritedFds {
+                    policy: FdPolicy::Only(vec![3]),
+                }],
+                vec![],
+            ),
+            _ => {
+                assert!(
+                    std::hint::black_box(false),
+                    "PROPERTY: unexpected kind in linux unimplemented refusal test"
+                );
+                (vec![], vec![])
+            }
+        };
+        BoundarySpec {
+            workload: Workload::Process {
+                exe: "true".to_string(),
+                args: Vec::new(),
+            },
+            capabilities,
+            controls,
+            budgets: BudgetRequirements::deny_all(),
+            evidence: EvidenceRequirements::default(),
+        }
+    }
+
+    let backend = LinuxBackend::with_abi_for_test(LANDLOCK_ABI_FLOOR);
+    let id = backend.id();
+    let mut registry = BackendRegistry::new();
+    registry.register(Arc::new(backend) as Arc<dyn Backend>);
+    let planner = BoundaryPlanner::new(&registry);
+
+    for kind in [
+        RequirementKind::TempRoot,
+        RequirementKind::ExposePath,
+        RequirementKind::CommitArtifact,
+        RequirementKind::DiscardArtifact,
+        RequirementKind::ListOutputs,
+        RequirementKind::InheritedFdsOnly,
+    ] {
+        let result = planner.plan(&spec_for_kind(kind), &id);
+        assert!(
+            matches!(result, Err(PlanError::Unsupported { .. })),
+            "{kind:?} must refuse at plan() on linux (empty ceiling for this chunk), got {result:?}"
+        );
+    }
+}

@@ -29,6 +29,7 @@ mod sim;
 pub mod host;
 
 pub use backend::inert::InertBackend;
+pub use backend::scaffolding::ScaffoldingBackend;
 
 // The per-platform HONEST support matrices are always available (pure data, so
 // the honesty is cross-platform testable). The OS backend STRUCTS are re-exported
