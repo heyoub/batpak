@@ -10,9 +10,9 @@ use std::thread;
 use std::time::Duration;
 
 use syncbat::{
-    EventStreamCursorV1, EventStreamSession, SessionControl, SessionDelivery, SessionEnd,
-    SessionError, SessionPoll, SubscriptionRuntimeError, SubscriptionSession,
-    SubscriptionSessionFactory,
+    cursor_invalid_error, cursor_mismatch_error, unknown_subscription_error, RuntimeCursor,
+    SessionControl, SessionDelivery, SessionEnd, SessionError, SessionPoll,
+    SubscriptionRuntimeError, SubscriptionSession, SubscriptionSessionFactory,
 };
 
 use super::error::NetbatError;
@@ -264,12 +264,12 @@ fn maybe_cursor_bytes(cursor: MaybeCursor) -> Option<Vec<u8>> {
     }
 }
 
-fn encode_maybe_cursor(cursor: &EventStreamCursorV1) -> MaybeCursor {
-    MaybeCursor::Present(CursorBytes::new(cursor.encode()))
+fn encode_maybe_cursor(cursor: &RuntimeCursor) -> MaybeCursor {
+    MaybeCursor::Present(CursorBytes::new(cursor.as_bytes().to_vec()))
 }
 
-fn encode_required_cursor(cursor: &EventStreamCursorV1) -> CursorBytes {
-    CursorBytes::new(cursor.encode())
+fn encode_required_cursor(cursor: &RuntimeCursor) -> CursorBytes {
+    CursorBytes::new(cursor.as_bytes().to_vec())
 }
 
 fn spawn_control_reader(
@@ -335,13 +335,7 @@ fn read_control_loop(
                     let _ = control_tx.send(SessionControl::Malformed);
                     break;
                 }
-                let cursor = match EventStreamCursorV1::decode(frame.cursor_after.as_bytes()) {
-                    Ok(cursor) => cursor,
-                    Err(_) => {
-                        let _ = control_tx.send(SessionControl::Malformed);
-                        break;
-                    }
-                };
+                let cursor = RuntimeCursor::from_bytes(frame.cursor_after.into_bytes());
                 let _ = control_tx.send(SessionControl::Ack {
                     delivery_index: frame.delivery_index.get(),
                     cursor,
@@ -375,33 +369,22 @@ fn timeout_kind(kind: io::ErrorKind) -> bool {
 fn map_open_error(subscription_id: &str, error: &SubscriptionRuntimeError) -> SessionDelivery {
     match error {
         SubscriptionRuntimeError::UnknownSubscription { .. } => {
-            EventStreamSession::unknown_subscription_error(subscription_id)
+            unknown_subscription_error(subscription_id)
         }
-        SubscriptionRuntimeError::CursorInvalid { reason } => {
-            EventStreamSession::cursor_invalid_error(reason)
-        }
-        SubscriptionRuntimeError::CursorMismatch { reason } => {
-            EventStreamSession::cursor_mismatch_error(reason)
-        }
-        SubscriptionRuntimeError::InvalidSubscriptionId { reason } => {
-            EventStreamSession::cursor_invalid_error(reason)
-        }
+        SubscriptionRuntimeError::CursorInvalid { reason } => cursor_invalid_error(reason),
+        SubscriptionRuntimeError::CursorMismatch { reason } => cursor_mismatch_error(reason),
+        SubscriptionRuntimeError::InvalidSubscriptionId { reason } => cursor_invalid_error(reason),
         SubscriptionRuntimeError::DuplicateSubscription { .. } => {
-            EventStreamSession::cursor_invalid_error("duplicate subscription route")
+            cursor_invalid_error("duplicate subscription route")
         }
         SubscriptionRuntimeError::InvalidRoute { reason }
-        | SubscriptionRuntimeError::InvalidConfig { reason } => {
-            EventStreamSession::cursor_invalid_error(reason)
-        }
-        SubscriptionRuntimeError::Store(_) => {
-            EventStreamSession::cursor_invalid_error("store error during subscribe")
-        }
+        | SubscriptionRuntimeError::InvalidConfig { reason } => cursor_invalid_error(reason),
+        SubscriptionRuntimeError::Store(_) => cursor_invalid_error("store error during subscribe"),
         SubscriptionRuntimeError::EnvelopeEncoding(_) => {
-            EventStreamSession::cursor_invalid_error("envelope encoding failed")
+            cursor_invalid_error("envelope encoding failed")
         }
-        SubscriptionRuntimeError::AckInvalid { reason } => {
-            EventStreamSession::cursor_invalid_error(reason)
-        }
+        SubscriptionRuntimeError::Worker(_) => cursor_invalid_error("subscription worker failed"),
+        SubscriptionRuntimeError::AckInvalid { reason } => cursor_invalid_error(reason),
     }
 }
 
@@ -456,7 +439,7 @@ fn terminal_delivery(delivery: &SessionDelivery) -> bool {
     )
 }
 
-fn optional_cursor(cursor: Option<&EventStreamCursorV1>) -> MaybeCursor {
+fn optional_cursor(cursor: Option<&RuntimeCursor>) -> MaybeCursor {
     match cursor {
         Some(cursor) => encode_maybe_cursor(cursor),
         None => MaybeCursor::Absent,
@@ -485,6 +468,7 @@ fn map_runtime_error(error: &SubscriptionRuntimeError) -> NetbatError {
             SubscriptionRuntimeError::CursorInvalid { reason } => reason,
             SubscriptionRuntimeError::CursorMismatch { reason } => reason,
             SubscriptionRuntimeError::EnvelopeEncoding(_) => "envelope encoding failed",
+            SubscriptionRuntimeError::Worker(_) => "subscription worker failed",
             SubscriptionRuntimeError::AckInvalid { reason } => reason,
         },
     }

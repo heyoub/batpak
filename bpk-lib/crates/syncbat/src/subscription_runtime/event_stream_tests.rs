@@ -188,7 +188,7 @@ fn subscription_runtime_event_open_rejects_zero_runtime_limits(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (store, _dir) = test_store()?;
     let (_control_tx, control_rx) = bounded(4);
-    let error = match syncbat::EventStreamSession::open(
+    let error = match syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &test_registry()?,
         SubscriptionRuntimeConfig::new(0, 64),
@@ -212,7 +212,7 @@ fn subscription_runtime_event_open_rejects_zero_runtime_limits(
     ));
 
     let (_control_tx, control_rx) = bounded(4);
-    let error = match syncbat::EventStreamSession::open(
+    let error = match syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &test_registry()?,
         SubscriptionRuntimeConfig::new(256, 0),
@@ -248,7 +248,7 @@ fn subscription_runtime_event_replay_live_ack_and_watermark(
 
     let (_control_tx, control_rx) = bounded(4);
     let config = SubscriptionRuntimeConfig::new(256, 64);
-    let mut session = syncbat::EventStreamSession::open(
+    let mut session = syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &test_registry()?,
         config,
@@ -303,7 +303,7 @@ fn subscription_runtime_event_resume_honors_cursor_after_global_sequence(
     let resume = EventStreamCursorV1::after_global_sequence(SUBSCRIPTION_ID, CATEGORY, 1, 1);
 
     let (_control_tx, control_rx) = bounded(4);
-    let mut session = syncbat::EventStreamSession::open(
+    let mut session = syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &test_registry()?,
         SubscriptionRuntimeConfig::default(),
@@ -342,7 +342,7 @@ fn subscription_runtime_event_slow_consumer_closes_with_err(
         },
     )?;
     let (_control_tx, control_rx) = bounded(4);
-    let mut session = syncbat::EventStreamSession::open(
+    let mut session = syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &registry,
         SubscriptionRuntimeConfig::new(256, 1),
@@ -367,7 +367,7 @@ fn subscription_runtime_event_cancel_emits_client_cancelled_end(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (store, _dir) = test_store()?;
     let (control_tx, control_rx) = bounded(4);
-    let mut session = syncbat::EventStreamSession::open(
+    let mut session = syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &test_registry()?,
         SubscriptionRuntimeConfig::default(),
@@ -407,7 +407,7 @@ fn subscription_runtime_event_cumulative_ack_frees_delivery_window(
         },
     )?;
     let (control_tx, control_rx) = bounded(4);
-    let mut session = syncbat::EventStreamSession::open(
+    let mut session = syncbat::EventStreamSession::open_from_registry(
         SubscriptionStore::new(Arc::clone(&store)),
         &registry,
         SubscriptionRuntimeConfig::new(256, 1),

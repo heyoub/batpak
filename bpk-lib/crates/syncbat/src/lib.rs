@@ -109,11 +109,14 @@ pub use register_store::{
 pub use store_effect::StoreEffectBackend;
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
 pub use subscription_runtime::{
-    EventStreamCursorV1, EventStreamEnvelopeV1, EventStreamSession, EventSubscriptionRuntime,
-    SessionControl, SessionDelivery, SessionEnd, SessionError, SessionEventDelivery, SessionPoll,
-    SessionWatermarkDelivery, SubscriptionId, SubscriptionRegistry, SubscriptionRoute,
-    SubscriptionRuntimeConfig, SubscriptionRuntimeError, SubscriptionSession,
-    SubscriptionSessionFactory, SubscriptionStore, CURSOR_V1_LEN, SOURCE_KIND_EVENT_CATEGORY,
+    cursor_invalid_error, cursor_mismatch_error, unknown_subscription_error,
+    CompositeSubscriptionRuntime, EventStreamCursorV1, EventStreamEnvelopeV1, EventStreamSession,
+    EventSubscriptionRuntime, ProjectionStreamCursorV1, ProjectionStreamEnvelopeV1,
+    ProjectionStreamSession, RuntimeCursor, SessionControl, SessionDelivery, SessionEnd,
+    SessionError, SessionEventDelivery, SessionPoll, SessionWatermarkDelivery, SubscriptionId,
+    SubscriptionRegistry, SubscriptionRoute, SubscriptionRuntimeConfig, SubscriptionRuntimeError,
+    SubscriptionSession, SubscriptionSessionFactory, SubscriptionStore, TypedProjectionProjector,
+    CURSOR_V1_LEN, PROJECTION_CURSOR_V1_LEN, SOURCE_KIND_EVENT_CATEGORY, SOURCE_KIND_PROJECTION,
 };
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.

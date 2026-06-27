@@ -1,5 +1,5 @@
-//! PROVES: S12-SUBSCRIPTION-RUNTIME-EVENTS netbat TCP/stream adaptation.
-//! CATCHES: subscribe handshake, frame mapping, ACK control, and terminal errors on wire.
+//! PROVES: S12-SUBSCRIPTION-RUNTIME-PROJECTIONS netbat TCP/stream adaptation.
+//! CATCHES: subscribe handshake, opaque cursor ACK mapping, and terminal errors on wire.
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -9,14 +9,15 @@ use std::time::Duration;
 
 use netbat as nb;
 use syncbat::{
-    EventStreamCursorV1, RuntimeCursor, SessionControl, SessionDelivery, SessionEnd, SessionError,
-    SessionEventDelivery, SessionPoll, SessionWatermarkDelivery, SubscriptionRuntimeError,
-    SubscriptionSession, SubscriptionSessionFactory,
+    ProjectionStreamCursorV1, RuntimeCursor, SessionControl, SessionDelivery, SessionEnd,
+    SessionError, SessionEventDelivery, SessionPoll, SessionWatermarkDelivery,
+    SubscriptionRuntimeError, SubscriptionSession, SubscriptionSessionFactory,
 };
 
-const SUBSCRIPTION_ID: &str = "orders.open.v1";
-const CATEGORY: u8 = 0x0A;
-const WIRE_SCHEMA: &str = "batpak.event-stream-envelope.v1";
+const SUBSCRIPTION_ID: &str = "counter.projection.v1";
+const PROJECTION_ID: &str = "testkit-all-counter";
+const ENTITY: &str = "entity:projection";
+const WIRE_SCHEMA: &str = "batpak.projection-stream-envelope.v1";
 
 enum FakeOpen {
     Deliver {
@@ -138,7 +139,7 @@ fn localhost_listener() -> Result<TcpListener, Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn stream_runtime_event_tcp_maps_replay_watermark_and_ack_wake(
+fn stream_runtime_projection_tcp_maps_snapshot_watermark_and_ack_wake(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let first = cursor_after(1);
     let second = cursor_after(2);
@@ -155,7 +156,7 @@ fn stream_runtime_event_tcp_maps_replay_watermark_and_ack_wake(
     let listener = localhost_listener()?;
     let addr = listener.local_addr()?;
     let server = thread::Builder::new()
-        .name("netbat-test-sub-replay-live".to_owned())
+        .name("netbat-test-proj-replay-live".to_owned())
         .spawn(move || {
             let (stream, _) = listener.accept()?;
             let reader = stream.try_clone()?;
@@ -197,13 +198,13 @@ fn stream_runtime_event_tcp_maps_replay_watermark_and_ack_wake(
 }
 
 #[test]
-fn stream_runtime_event_unknown_subscription_emits_sub_err(
+fn stream_runtime_projection_unknown_subscription_emits_sub_err(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = FakeRuntime::unknown();
     let listener = localhost_listener()?;
     let addr = listener.local_addr()?;
     let server = thread::Builder::new()
-        .name("netbat-test-sub-unknown".to_owned())
+        .name("netbat-test-proj-unknown".to_owned())
         .spawn(move || {
             let (stream, _) = listener.accept()?;
             let reader = stream.try_clone()?;
@@ -224,12 +225,13 @@ fn stream_runtime_event_unknown_subscription_emits_sub_err(
 }
 
 #[test]
-fn stream_runtime_event_slow_consumer_emits_sub_err() -> Result<(), Box<dyn std::error::Error>> {
+fn stream_runtime_projection_slow_consumer_emits_sub_err() -> Result<(), Box<dyn std::error::Error>>
+{
     let runtime = FakeRuntime::deliver(vec![slow_consumer_error()], None);
     let listener = localhost_listener()?;
     let addr = listener.local_addr()?;
     let server = thread::Builder::new()
-        .name("netbat-test-sub-slow".to_owned())
+        .name("netbat-test-proj-slow".to_owned())
         .spawn(move || {
             let (stream, _) = listener.accept()?;
             let reader = stream.try_clone()?;
@@ -253,14 +255,14 @@ fn stream_runtime_event_slow_consumer_emits_sub_err() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn stream_runtime_event_client_disconnect_without_cancel_exits_server(
+fn stream_runtime_projection_client_disconnect_without_cancel_exits_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = FakeRuntime::deliver(Vec::new(), None);
     let listener = localhost_listener()?;
     let addr = listener.local_addr()?;
     let (done_tx, done_rx) = flume::bounded(1);
     let server = thread::Builder::new()
-        .name("netbat-test-sub-disconnect".to_owned())
+        .name("netbat-test-proj-disconnect".to_owned())
         .spawn(move || {
             let result = (|| -> Result<(), String> {
                 let (stream, _) = listener.accept().map_err(|error| error.to_string())?;
@@ -299,7 +301,7 @@ fn event_delivery(
         cursor_before,
         cursor_after,
         wire_payload_schema_ref: WIRE_SCHEMA.to_owned(),
-        envelope_bytes: b"canonical-envelope-fixture".to_vec(),
+        envelope_bytes: b"canonical-projection-envelope-fixture".to_vec(),
     })
 }
 
@@ -323,19 +325,19 @@ fn slow_consumer_error() -> SessionDelivery {
 
 fn cursor_beginning() -> RuntimeCursor {
     RuntimeCursor::from_bytes(
-        EventStreamCursorV1::beginning(SUBSCRIPTION_ID, CATEGORY)
+        ProjectionStreamCursorV1::beginning(SUBSCRIPTION_ID, PROJECTION_ID, ENTITY)
             .encode()
             .to_vec(),
     )
 }
 
-fn cursor_after(global_sequence: u64) -> RuntimeCursor {
+fn cursor_after(entity_generation: u64) -> RuntimeCursor {
     RuntimeCursor::from_bytes(
-        EventStreamCursorV1::after_global_sequence(
+        ProjectionStreamCursorV1::after_entity_generation(
             SUBSCRIPTION_ID,
-            CATEGORY,
-            global_sequence,
-            global_sequence.saturating_mul(10),
+            PROJECTION_ID,
+            ENTITY,
+            entity_generation,
         )
         .encode()
         .to_vec(),

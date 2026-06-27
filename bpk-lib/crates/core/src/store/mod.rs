@@ -125,6 +125,7 @@ pub use index::IndexEntry;
 pub use platform::alloc;
 pub use platform::clock::{Clock, SystemClock};
 pub use platform::spawn::{JobHandle, JobStatus, JoinError, Spawn, SpawnError, ThreadSpawn};
+pub use projection::flow::ReplayInput;
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,

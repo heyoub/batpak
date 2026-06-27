@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use batpak::coordinate::EventCategory;
+use batpak::store::Freshness;
 
 use super::error::SubscriptionRuntimeError;
+use super::projector::{ProjectionProjector, ProjectionRouteBinding};
 
 const MAX_SUBSCRIPTION_ID_BYTES: usize = 128;
 
@@ -30,7 +33,7 @@ impl SubscriptionId {
 }
 
 /// Declared route for one subscription id.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub enum SubscriptionRoute {
     /// Category-wide event stream.
     EventCategory {
@@ -43,18 +46,169 @@ pub enum SubscriptionRoute {
         /// Optional route-specific queue clamp.
         backpressure_capacity: Option<usize>,
     },
+    /// Entity-scoped projection stream.
+    Projection {
+        /// Route-declared projection id.
+        projection_id: String,
+        /// Entity coordinate bound to the projection.
+        entity: String,
+        /// Wire `payload_schema_ref` token for stream envelopes.
+        wire_payload_schema_ref: String,
+        /// Optional inner projection schema ref carried inside the envelope.
+        inner_projection_schema_ref: Option<String>,
+        /// Freshness mode for projection materialization.
+        freshness: Freshness,
+        /// Optional route-specific queue clamp.
+        backpressure_capacity: Option<usize>,
+        /// syncbat-owned projector that opens typed projection sessions.
+        projector: Arc<dyn ProjectionProjector>,
+    },
 }
 
 impl SubscriptionRoute {
     /// Return the event category for an event-category route.
-    ///
-    /// # Errors
-    /// Returns `None` when the route is not event-category (future source kinds).
     #[must_use]
     pub fn event_category(&self) -> Option<u8> {
         match self {
             Self::EventCategory { category, .. } => Some(*category),
+            Self::Projection { .. } => None,
         }
+    }
+
+    /// Build a projection route binding for session open.
+    #[must_use]
+    pub fn projection_binding(&self, subscription_id: &str) -> Option<ProjectionRouteBinding> {
+        match self {
+            Self::Projection {
+                projection_id,
+                entity,
+                wire_payload_schema_ref,
+                inner_projection_schema_ref,
+                freshness,
+                backpressure_capacity,
+                ..
+            } => Some(ProjectionRouteBinding {
+                subscription_id: subscription_id.to_owned(),
+                projection_id: projection_id.clone(),
+                entity: entity.clone(),
+                wire_payload_schema_ref: wire_payload_schema_ref.clone(),
+                inner_projection_schema_ref: inner_projection_schema_ref.clone(),
+                freshness: freshness.clone(),
+                backpressure_capacity: *backpressure_capacity,
+            }),
+            Self::EventCategory { .. } => None,
+        }
+    }
+}
+
+impl std::fmt::Debug for SubscriptionRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EventCategory {
+                category,
+                wire_payload_schema_ref,
+                inner_event_payload_schema_ref,
+                backpressure_capacity,
+            } => f
+                .debug_struct("EventCategory")
+                .field("category", category)
+                .field("wire_payload_schema_ref", wire_payload_schema_ref)
+                .field(
+                    "inner_event_payload_schema_ref",
+                    inner_event_payload_schema_ref,
+                )
+                .field("backpressure_capacity", backpressure_capacity)
+                .finish(),
+            Self::Projection {
+                projection_id,
+                entity,
+                wire_payload_schema_ref,
+                inner_projection_schema_ref,
+                freshness,
+                backpressure_capacity,
+                ..
+            } => f
+                .debug_struct("Projection")
+                .field("projection_id", projection_id)
+                .field("entity", entity)
+                .field("wire_payload_schema_ref", wire_payload_schema_ref)
+                .field("inner_projection_schema_ref", inner_projection_schema_ref)
+                .field("freshness", freshness)
+                .field("backpressure_capacity", backpressure_capacity)
+                .field("projector", &"Arc<dyn ProjectionProjector>")
+                .finish(),
+        }
+    }
+}
+
+impl PartialEq for SubscriptionRoute {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::EventCategory {
+                    category: left_category,
+                    wire_payload_schema_ref: left_wire,
+                    inner_event_payload_schema_ref: left_inner,
+                    backpressure_capacity: left_cap,
+                },
+                Self::EventCategory {
+                    category: right_category,
+                    wire_payload_schema_ref: right_wire,
+                    inner_event_payload_schema_ref: right_inner,
+                    backpressure_capacity: right_cap,
+                },
+            ) => {
+                left_category == right_category
+                    && left_wire == right_wire
+                    && left_inner == right_inner
+                    && left_cap == right_cap
+            }
+            (
+                Self::Projection {
+                    projection_id: left_projection,
+                    entity: left_entity,
+                    wire_payload_schema_ref: left_wire,
+                    inner_projection_schema_ref: left_inner,
+                    freshness: left_freshness,
+                    backpressure_capacity: left_cap,
+                    ..
+                },
+                Self::Projection {
+                    projection_id: right_projection,
+                    entity: right_entity,
+                    wire_payload_schema_ref: right_wire,
+                    inner_projection_schema_ref: right_inner,
+                    freshness: right_freshness,
+                    backpressure_capacity: right_cap,
+                    ..
+                },
+            ) => {
+                left_projection == right_projection
+                    && left_entity == right_entity
+                    && left_wire == right_wire
+                    && left_inner == right_inner
+                    && freshness_same(left_freshness, right_freshness)
+                    && left_cap == right_cap
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for SubscriptionRoute {}
+
+fn freshness_same(left: &Freshness, right: &Freshness) -> bool {
+    match (left, right) {
+        (Freshness::Consistent, Freshness::Consistent) => true,
+        (
+            Freshness::MaybeStale {
+                max_stale_ms: left_ms,
+            },
+            Freshness::MaybeStale {
+                max_stale_ms: right_ms,
+            },
+        ) => left_ms == right_ms,
+        _ => false,
     }
 }
 
@@ -109,6 +263,35 @@ fn validate_route(route: &SubscriptionRoute) -> Result<(), SubscriptionRuntimeEr
             EventCategory::new(*category).map_err(|_| SubscriptionRuntimeError::InvalidRoute {
                 reason: "event category out of range",
             })?;
+            if wire_payload_schema_ref.is_empty() {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "wire payload schema ref is empty",
+                });
+            }
+            if matches!(backpressure_capacity, Some(0)) {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "backpressure capacity is zero",
+                });
+            }
+            Ok(())
+        }
+        SubscriptionRoute::Projection {
+            projection_id,
+            entity,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+            ..
+        } => {
+            if projection_id.is_empty() {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "projection id is empty",
+                });
+            }
+            if entity.is_empty() {
+                return Err(SubscriptionRuntimeError::InvalidRoute {
+                    reason: "entity is empty",
+                });
+            }
             if wire_payload_schema_ref.is_empty() {
                 return Err(SubscriptionRuntimeError::InvalidRoute {
                     reason: "wire payload schema ref is empty",
