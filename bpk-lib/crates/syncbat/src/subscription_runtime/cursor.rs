@@ -1,5 +1,7 @@
 use super::error::SubscriptionRuntimeError;
 
+pub use super::entity_cursor::EntityStreamCursorV1;
+
 /// Fixed cursor magic bytes (`BPSC`).
 pub const CURSOR_MAGIC: [u8; 4] = *b"BPSC";
 /// Supported cursor schema version.
@@ -12,6 +14,8 @@ pub const SOURCE_KIND_PROJECTION: u8 = 0x02;
 pub const SOURCE_KIND_OPERATION_STATUS: u8 = 0x03;
 /// Receipt stream source kind.
 pub const SOURCE_KIND_RECEIPT_STREAM: u8 = 0x04;
+/// Entity stream source kind.
+pub const SOURCE_KIND_ENTITY_STREAM: u8 = 0x05;
 /// Fixed on-wire event cursor byte length.
 pub const CURSOR_V1_LEN: usize = 40;
 /// Fixed on-wire projection cursor byte length.
@@ -20,6 +24,8 @@ pub const PROJECTION_CURSOR_V1_LEN: usize = 56;
 pub const OPERATION_STATUS_CURSOR_V1_LEN: usize = 56;
 /// Fixed on-wire receipt-stream cursor byte length.
 pub const RECEIPT_STREAM_CURSOR_V1_LEN: usize = 56;
+/// Fixed on-wire entity-stream cursor byte length.
+pub const ENTITY_STREAM_CURSOR_V1_LEN: usize = 56;
 
 const HASH_DOMAIN: &[u8] = b"syncbat.event-stream.cursor.subscription-id.v1\0";
 
@@ -195,7 +201,7 @@ pub fn subscription_id_hash(subscription_id: &str) -> [u8; 16] {
     out
 }
 
-fn read_u64_be(bytes: &[u8], offset: usize) -> u64 {
+pub(super) fn read_u64_be(bytes: &[u8], offset: usize) -> u64 {
     let mut buf = [0_u8; 8];
     buf.copy_from_slice(&bytes[offset..offset + 8]);
     u64::from_be_bytes(buf)
@@ -409,7 +415,7 @@ pub fn projection_entity_hash(entity: &str) -> [u8; 8] {
     out
 }
 
-fn hash_prefix_16(domain: &[u8], value: &[u8]) -> [u8; 16] {
+pub(super) fn hash_prefix_16(domain: &[u8], value: &[u8]) -> [u8; 16] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(domain);
     hasher.update(value);

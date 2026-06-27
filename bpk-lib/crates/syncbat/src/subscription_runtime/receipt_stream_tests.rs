@@ -94,12 +94,25 @@ fn open_session(
     resume_cursor: Option<&[u8]>,
     client_window: u32,
 ) -> Result<Box<dyn SubscriptionSession>, Box<dyn std::error::Error>> {
-    let (_control_tx, control_rx) = bounded(4);
-    let runtime = CompositeSubscriptionRuntime::new(
-        SubscriptionStore::new(store),
-        registry.clone(),
+    open_session_with_config(
+        store,
+        registry,
+        resume_cursor,
+        client_window,
         SubscriptionRuntimeConfig::default(),
-    );
+    )
+}
+
+fn open_session_with_config(
+    store: Arc<Store>,
+    registry: &SubscriptionRegistry,
+    resume_cursor: Option<&[u8]>,
+    client_window: u32,
+    config: SubscriptionRuntimeConfig,
+) -> Result<Box<dyn SubscriptionSession>, Box<dyn std::error::Error>> {
+    let (_control_tx, control_rx) = bounded(4);
+    let runtime =
+        CompositeSubscriptionRuntime::new(SubscriptionStore::new(store), registry.clone(), config);
     runtime
         .open_session(SUBSCRIPTION_ID, resume_cursor, client_window, control_rx)
         .map_err(|error| -> Box<dyn std::error::Error> { Box::new(error) })
@@ -319,6 +332,50 @@ fn subscription_runtime_receipt_wrong_receipt_kind_skipped(
         receipt_global_sequences(&deliveries)?.len(),
         1,
         "PROPERTY: non-matching receipt kinds must be skipped"
+    );
+    Ok(())
+}
+
+#[test]
+fn subscription_runtime_receipt_nonmatching_page_does_not_watermark_past_later_matching_receipt(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (store, _dir) = test_store()?;
+    append_receipt(Arc::clone(&store), OTHER_RECEIPT_KIND, "ping")?;
+    append_receipt(Arc::clone(&store), RECEIPT_KIND, OPERATION)?;
+
+    let config = SubscriptionRuntimeConfig::new(256, 1);
+    let mut session =
+        open_session_with_config(Arc::clone(&store), &test_registry()?, None, 128, config)?;
+    let deliveries = collect_deliveries(session.as_mut(), 8)?;
+    let first_event_index = deliveries
+        .iter()
+        .position(|delivery| matches!(delivery, SessionDelivery::Event(_)));
+    let first_watermark_index = deliveries
+        .iter()
+        .position(|delivery| matches!(delivery, SessionDelivery::Watermark(_)));
+    let event_index = first_event_index
+        .ok_or_else(|| std::io::Error::other("PROPERTY: matching receipt must be delivered"))?;
+    let watermark_index = first_watermark_index.ok_or_else(|| {
+        std::io::Error::other("PROPERTY: catch-up must eventually emit SUB_WATERMARK")
+    })?;
+    assert!(
+        event_index < watermark_index,
+        "PROPERTY: nonmatching receipt page must not watermark past a later matching receipt"
+    );
+    let envelope_bytes = deliveries
+        .iter()
+        .find_map(|delivery| match delivery {
+            SessionDelivery::Event(event) => Some(event.envelope_bytes.clone()),
+            SessionDelivery::Watermark(_) | SessionDelivery::Error(_) | SessionDelivery::End(_) => {
+                None
+            }
+        })
+        .ok_or_else(|| std::io::Error::other("PROPERTY: expected matching receipt SUB_EVENT"))?;
+    let envelope: ReceiptStreamEnvelopeV1 = batpak::canonical::from_bytes(&envelope_bytes)?;
+    let receipt: ReceiptEnvelope = batpak::canonical::from_bytes(&envelope.receipt)?;
+    assert_eq!(
+        receipt.receipt_kind, RECEIPT_KIND,
+        "PROPERTY: delivered inner receipt must match route filter"
     );
     Ok(())
 }

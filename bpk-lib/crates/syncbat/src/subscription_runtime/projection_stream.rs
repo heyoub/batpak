@@ -521,6 +521,18 @@ impl SubscriptionSessionFactory for CompositeSubscriptionRuntime {
                 )?;
                 Ok(Box::new(session))
             }
+            SubscriptionRoute::EntityStream { .. } => {
+                let session = super::entity_stream::EntityStreamSession::open_from_registry(
+                    self.store.clone(),
+                    &self.registry,
+                    self.config,
+                    subscription_id,
+                    resume_cursor,
+                    client_window,
+                    control_rx,
+                )?;
+                Ok(Box::new(session))
+            }
         }
     }
 }

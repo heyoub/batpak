@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use batpak::coordinate::EventCategory;
+use batpak::coordinate::{Coordinate, EventCategory};
 use batpak::store::Freshness;
 
 use crate::operation::MAX_DESCRIPTOR_REF_BYTES;
@@ -28,6 +28,23 @@ pub struct OperationStatusRouteBinding {
     pub inner_status_schema_ref: Option<String>,
     /// Freshness mode for status materialization.
     pub freshness: Freshness,
+    /// Optional route-specific queue clamp.
+    pub backpressure_capacity: Option<usize>,
+}
+
+/// Binding fields needed to open an entity-stream subscription session.
+#[derive(Clone, Debug)]
+pub struct EntityStreamRouteBinding {
+    /// Globally unique subscription id.
+    pub subscription_id: String,
+    /// Entity coordinate bound to the stream.
+    pub entity: String,
+    /// Scope coordinate bound to the stream.
+    pub scope: String,
+    /// Wire payload schema ref token.
+    pub wire_payload_schema_ref: String,
+    /// Optional inner event payload schema ref.
+    pub inner_event_payload_schema_ref: Option<String>,
     /// Optional route-specific queue clamp.
     pub backpressure_capacity: Option<usize>,
 }
@@ -77,6 +94,19 @@ pub enum SubscriptionRoute {
     EventCategory {
         /// Exported 4-bit event category filter.
         category: u8,
+        /// Wire `payload_schema_ref` token for stream envelopes.
+        wire_payload_schema_ref: String,
+        /// Optional inner payload schema ref carried inside the envelope.
+        inner_event_payload_schema_ref: Option<String>,
+        /// Optional route-specific queue clamp.
+        backpressure_capacity: Option<usize>,
+    },
+    /// Exact coordinate event stream.
+    EntityStream {
+        /// Entity coordinate bound to the stream.
+        entity: String,
+        /// Scope coordinate bound to the stream.
+        scope: String,
         /// Wire `payload_schema_ref` token for stream envelopes.
         wire_payload_schema_ref: String,
         /// Optional inner payload schema ref carried inside the envelope.
@@ -135,9 +165,35 @@ impl SubscriptionRoute {
     pub fn event_category(&self) -> Option<u8> {
         match self {
             Self::EventCategory { category, .. } => Some(*category),
-            Self::Projection { .. } | Self::OperationStatus { .. } | Self::ReceiptStream { .. } => {
-                None
-            }
+            Self::Projection { .. }
+            | Self::OperationStatus { .. }
+            | Self::ReceiptStream { .. }
+            | Self::EntityStream { .. } => None,
+        }
+    }
+
+    /// Build an entity-stream route binding for session open.
+    #[must_use]
+    pub fn entity_stream_binding(&self, subscription_id: &str) -> Option<EntityStreamRouteBinding> {
+        match self {
+            Self::EntityStream {
+                entity,
+                scope,
+                wire_payload_schema_ref,
+                inner_event_payload_schema_ref,
+                backpressure_capacity,
+            } => Some(EntityStreamRouteBinding {
+                subscription_id: subscription_id.to_owned(),
+                entity: entity.clone(),
+                scope: scope.clone(),
+                wire_payload_schema_ref: wire_payload_schema_ref.clone(),
+                inner_event_payload_schema_ref: inner_event_payload_schema_ref.clone(),
+                backpressure_capacity: *backpressure_capacity,
+            }),
+            Self::EventCategory { .. }
+            | Self::Projection { .. }
+            | Self::OperationStatus { .. }
+            | Self::ReceiptStream { .. } => None,
         }
     }
 
@@ -163,6 +219,7 @@ impl SubscriptionRoute {
                 backpressure_capacity: *backpressure_capacity,
             }),
             Self::EventCategory { .. } => None,
+            Self::EntityStream { .. } => None,
             Self::OperationStatus { .. } | Self::ReceiptStream { .. } => None,
         }
     }
@@ -190,9 +247,10 @@ impl SubscriptionRoute {
                 freshness: freshness.clone(),
                 backpressure_capacity: *backpressure_capacity,
             }),
-            Self::EventCategory { .. } | Self::Projection { .. } | Self::ReceiptStream { .. } => {
-                None
-            }
+            Self::EventCategory { .. }
+            | Self::Projection { .. }
+            | Self::ReceiptStream { .. }
+            | Self::EntityStream { .. } => None,
         }
     }
 
@@ -215,9 +273,10 @@ impl SubscriptionRoute {
                 inner_receipt_schema_ref: inner_receipt_schema_ref.clone(),
                 backpressure_capacity: *backpressure_capacity,
             }),
-            Self::EventCategory { .. } | Self::Projection { .. } | Self::OperationStatus { .. } => {
-                None
-            }
+            Self::EventCategory { .. }
+            | Self::Projection { .. }
+            | Self::OperationStatus { .. }
+            | Self::EntityStream { .. } => None,
         }
     }
 }
@@ -233,6 +292,23 @@ impl std::fmt::Debug for SubscriptionRoute {
             } => f
                 .debug_struct("EventCategory")
                 .field("category", category)
+                .field("wire_payload_schema_ref", wire_payload_schema_ref)
+                .field(
+                    "inner_event_payload_schema_ref",
+                    inner_event_payload_schema_ref,
+                )
+                .field("backpressure_capacity", backpressure_capacity)
+                .finish(),
+            Self::EntityStream {
+                entity,
+                scope,
+                wire_payload_schema_ref,
+                inner_event_payload_schema_ref,
+                backpressure_capacity,
+            } => f
+                .debug_struct("EntityStream")
+                .field("entity", entity)
+                .field("scope", scope)
                 .field("wire_payload_schema_ref", wire_payload_schema_ref)
                 .field(
                     "inner_event_payload_schema_ref",
@@ -293,6 +369,7 @@ impl std::fmt::Debug for SubscriptionRoute {
 impl PartialEq for SubscriptionRoute {
     fn eq(&self, other: &Self) -> bool {
         self.event_category_eq(other)
+            || self.entity_stream_eq(other)
             || self.projection_eq(other)
             || self.operation_status_eq(other)
             || self.receipt_stream_eq(other)
@@ -319,6 +396,34 @@ impl SubscriptionRoute {
                 },
             ) => {
                 left_category == right_category
+                    && left_wire == right_wire
+                    && left_inner == right_inner
+                    && left_cap == right_cap
+            }
+            _ => false,
+        }
+    }
+
+    fn entity_stream_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::EntityStream {
+                    entity: left_entity,
+                    scope: left_scope,
+                    wire_payload_schema_ref: left_wire,
+                    inner_event_payload_schema_ref: left_inner,
+                    backpressure_capacity: left_cap,
+                },
+                Self::EntityStream {
+                    entity: right_entity,
+                    scope: right_scope,
+                    wire_payload_schema_ref: right_wire,
+                    inner_event_payload_schema_ref: right_inner,
+                    backpressure_capacity: right_cap,
+                },
+            ) => {
+                left_entity == right_entity
+                    && left_scope == right_scope
                     && left_wire == right_wire
                     && left_inner == right_inner
                     && left_cap == right_cap
@@ -480,20 +585,7 @@ fn validate_route(route: &SubscriptionRoute) -> Result<(), SubscriptionRuntimeEr
             backpressure_capacity,
             ..
         } => {
-            EventCategory::new(*category).map_err(|_| SubscriptionRuntimeError::InvalidRoute {
-                reason: "event category out of range",
-            })?;
-            if wire_payload_schema_ref.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "wire payload schema ref is empty",
-                });
-            }
-            if matches!(backpressure_capacity, Some(0)) {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "backpressure capacity is zero",
-                });
-            }
-            Ok(())
+            validate_event_category_route(*category, wire_payload_schema_ref, backpressure_capacity)
         }
         SubscriptionRoute::Projection {
             projection_id,
@@ -501,83 +593,139 @@ fn validate_route(route: &SubscriptionRoute) -> Result<(), SubscriptionRuntimeEr
             wire_payload_schema_ref,
             backpressure_capacity,
             ..
-        } => {
-            if projection_id.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "projection id is empty",
-                });
-            }
-            if entity.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "entity is empty",
-                });
-            }
-            if wire_payload_schema_ref.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "wire payload schema ref is empty",
-                });
-            }
-            if matches!(backpressure_capacity, Some(0)) {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "backpressure capacity is zero",
-                });
-            }
-            Ok(())
-        }
+        } => validate_projection_route(
+            projection_id,
+            entity,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+        ),
         SubscriptionRoute::OperationStatus {
             operation,
             entity,
             wire_payload_schema_ref,
             backpressure_capacity,
             ..
-        } => {
-            if entity.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "entity is empty",
-                });
-            }
-            let expected = operation_status_entity(operation.as_str()).map_err(|_| {
-                SubscriptionRuntimeError::InvalidRoute {
-                    reason: "operation name produces invalid status entity",
-                }
-            })?;
-            if *entity != expected {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "entity does not match operation-status entity helper",
-                });
-            }
-            if wire_payload_schema_ref.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "wire payload schema ref is empty",
-                });
-            }
-            if matches!(backpressure_capacity, Some(0)) {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "backpressure capacity is zero",
-                });
-            }
-            Ok(())
-        }
+        } => validate_operation_status_route(
+            operation,
+            entity,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+        ),
+        SubscriptionRoute::EntityStream {
+            entity,
+            scope,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+            ..
+        } => validate_entity_stream_route(
+            entity,
+            scope,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+        ),
         SubscriptionRoute::ReceiptStream {
             receipt_kind,
             wire_payload_schema_ref,
             backpressure_capacity,
             ..
-        } => {
-            validate_receipt_kind(receipt_kind)?;
-            if wire_payload_schema_ref.is_empty() {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "wire payload schema ref is empty",
-                });
-            }
-            if matches!(backpressure_capacity, Some(0)) {
-                return Err(SubscriptionRuntimeError::InvalidRoute {
-                    reason: "backpressure capacity is zero",
-                });
-            }
-            Ok(())
-        }
+        } => validate_receipt_stream_route(
+            receipt_kind,
+            wire_payload_schema_ref,
+            backpressure_capacity,
+        ),
     }
+}
+
+fn validate_event_category_route(
+    category: u8,
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    EventCategory::new(category).map_err(|_| SubscriptionRuntimeError::InvalidRoute {
+        reason: "event category out of range",
+    })?;
+    validate_wire_and_backpressure(wire_payload_schema_ref, backpressure_capacity)
+}
+
+fn validate_projection_route(
+    projection_id: &str,
+    entity: &str,
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    if projection_id.is_empty() {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "projection id is empty",
+        });
+    }
+    if entity.is_empty() {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "entity is empty",
+        });
+    }
+    validate_wire_and_backpressure(wire_payload_schema_ref, backpressure_capacity)
+}
+
+fn validate_operation_status_route(
+    operation: &OperationName,
+    entity: &str,
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    if entity.is_empty() {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "entity is empty",
+        });
+    }
+    let expected = operation_status_entity(operation.as_str()).map_err(|_| {
+        SubscriptionRuntimeError::InvalidRoute {
+            reason: "operation name produces invalid status entity",
+        }
+    })?;
+    if entity != expected {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "entity does not match operation-status entity helper",
+        });
+    }
+    validate_wire_and_backpressure(wire_payload_schema_ref, backpressure_capacity)
+}
+
+fn validate_entity_stream_route(
+    entity: &str,
+    scope: &str,
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    Coordinate::new(entity, scope).map_err(|_| SubscriptionRuntimeError::InvalidRoute {
+        reason: "entity coordinate is invalid",
+    })?;
+    validate_wire_and_backpressure(wire_payload_schema_ref, backpressure_capacity)
+}
+
+fn validate_receipt_stream_route(
+    receipt_kind: &str,
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    validate_receipt_kind(receipt_kind)?;
+    validate_wire_and_backpressure(wire_payload_schema_ref, backpressure_capacity)
+}
+
+fn validate_wire_and_backpressure(
+    wire_payload_schema_ref: &str,
+    backpressure_capacity: &Option<usize>,
+) -> Result<(), SubscriptionRuntimeError> {
+    if wire_payload_schema_ref.is_empty() {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "wire payload schema ref is empty",
+        });
+    }
+    if matches!(backpressure_capacity, Some(0)) {
+        return Err(SubscriptionRuntimeError::InvalidRoute {
+            reason: "backpressure capacity is zero",
+        });
+    }
+    Ok(())
 }
 
 fn validate_receipt_kind(value: &str) -> Result<(), SubscriptionRuntimeError> {

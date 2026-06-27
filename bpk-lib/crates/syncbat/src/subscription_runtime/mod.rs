@@ -5,6 +5,8 @@
 
 mod config;
 mod cursor;
+mod entity_cursor;
+mod entity_stream;
 mod envelope;
 mod error;
 mod event_stream;
@@ -17,15 +19,17 @@ mod session;
 
 pub use config::SubscriptionRuntimeConfig;
 pub use cursor::{
-    EventStreamCursorV1, OperationStatusPositionKind, OperationStatusStreamCursorV1, PositionKind,
-    ProjectionPositionKind, ProjectionStreamCursorV1, ReceiptStreamCursorV1, CURSOR_V1_LEN,
+    EntityStreamCursorV1, EventStreamCursorV1, OperationStatusPositionKind,
+    OperationStatusStreamCursorV1, PositionKind, ProjectionPositionKind, ProjectionStreamCursorV1,
+    ReceiptStreamCursorV1, CURSOR_V1_LEN, ENTITY_STREAM_CURSOR_V1_LEN,
     OPERATION_STATUS_CURSOR_V1_LEN, PROJECTION_CURSOR_V1_LEN, RECEIPT_STREAM_CURSOR_V1_LEN,
-    SOURCE_KIND_EVENT_CATEGORY, SOURCE_KIND_OPERATION_STATUS, SOURCE_KIND_PROJECTION,
-    SOURCE_KIND_RECEIPT_STREAM,
+    SOURCE_KIND_ENTITY_STREAM, SOURCE_KIND_EVENT_CATEGORY, SOURCE_KIND_OPERATION_STATUS,
+    SOURCE_KIND_PROJECTION, SOURCE_KIND_RECEIPT_STREAM,
 };
+pub use entity_stream::EntityStreamSession;
 pub use envelope::{
-    EventStreamEnvelopeV1, OperationStatusStreamEnvelopeV1, ProjectionStreamEnvelopeV1,
-    ReceiptStreamEnvelopeV1,
+    EntityStreamEnvelopeV1, EventStreamEnvelopeV1, OperationStatusStreamEnvelopeV1,
+    ProjectionStreamEnvelopeV1, ReceiptStreamEnvelopeV1,
 };
 pub use error::SubscriptionRuntimeError;
 pub use event_stream::{EventStreamSession, EventSubscriptionRuntime};
@@ -36,8 +40,8 @@ pub use projection_stream::{
 pub use projector::{ProjectionProjector, ProjectionRouteBinding};
 pub use receipt_stream::ReceiptStreamSession;
 pub use registry::{
-    OperationStatusRouteBinding, ReceiptStreamRouteBinding, SubscriptionId, SubscriptionRegistry,
-    SubscriptionRoute,
+    EntityStreamRouteBinding, OperationStatusRouteBinding, ReceiptStreamRouteBinding,
+    SubscriptionId, SubscriptionRegistry, SubscriptionRoute,
 };
 pub use session::{
     cursor_invalid_error, cursor_mismatch_error, unknown_subscription_error, RuntimeCursor,
@@ -60,3 +64,7 @@ mod operation_status_stream_tests;
 #[cfg(test)]
 #[path = "receipt_stream_tests.rs"]
 mod receipt_stream_tests;
+
+#[cfg(test)]
+#[path = "entity_stream_tests.rs"]
+mod entity_stream_tests;

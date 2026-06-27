@@ -298,6 +298,7 @@ rows:
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_replay_delivers_matching_receipt_kind
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_live_delivery_after_core_checkout_receipt
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_wrong_receipt_kind_skipped
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_nonmatching_page_does_not_watermark_past_later_matching_receipt
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_malformed_receipt_payload_emits_receipt_decode_failed
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_watermark_after_filtered_stream_catches_up
       - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cumulative_ack_frees_delivery_window
@@ -314,11 +315,31 @@ rows:
 
   - id: S12-SUBSCRIPTION-RUNTIME-ENTITY
     title: Subscription runtime entity stream delivery
-    status: INCOMPLETE
+    status: PROVEN
     terminal_required: true
     surface: netbat
-    blocked_by:
-      - event runtime is PROVEN; entity source runtime is not implemented yet
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_replay_delivers_exact_coordinate_events
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_live_delivery_after_append
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_descendant_entity_skipped_exact_entity_later_delivered
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_wrong_scope_skipped
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_watermark_only_after_source_exhaustion
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_resume_after_cursor_does_not_redeliver_acknowledged_event
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cancel_emits_client_cancelled
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_disconnect_without_cancel_ends_session
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_tcp_maps_entity_sub_event_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat --lib subscription_runtime_entity
+      - just cargo test -p netbat stream_runtime_entity
+      - just cargo test -p syncbat --lib subscription_runtime_receipt
 
   # ── Cloud-only proof batch ───────────────────────────────────────────────────
 
