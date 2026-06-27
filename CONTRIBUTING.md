@@ -78,8 +78,8 @@ No current environment is both canonical and timing-stable.
 ## Docs And Release Hygiene
 
 - `README.md` is the primary repo entrypoint and should stay enough for orientation
-- `FACTORY.md`, `MODEL.md`, and `INVARIANTS.md` are the primary ontology surface
-- `CONFORMANCE.md` is the command and proof contract
+- `01_FACTORY.md`, `02_MODEL.md`, and `03_INVARIANTS.md` are the primary ontology surface
+- `12_CONFORMANCE.md` is the command and proof contract
 - Historical decisions live under `archive/decisions/` and are not the public reading path.
 
 Before release-oriented changes, run:

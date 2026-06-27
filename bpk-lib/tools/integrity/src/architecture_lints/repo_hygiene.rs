@@ -113,18 +113,18 @@ fn check_no_legacy_topology_or_replay_names(
         }
         let rel = relative(repo_root, path);
         let is_live_surface = rel == "README.md"
-            || rel == "FACTORY.md"
-            || rel == "MODEL.md"
-            || rel == "INVARIANTS.md"
-            || rel == "BATTERIES.md"
-            || rel == "TERMINALS.md"
-            || rel == "EVENTS.md"
-            || rel == "RECEIPTS.md"
-            || rel == "CIRCUITS.md"
-            || rel == "REPLAY.md"
-            || rel == "PROJECTIONS.md"
-            || rel == "INTEGRATION.md"
-            || rel == "CONFORMANCE.md"
+            || rel == "01_FACTORY.md"
+            || rel == "02_MODEL.md"
+            || rel == "03_INVARIANTS.md"
+            || rel == "04_BATTERIES.md"
+            || rel == "05_TERMINALS.md"
+            || rel == "06_EVENTS.md"
+            || rel == "07_RECEIPTS.md"
+            || rel == "08_CIRCUITS.md"
+            || rel == "09_REPLAY.md"
+            || rel == "10_PROJECTIONS.md"
+            || rel == "11_INTEGRATION.md"
+            || rel == "12_CONFORMANCE.md"
             || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
             || rel.starts_with("crates/examples/examples/")
@@ -380,7 +380,11 @@ fn check_bidirectional_substrate_lane_terms(
 
         let is_live_doc = matches!(
             rel.as_str(),
-            "REPLAY.md" | "INTEGRATION.md" | "EVENTS.md" | "TERMINALS.md" | "CONFORMANCE.md"
+            "09_REPLAY.md"
+                | "11_INTEGRATION.md"
+                | "06_EVENTS.md"
+                | "05_TERMINALS.md"
+                | "12_CONFORMANCE.md"
         );
         if is_live_doc && ext == "md" {
             let content =

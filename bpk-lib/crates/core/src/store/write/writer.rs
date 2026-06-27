@@ -7,7 +7,7 @@
 compile_error!(
     "Red flag: only Once and Bounded restart policies. \
      Exponential backoff belongs in the product's supervisor, not here. \
-     See CIRCUITS.md."
+     See 08_CIRCUITS.md."
 );
 
 pub use super::fanout::Notification;

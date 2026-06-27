@@ -70,4 +70,4 @@ concurrency schedules. They do not change the public Rust API.
 
 ## Current Batteries
 
-The shipped family is described in [BATTERIES.md](BATTERIES.md). Do not treat reserved names as shipped products.
+The shipped family is described in [04_BATTERIES.md](04_BATTERIES.md). Do not treat reserved names as shipped products.

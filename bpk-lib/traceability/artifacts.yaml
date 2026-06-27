@@ -765,14 +765,14 @@
   kind: docs
   paths:
     - README.md
-    - FACTORY.md
-    - MODEL.md
-    - INVARIANTS.md
-    - TERMINALS.md
-    - EVENTS.md
-    - REPLAY.md
-    - INTEGRATION.md
-    - CONFORMANCE.md
+    - 01_FACTORY.md
+    - 02_MODEL.md
+    - 03_INVARIANTS.md
+    - 05_TERMINALS.md
+    - 06_EVENTS.md
+    - 09_REPLAY.md
+    - 11_INTEGRATION.md
+    - 12_CONFORMANCE.md
     - CONTRIBUTING.md
     - AGENTS.md
     - templates/minimal-app/Cargo.toml
@@ -794,7 +794,7 @@
 - id: ART-SCHEMA-EVOLUTION-DOC
   kind: docs
   paths:
-    - EVENTS.md
+    - 06_EVENTS.md
 - id: ART-EXAMPLES
   kind: examples
   paths:

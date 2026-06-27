@@ -76,9 +76,9 @@ Full documentation lives in the
 evaluator path, the
 [cookbook](https://github.com/heyoub/batpak/blob/main/cookbook/README.md) for
 task-shaped recipes, and
-[MODEL](https://github.com/heyoub/batpak/blob/main/MODEL.md) /
-[INVARIANTS](https://github.com/heyoub/batpak/blob/main/INVARIANTS.md) /
-[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/CONFORMANCE.md)
+[MODEL](https://github.com/heyoub/batpak/blob/main/02_MODEL.md) /
+[INVARIANTS](https://github.com/heyoub/batpak/blob/main/03_INVARIANTS.md) /
+[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/12_CONFORMANCE.md)
 for the mental model and the guarantees.
 
 ```text

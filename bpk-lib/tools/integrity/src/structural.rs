@@ -39,7 +39,7 @@ pub(crate) fn run() -> Result<()> {
         ))
     })?;
 
-    // GAUNTLET-DOCS-CURRENCY: the INVARIANTS.md catalog block must be a current
+    // GAUNTLET-DOCS-CURRENCY: the 03_INVARIANTS.md catalog block must be a current
     // view of traceability/invariants.yaml (drift => fail), and every declared
     // witness_test must resolve to a real test. `check=true` => never rewrite.
     docs_catalog::run(&repo_root, true)?;
@@ -435,7 +435,7 @@ fn check_event_payload_frozen_fixtures(
         warnings.push(format!(
             "structural-check (warn): EventPayload type `{name}` has no frozen payload fixture under \
              {} and is not in FROZEN_FIXTURE_DEBT. Freeze a v1 fixture + a frozen_decode test \
-             (see EVENTS.md -> Schema Evolution), or add a debt entry. \
+             (see 06_EVENTS.md -> Schema Evolution), or add a debt entry. \
              [ART-EVENT-PAYLOAD-FROZEN-GOLDENS; warn-first this minor]",
             relative(repo_root, &payloads_dir)
         ));

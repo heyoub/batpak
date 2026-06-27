@@ -13,5 +13,5 @@ batpak store internals.
 
 The runtime contract is documented in repository ADR-0028.
 
-Live terminals: [TERMINALS.md](../../../TERMINALS.md). Composition:
-[INTEGRATION.md](../../../INTEGRATION.md).
+Live terminals: [05_TERMINALS.md](../../../05_TERMINALS.md). Composition:
+[11_INTEGRATION.md](../../../11_INTEGRATION.md).

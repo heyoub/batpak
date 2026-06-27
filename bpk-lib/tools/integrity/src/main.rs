@@ -160,7 +160,7 @@ enum CommandKind {
         check: bool,
     },
     /// GAUNTLET-DOCS-CURRENCY: regenerate (or `--check`) the auto-generated INV
-    /// catalog block in `INVARIANTS.md` from `traceability/invariants.yaml`, and
+    /// catalog block in `03_INVARIANTS.md` from `traceability/invariants.yaml`, and
     /// enforce the per-INV `witness_test` strong-tier citation gate. `--check`
     /// fails on drift instead of rewriting; it is folded into `structural-check`.
     DocsCatalog {

@@ -6,7 +6,7 @@ shipped notes identify the first release where a decision became part of the
 public or repository contract when that release is known.
 
 For the cross-ADR evidence-report identity pattern, see
-`../../RECEIPTS.md`.
+`../../07_RECEIPTS.md`.
 
 Agent/human transcription rails live as `cookbook/200_*.md` files and are
 indexed by `bpk-lib/traceability/agent_surface.yaml`.
@@ -15,10 +15,10 @@ Root layer docs:
 
 | Doc | Layer |
 | --- | --- |
-| [`../../BATTERIES.md`](../../BATTERIES.md) | shipped battery family |
-| [`../../MODEL.md`](../../MODEL.md) | canonical current ontology |
-| [`../../INVARIANTS.md`](../../INVARIANTS.md) | narrative invariants; traceability remains machine law |
-| [`../../CONFORMANCE.md`](../../CONFORMANCE.md) | command and proof contract |
+| [`../../04_BATTERIES.md`](../../04_BATTERIES.md) | shipped battery family |
+| [`../../02_MODEL.md`](../../02_MODEL.md) | canonical current ontology |
+| [`../../03_INVARIANTS.md`](../../03_INVARIANTS.md) | narrative invariants; traceability remains machine law |
+| [`../../12_CONFORMANCE.md`](../../12_CONFORMANCE.md) | command and proof contract |
 
 | ADR | Title | Status |
 | --- | --- | --- |

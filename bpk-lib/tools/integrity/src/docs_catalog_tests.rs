@@ -1,5 +1,5 @@
 //! PROVES: INV-DOCS-CATALOG-VIEW-CURRENT, INV-INVARIANT-WITNESS-TEST
-//! CATCHES: a stale INVARIANTS.md catalog block; a witness_test that names a
+//! CATCHES: a stale 03_INVARIANTS.md catalog block; a witness_test that names a
 //!          missing file, a missing fn, or a non-`#[test]` fn.
 //! SEEDED: synthetic in-memory catalog + a tempdir source tree.
 
@@ -132,17 +132,17 @@ fn witness_gate_rejects_missing_file() {
 #[test]
 fn live_catalog_block_matches_committed_invariants_md() {
     // Red-fixture wiring: this is the in-process mirror of `--check`. If a new
-    // INV lands in invariants.yaml without regenerating INVARIANTS.md, this
+    // INV lands in invariants.yaml without regenerating 03_INVARIANTS.md, this
     // fails (alongside the structural-check gate).
     let repo_root = crate::repo_surface::repo_root().expect("repo root");
     let invariants = load_catalog(&repo_root).expect("load catalog");
     let block = render_catalog_block(&invariants);
-    let md_path = crate::repo_surface::project_root(&repo_root).join("INVARIANTS.md");
+    let md_path = crate::repo_surface::project_root(&repo_root).join("03_INVARIANTS.md");
     let md = std::fs::read_to_string(md_path).expect("read md");
     let next = splice_catalog_block(&md, &block).expect("splice");
     assert_eq!(
         md, next,
-        "INVARIANTS.md catalog block is stale; run `cargo xtask docs`"
+        "03_INVARIANTS.md catalog block is stale; run `cargo xtask docs`"
     );
 }
 

@@ -31,18 +31,18 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
 
     for path in [
         "README.md",
-        "FACTORY.md",
-        "MODEL.md",
-        "INVARIANTS.md",
-        "BATTERIES.md",
-        "TERMINALS.md",
-        "EVENTS.md",
-        "RECEIPTS.md",
-        "CIRCUITS.md",
-        "REPLAY.md",
-        "PROJECTIONS.md",
-        "INTEGRATION.md",
-        "CONFORMANCE.md",
+        "01_FACTORY.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "04_BATTERIES.md",
+        "05_TERMINALS.md",
+        "06_EVENTS.md",
+        "07_RECEIPTS.md",
+        "08_CIRCUITS.md",
+        "09_REPLAY.md",
+        "10_PROJECTIONS.md",
+        "11_INTEGRATION.md",
+        "12_CONFORMANCE.md",
         "CONTRIBUTING.md",
         "archive/decisions/099_DECISION_INDEX.md",
         "bpk-lib/traceability/testing_ledger.yaml",
@@ -57,6 +57,7 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
     check_root_markdown_allowlist(project_root)?;
+    check_no_unprefixed_factory_docs(project_root)?;
     ensure(
         !project_root.join("deny.toml").exists(),
         "deny.toml belongs under bpk-lib/ (cargo deny runs from the workspace root)",
@@ -130,23 +131,23 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
 fn check_root_markdown_allowlist(project_root: &Path) -> Result<()> {
     let allowed: BTreeSet<&str> = [
         "AGENTS.md",
-        "BATTERIES.md",
+        "04_BATTERIES.md",
         "CHANGELOG.md",
-        "CIRCUITS.md",
+        "08_CIRCUITS.md",
         "CODE_OF_CONDUCT.md",
-        "CONFORMANCE.md",
+        "12_CONFORMANCE.md",
         "CONTRIBUTING.md",
-        "EVENTS.md",
-        "FACTORY.md",
-        "INTEGRATION.md",
-        "INVARIANTS.md",
-        "MODEL.md",
-        "PROJECTIONS.md",
+        "06_EVENTS.md",
+        "01_FACTORY.md",
+        "11_INTEGRATION.md",
+        "03_INVARIANTS.md",
+        "02_MODEL.md",
+        "10_PROJECTIONS.md",
         "README.md",
-        "RECEIPTS.md",
-        "REPLAY.md",
+        "07_RECEIPTS.md",
+        "09_REPLAY.md",
         "SUPPORT.md",
-        "TERMINALS.md",
+        "05_TERMINALS.md",
     ]
     .into_iter()
     .collect();
@@ -168,6 +169,31 @@ fn check_root_markdown_allowlist(project_root: &Path) -> Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn check_no_unprefixed_factory_docs(project_root: &Path) -> Result<()> {
+    for legacy in [
+        "FACTORY.md",
+        "MODEL.md",
+        "INVARIANTS.md",
+        "BATTERIES.md",
+        "TERMINALS.md",
+        "EVENTS.md",
+        "RECEIPTS.md",
+        "CIRCUITS.md",
+        "REPLAY.md",
+        "PROJECTIONS.md",
+        "INTEGRATION.md",
+        "CONFORMANCE.md",
+    ] {
+        ensure(
+            !project_root.join(legacy).exists(),
+            format!(
+                "unprefixed factory doc `{legacy}` must not exist at repo root; use numbered canonical names (01_FACTORY.md … 12_CONFORMANCE.md)"
+            ),
+        )?;
+    }
     Ok(())
 }
 
@@ -199,10 +225,10 @@ fn check_no_mdbook_dependency(repo_root: &Path) -> Result<()> {
         project_root.join(".github/workflows/ci.yml"),
         project_root.join(".github/workflows/perf.yml"),
         project_root.join("README.md"),
-        project_root.join("FACTORY.md"),
-        project_root.join("MODEL.md"),
-        project_root.join("INVARIANTS.md"),
-        project_root.join("CONFORMANCE.md"),
+        project_root.join("01_FACTORY.md"),
+        project_root.join("02_MODEL.md"),
+        project_root.join("03_INVARIANTS.md"),
+        project_root.join("12_CONFORMANCE.md"),
         project_root.join("CONTRIBUTING.md"),
         project_root.join("AGENTS.md"),
         project_root.join("justfile"),

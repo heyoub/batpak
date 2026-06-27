@@ -42,7 +42,7 @@ All notable changes to this project will be documented in this file.
   Append-only frozen-bytes decode fixtures plus a structural lint back the
   back-compat guarantee. The refbat manifest is now `manifestVersion` 2 with a
   per-event `payloadVersion`, and the TypeScript client decodes newer payload
-  versions tolerantly. See EVENTS.md ("Schema Evolution").
+  versions tolerantly. See 06_EVENTS.md ("Schema Evolution").
 - Durable idempotency (0.8.3): `AppendOptions::with_idempotency(key)` is now a
   durable correctness primitive. A dedicated `index.idemp` sidecar (magic
   `FBATID`, crc32fast CRC, atomic write) records the minimal tuple to
@@ -56,7 +56,7 @@ All notable changes to this project will be documented in this file.
   regardless of load; the soft cap may only ever trim out-of-window keys. Adds
   `IdempotencyKey::for_operation(domain, components)` (length-delimited blake3
   operation identity) and an additive `bank.commit` `idempotency_key_hex` wire
-  field. See EVENTS.md ("Durable idempotency") and cookbook recipe
+  field. See 06_EVENTS.md ("Durable idempotency") and cookbook recipe
   `200_IDEMPOTENT_PASS`.
 - TypeScript codegen (0.8.3): a Rust `#[serde(default)] Option<T>` field now
   generates an omittable TS input property (callers may omit it entirely) while
@@ -133,7 +133,7 @@ All notable changes to this project will be documented in this file.
   evidence behind the 0.x version number. The factory mental model now enters
   through a Rosetta table (factory word → Rust surface → plain meaning) and
   intent-based reading paths instead of a prerequisite reading order. Factory
-  docs themselves (`FACTORY.md`, `MODEL.md`) are unchanged.
+  docs themselves (`01_FACTORY.md`, `02_MODEL.md`) are unchanged.
 - Aligned every publishable Rust crate and `@batpak/*` npm package on
   `0.8.2`, catching npm up to the substrate evidence surface already in
   git from `0.8.1`.

@@ -1,4 +1,4 @@
-//! Tests for the MODEL.md → exported-symbol binding gate: the committed bindings
+//! Tests for the 02_MODEL.md → exported-symbol binding gate: the committed bindings
 //! are clean on the live tree, and planted drift (missing doc phrase, missing
 //! symbol, bad kind) is rejected.
 //!
@@ -19,7 +19,7 @@ bindings:
     kind: type
 "#;
 
-/// GREEN: doc_phrase in MODEL.md and symbol in the seal.
+/// GREEN: doc_phrase in 02_MODEL.md and symbol in the seal.
 #[test]
 fn passes_when_phrase_and_symbol_resolve() {
     let m = model(GOOD);
@@ -27,13 +27,13 @@ fn passes_when_phrase_and_symbol_resolve() {
         .expect("clean binding passes");
 }
 
-/// RED: the doc_phrase is absent from MODEL.md (the concept drifted out of the doc).
+/// RED: the doc_phrase is absent from 02_MODEL.md (the concept drifted out of the doc).
 #[test]
 fn rejects_missing_doc_phrase() {
     let m = model(GOOD);
     let err = check_bindings(&m, "no concept here", "pub struct Store")
         .expect_err("missing doc phrase must fail");
-    assert!(format!("{err:#}").contains("NOT present in MODEL.md"));
+    assert!(format!("{err:#}").contains("NOT present in 02_MODEL.md"));
 }
 
 /// RED: the symbol is absent from the seal (renamed/removed export — the refbat-style rot).
@@ -69,7 +69,7 @@ fn rejects_empty_bindings() {
     assert!(format!("{err:#}").contains("vacuous"));
 }
 
-/// The committed model_bindings.yaml is clean: every doc_phrase is in MODEL.md
+/// The committed model_bindings.yaml is clean: every doc_phrase is in 02_MODEL.md
 /// and every symbol is in the live public-API seal.
 #[test]
 fn live_model_bindings_are_clean() {

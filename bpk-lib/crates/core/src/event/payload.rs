@@ -44,7 +44,7 @@ pub trait EventPayload: Serialize + DeserializeOwned {
     /// at the typed-append seam so a future decoder can tell which struct shape
     /// produced the stored bytes and run the registered [`Upcast`] chain when
     /// they differ. Defaults to `1`; bump it (and freeze a new fixture + add an
-    /// `Upcast`) whenever a non-additive change lands. See `EVENTS.md` →
+    /// `Upcast`) whenever a non-additive change lands. See `06_EVENTS.md` →
     /// "Schema Evolution".
     ///
     /// `0` is reserved as the legacy/untyped sentinel and is never a valid

@@ -66,8 +66,8 @@ One paragraph version:
 | Host contract | `hostbat` | Client manifest and subscription descriptors |
 
 The in-process path opens `Store` directly. The networked path crosses
-terminals documented in [TERMINALS.md](TERMINALS.md). Journal and multi-journal
-composition rules live in [README.md](README.md) and [CIRCUITS.md](CIRCUITS.md).
+terminals documented in [05_TERMINALS.md](05_TERMINALS.md). Journal and multi-journal
+composition rules live in [README.md](README.md) and [08_CIRCUITS.md](08_CIRCUITS.md).
 
 ## Beginner Store Path
 

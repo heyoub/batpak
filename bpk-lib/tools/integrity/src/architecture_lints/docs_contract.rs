@@ -19,25 +19,25 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
 fn check_portable_context_links(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
     let readme = doc_root.join("README.md");
-    let factory = doc_root.join("FACTORY.md");
-    let model = doc_root.join("MODEL.md");
-    let invariants = doc_root.join("INVARIANTS.md");
-    let conformance = doc_root.join("CONFORMANCE.md");
+    let factory = doc_root.join("01_FACTORY.md");
+    let model = doc_root.join("02_MODEL.md");
+    let invariants = doc_root.join("03_INVARIANTS.md");
+    let conformance = doc_root.join("12_CONFORMANCE.md");
 
     let readme_links = markdown_links(doc_root, &readme)?;
     for target in [
-        "FACTORY.md",
-        "MODEL.md",
-        "INVARIANTS.md",
-        "BATTERIES.md",
-        "TERMINALS.md",
-        "EVENTS.md",
-        "RECEIPTS.md",
-        "CIRCUITS.md",
-        "REPLAY.md",
-        "PROJECTIONS.md",
-        "INTEGRATION.md",
-        "CONFORMANCE.md",
+        "01_FACTORY.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "04_BATTERIES.md",
+        "05_TERMINALS.md",
+        "06_EVENTS.md",
+        "07_RECEIPTS.md",
+        "08_CIRCUITS.md",
+        "09_REPLAY.md",
+        "10_PROJECTIONS.md",
+        "11_INTEGRATION.md",
+        "12_CONFORMANCE.md",
     ] {
         ensure(
             readme_links.contains(target),
@@ -46,10 +46,10 @@ fn check_portable_context_links(repo_root: &Path) -> Result<()> {
     }
 
     for (label, path) in [
-        ("FACTORY.md", factory),
-        ("MODEL.md", model),
-        ("INVARIANTS.md", invariants),
-        ("CONFORMANCE.md", conformance),
+        ("01_FACTORY.md", factory),
+        ("02_MODEL.md", model),
+        ("03_INVARIANTS.md", invariants),
+        ("12_CONFORMANCE.md", conformance),
     ] {
         let links = markdown_links(doc_root, &path)?;
         ensure(
@@ -66,18 +66,18 @@ fn check_live_docs_do_not_link_archives(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
     let files = vec![
         doc_root.join("README.md"),
-        doc_root.join("FACTORY.md"),
-        doc_root.join("MODEL.md"),
-        doc_root.join("INVARIANTS.md"),
-        doc_root.join("BATTERIES.md"),
-        doc_root.join("TERMINALS.md"),
-        doc_root.join("EVENTS.md"),
-        doc_root.join("RECEIPTS.md"),
-        doc_root.join("CIRCUITS.md"),
-        doc_root.join("REPLAY.md"),
-        doc_root.join("PROJECTIONS.md"),
-        doc_root.join("INTEGRATION.md"),
-        doc_root.join("CONFORMANCE.md"),
+        doc_root.join("01_FACTORY.md"),
+        doc_root.join("02_MODEL.md"),
+        doc_root.join("03_INVARIANTS.md"),
+        doc_root.join("04_BATTERIES.md"),
+        doc_root.join("05_TERMINALS.md"),
+        doc_root.join("06_EVENTS.md"),
+        doc_root.join("07_RECEIPTS.md"),
+        doc_root.join("08_CIRCUITS.md"),
+        doc_root.join("09_REPLAY.md"),
+        doc_root.join("10_PROJECTIONS.md"),
+        doc_root.join("11_INTEGRATION.md"),
+        doc_root.join("12_CONFORMANCE.md"),
         doc_root.join("CONTRIBUTING.md"),
     ];
     for path in files {
@@ -99,18 +99,18 @@ fn check_factory_docs_use_just_commands(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
     for doc in [
         "README.md",
-        "FACTORY.md",
-        "MODEL.md",
-        "INVARIANTS.md",
-        "BATTERIES.md",
-        "TERMINALS.md",
-        "EVENTS.md",
-        "RECEIPTS.md",
-        "CIRCUITS.md",
-        "REPLAY.md",
-        "PROJECTIONS.md",
-        "INTEGRATION.md",
-        "CONFORMANCE.md",
+        "01_FACTORY.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "04_BATTERIES.md",
+        "05_TERMINALS.md",
+        "06_EVENTS.md",
+        "07_RECEIPTS.md",
+        "08_CIRCUITS.md",
+        "09_REPLAY.md",
+        "10_PROJECTIONS.md",
+        "11_INTEGRATION.md",
+        "12_CONFORMANCE.md",
     ] {
         let content =
             fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
@@ -131,10 +131,10 @@ fn check_root_doc_site_contract(repo_root: &Path) -> Result<()> {
     let content = fs::read_to_string(&docs_rs).context("read tools/xtask/src/docs.rs")?;
     for (source, rendered) in [
         ("README.md", "README.html"),
-        ("FACTORY.md", "FACTORY.html"),
-        ("MODEL.md", "MODEL.html"),
-        ("INVARIANTS.md", "INVARIANTS.html"),
-        ("CONFORMANCE.md", "CONFORMANCE.html"),
+        ("01_FACTORY.md", "FACTORY.html"),
+        ("02_MODEL.md", "MODEL.html"),
+        ("03_INVARIANTS.md", "INVARIANTS.html"),
+        ("12_CONFORMANCE.md", "CONFORMANCE.html"),
     ] {
         ensure(
             content.contains(source),
@@ -159,11 +159,11 @@ fn check_root_doc_site_contract(repo_root: &Path) -> Result<()> {
 fn check_reference_doc_completeness(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
     for (path, heading) in [
-        ("FACTORY.md", "## Factory Contract"),
-        ("MODEL.md", "## Objects"),
-        ("INVARIANTS.md", "## Batteries Do Not Own The Machine"),
-        ("CONFORMANCE.md", "## Command Authority"),
-        ("CONFORMANCE.md", "## Machine Law"),
+        ("01_FACTORY.md", "## Factory Contract"),
+        ("02_MODEL.md", "## Objects"),
+        ("03_INVARIANTS.md", "## Batteries Do Not Own The Machine"),
+        ("12_CONFORMANCE.md", "## Command Authority"),
+        ("12_CONFORMANCE.md", "## Machine Law"),
     ] {
         let content =
             fs::read_to_string(doc_root.join(path)).with_context(|| format!("read {path}"))?;
@@ -183,7 +183,7 @@ fn check_terminal_manifest_doc_parity(repo_root: &Path) -> Result<()> {
         "evidence.read_walk",
         "evidence.projection_run",
     ];
-    for doc in ["TERMINALS.md", "CONFORMANCE.md"] {
+    for doc in ["05_TERMINALS.md", "12_CONFORMANCE.md"] {
         let content =
             fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
         for op in evidence_ops {

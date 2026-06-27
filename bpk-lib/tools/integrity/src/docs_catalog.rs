@@ -1,8 +1,8 @@
-//! GAUNTLET-DOCS-CURRENCY: make `INVARIANTS.md` a generated VIEW of the
+//! GAUNTLET-DOCS-CURRENCY: make `03_INVARIANTS.md` a generated VIEW of the
 //! `traceability/invariants.yaml` catalog instead of hand-synced prose.
 //!
 //! INV-DOCS-CATALOG-VIEW-CURRENT: the auto-generated INV catalog block in
-//! `INVARIANTS.md` (between the `<!-- BEGIN INV-CATALOG -->` /
+//! `03_INVARIANTS.md` (between the `<!-- BEGIN INV-CATALOG -->` /
 //! `<!-- END INV-CATALOG -->` markers) lists every catalog id + its one-line
 //! statement. The human prose ABOVE the block stays authored; the block is a
 //! pure projection of the catalog. `--check` mode fails CI on any drift so the
@@ -38,7 +38,7 @@ pub(crate) struct CatalogInvariant {
 }
 
 /// Top-level entry: generate the catalog block and either splice it into
-/// `INVARIANTS.md` (write mode) or assert the file already matches (check mode).
+/// `03_INVARIANTS.md` (write mode) or assert the file already matches (check mode).
 /// The witness-test gate runs in BOTH modes (it is independent of MD drift).
 pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     let invariants = load_catalog(repo_root)?;
@@ -46,17 +46,17 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     check_witness_tests(repo_root, &invariants, &mut cache)?;
     // Anti-rot: the README headline count must match the live catalog sizes (it is an
     // easy-to-look-legitimate claim that silently rots as the catalog grows). Runs in
-    // both modes — it is independent of INVARIANTS.md drift.
+    // both modes — it is independent of 03_INVARIANTS.md drift.
     check_readme_counts(repo_root, invariants.len())?;
     // Anti-rot: every `crates/.../*.rs` path the cookbook cites must resolve — this is
     // exactly the drift that shipped 6 stale example paths when the examples were hoisted.
     check_cookbook_citations(repo_root)?;
 
     let block = render_catalog_block(&invariants);
-    // INVARIANTS.md lives at the true repo root (parent of the cargo workspace
+    // 03_INVARIANTS.md lives at the true repo root (parent of the cargo workspace
     // `bpk-lib`); traceability/* lives inside the workspace. Resolve each from
     // its own root so the gate works regardless of where the binary is invoked.
-    let md_path = project_root(repo_root).join("INVARIANTS.md");
+    let md_path = project_root(repo_root).join("03_INVARIANTS.md");
     let current =
         std::fs::read_to_string(&md_path).with_context(|| format!("read {}", md_path.display()))?;
     let next = splice_catalog_block(&current, &block)?;
@@ -64,7 +64,7 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     if check {
         ensure(
             current == next,
-            "INVARIANTS.md is stale: the generated INV catalog block does not match \
+            "03_INVARIANTS.md is stale: the generated INV catalog block does not match \
              traceability/invariants.yaml. Run `cargo xtask docs` (or \
              `cargo run -p batpak-integrity -- docs-catalog`) to regenerate it.",
         )?;
@@ -75,12 +75,12 @@ pub(crate) fn run(repo_root: &Path, check: bool) -> Result<()> {
     } else if current != next {
         std::fs::write(&md_path, &next).with_context(|| format!("write {}", md_path.display()))?;
         outln!(
-            "docs-catalog: regenerated INVARIANTS.md catalog block ({} invariants)",
+            "docs-catalog: regenerated 03_INVARIANTS.md catalog block ({} invariants)",
             invariants.len()
         );
     } else {
         outln!(
-            "docs-catalog: INVARIANTS.md already current ({} invariants)",
+            "docs-catalog: 03_INVARIANTS.md already current ({} invariants)",
             invariants.len()
         );
     }
@@ -258,7 +258,7 @@ pub(crate) fn splice_catalog_block(current: &str, block: &str) -> Result<String>
     let begin = find_unique(current, BEGIN_MARKER)?;
     let end = find_unique(current, END_MARKER)?;
     if end <= begin {
-        bail!("INVARIANTS.md: {END_MARKER} appears before {BEGIN_MARKER}");
+        bail!("03_INVARIANTS.md: {END_MARKER} appears before {BEGIN_MARKER}");
     }
     let prefix = &current[..begin + BEGIN_MARKER.len()];
     let suffix = &current[end..];
@@ -268,9 +268,9 @@ pub(crate) fn splice_catalog_block(current: &str, block: &str) -> Result<String>
 fn find_unique(haystack: &str, needle: &str) -> Result<usize> {
     let first = haystack
         .find(needle)
-        .with_context(|| format!("INVARIANTS.md is missing the `{needle}` marker"))?;
+        .with_context(|| format!("03_INVARIANTS.md is missing the `{needle}` marker"))?;
     if haystack[first + needle.len()..].contains(needle) {
-        bail!("INVARIANTS.md contains more than one `{needle}` marker");
+        bail!("03_INVARIANTS.md contains more than one `{needle}` marker");
     }
     Ok(first)
 }

@@ -6,4 +6,4 @@
   <https://github.com/heyoub/batpak/issues/new/choose>.
 - Performance questions: include the benchmark surface, whether you saved or
   compared against a baseline, and the relevant benchmark or conformance context
-  from `CONFORMANCE.md`.
+  from `12_CONFORMANCE.md`.

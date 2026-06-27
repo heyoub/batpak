@@ -733,7 +733,7 @@
     - ART-LINEARIZABILITY-TESTS
 - id: INV-DOCS-CATALOG-VIEW-CURRENT
   statement: >-
-    INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
+    03_INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
     block between the BEGIN/END INV-CATALOG markers lists every catalog id and its one-line
     statement, the authored human prose stays above the block, and the docs-catalog gate folded into
     structural-check fails on any drift so the published docs can never silently rot away from

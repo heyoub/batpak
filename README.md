@@ -33,8 +33,8 @@ placement, runtime integration, network boundaries, and application authority.
 | Network terminal | `netbat` | NETBAT/1 frames, bounded request/response |
 | Host contract | `hostbat` | Client manifest, H-interface fingerprints, subscription descriptors |
 
-See [BATTERIES.md](BATTERIES.md) for the full battery map and
-[TERMINALS.md](TERMINALS.md) for the ten-op NETBAT profile.
+See [04_BATTERIES.md](04_BATTERIES.md) for the full battery map and
+[05_TERMINALS.md](05_TERMINALS.md) for the ten-op NETBAT profile.
 
 ## Two Doors
 
@@ -55,7 +55,7 @@ cargo test -p netbat
 
 The ten reference NETBAT terminals — `bank.commit`, `event.query`, `event.get`,
 `receipt.verify`, `event.walk`, and the four `evidence.*` ops — are documented
-in [TERMINALS.md](TERMINALS.md). The Rust `hostbat` crate projects the live
+in [05_TERMINALS.md](05_TERMINALS.md). The Rust `hostbat` crate projects the live
 host contract through `ClientManifest`.
 
 ## First Shape
@@ -116,7 +116,7 @@ denied to distributed systems.
 
 **Scale out** with multiple journals and explicit circuits: `netbat` routes,
 cross-store observations, and host wiring documented in
-[CIRCUITS.md](CIRCUITS.md) and [INTEGRATION.md](INTEGRATION.md). There is no
+[08_CIRCUITS.md](08_CIRCUITS.md) and [11_INTEGRATION.md](11_INTEGRATION.md). There is no
 single `global_sequence` across separate store roots, and no in-core Raft over
 one mutable directory.
 
@@ -160,7 +160,7 @@ Judge the evidence, not the version number:
 - Mutation testing on critical seams, so the tests are themselves tested.
 - 102 named invariants traced to 150 concrete artifacts, enforced by an
   integrity gate that fails CI on orphaned or stale claims —
-  see [INVARIANTS.md](INVARIANTS.md) and [CONFORMANCE.md](CONFORMANCE.md).
+  see [03_INVARIANTS.md](03_INVARIANTS.md) and [12_CONFORMANCE.md](12_CONFORMANCE.md).
 
 All of it runs from one command surface: `just verify`.
 
@@ -191,7 +191,7 @@ surface on the right:
 
 Factory words explain the shape. Engineering names stay precise in the API,
 and factory language never renames a Rust contract unless the type model
-earns that name. Deeper factory identity lives in [FACTORY.md](FACTORY.md).
+earns that name. Deeper factory identity lives in [01_FACTORY.md](01_FACTORY.md).
 
 ## Reading Paths
 
@@ -200,15 +200,15 @@ is required to read all of them:
 
 - **Evaluating?** You have already read enough. Run the quickstart, skim
   the [cookbook](cookbook/README.md), decide.
-- **Building on the store?** [MODEL.md](MODEL.md) →
-  [EVENTS.md](EVENTS.md) → [RECEIPTS.md](RECEIPTS.md) →
-  [REPLAY.md](REPLAY.md) → [PROJECTIONS.md](PROJECTIONS.md) →
+- **Building on the store?** [02_MODEL.md](02_MODEL.md) →
+  [06_EVENTS.md](06_EVENTS.md) → [07_RECEIPTS.md](07_RECEIPTS.md) →
+  [09_REPLAY.md](09_REPLAY.md) → [10_PROJECTIONS.md](10_PROJECTIONS.md) →
   [cookbook](cookbook/README.md).
-- **Composing batteries or operating a host?** [FACTORY.md](FACTORY.md) →
-  [BATTERIES.md](BATTERIES.md) → [TERMINALS.md](TERMINALS.md) →
-  [CIRCUITS.md](CIRCUITS.md) → [INTEGRATION.md](INTEGRATION.md).
-- **Auditing the guarantees?** [INVARIANTS.md](INVARIANTS.md) →
-  [CONFORMANCE.md](CONFORMANCE.md).
+- **Composing batteries or operating a host?** [01_FACTORY.md](01_FACTORY.md) →
+  [04_BATTERIES.md](04_BATTERIES.md) → [05_TERMINALS.md](05_TERMINALS.md) →
+  [08_CIRCUITS.md](08_CIRCUITS.md) → [11_INTEGRATION.md](11_INTEGRATION.md).
+- **Auditing the guarantees?** [03_INVARIANTS.md](03_INVARIANTS.md) →
+  [12_CONFORMANCE.md](12_CONFORMANCE.md).
 
 Machine law lives in `bpk-lib/traceability/` and `bpk-lib/tools/integrity/`.
 These root docs describe the current system; they are not a decision archive.

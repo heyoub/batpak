@@ -5,7 +5,7 @@ one exclusive writer. That scopes source truth to a single append-only journal;
 it does not mean distributed systems are out of scope. Larger hosts compose
 **multiple journals** through explicit circuits — `netbat` routes, `syncbat`
 dispatch, reference `refbat`, and cross-store observations — without one battery
-mutating another's state through a hidden path. See [CIRCUITS.md](CIRCUITS.md)
+mutating another's state through a hidden path. See [08_CIRCUITS.md](08_CIRCUITS.md)
 for journal composition rules and [README.md](README.md) for the scale-out
 model. batpak does not own the whole application.
 

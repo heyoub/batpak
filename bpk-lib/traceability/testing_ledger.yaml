@@ -18,7 +18,7 @@
 # `status` is one of {green, amber, red, unmeasured}. Commands must start with
 # an approved prefix: `cargo test`, `BATPAK_RUN_CHAOS=1 cargo test`,
 # `CARGO_INCREMENTAL=0 cargo mutants`, or `cargo xtask`. The full testing
-# doctrine prose now lives in CONFORMANCE.md ("Testing doctrine").
+# doctrine prose now lives in 12_CONFORMANCE.md ("Testing doctrine").
 
 - title: syncbat checkout emits honest runtime receipts
   section: Runtime And Boundary Harness
@@ -997,7 +997,7 @@
     silent-degrade path (segments are the durable bottom layer, never rebuilt
     from elsewhere), so no new typed refusal was warranted.
 
-- title: Docs-currency gate keeps INVARIANTS.md a current view of the catalog
+- title: Docs-currency gate keeps 03_INVARIANTS.md a current view of the catalog
   section: Structural Harness
   pattern: Structural Harness
   status: green
@@ -1012,14 +1012,14 @@
     - cargo xtask structural
   coverage_delta: >
     the docs-catalog gate folded into structural-check asserts the generated
-    INV-CATALOG block in INVARIANTS.md matches traceability/invariants.yaml and
+    INV-CATALOG block in 03_INVARIANTS.md matches traceability/invariants.yaml and
     that every declared witness_test resolves to a real test; exact JSON delta
     not recorded.
   mutation_delta: unmeasured
   blind_spots: >
     only the INVs that declare a witness_test ride the strong tier; the remaining
     catalog ids still ride the weak header-citation / ledger escalation path. The
-    MODEL.md symbol-binding gate (5.2) and the prose-only burndown ratchet (5.4)
+    02_MODEL.md symbol-binding gate (5.2) and the prose-only burndown ratchet (5.4)
     are DEFERRED; release board truth is in traceability/releases/0.9.0.yaml and
     witness catalog gaps in traceability/invariants.yaml.
 

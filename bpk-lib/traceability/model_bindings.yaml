@@ -1,5 +1,5 @@
-# model_bindings.yaml — bind MODEL.md narrative concepts to REAL exported symbols
-# (D5). MODEL.md is narrative ontology; this file pins each named concept and each
+# model_bindings.yaml — bind 02_MODEL.md narrative concepts to REAL exported symbols
+# (D5). 02_MODEL.md is narrative ontology; this file pins each named concept and each
 # Beginner-Store-Path step to an actual entry in the sealed public surface
 # (traceability/public_api/batpak.txt), so the model cannot describe a symbol that
 # has been renamed or removed (the exact docs-currency rot, e.g. the deleted
@@ -8,14 +8,14 @@
 #
 # Per binding:
 #   concept:    short label for the report
-#   doc_phrase: a substring that MUST appear verbatim in MODEL.md (so the binding
+#   doc_phrase: a substring that MUST appear verbatim in 02_MODEL.md (so the binding
 #               cannot drift away from a concept the doc actually names)
 #   symbol:     a substring that MUST appear in public_api/batpak.txt (the sealed
 #               exported surface), proving the named symbol really is exported
 #   kind:       `type` (an engineering-name object) or `method` (a store-path step)
 
 bindings:
-  # --- Engineering Names (MODEL.md "Engineering Names" + "Family Stack"). ---
+  # --- Engineering Names (02_MODEL.md "Engineering Names" + "Family Stack"). ---
   - concept: Store
     doc_phrase: "`batpak::Store`"
     symbol: "pub struct batpak::store::Store"
@@ -37,7 +37,7 @@ bindings:
     symbol: "pub trait batpak::guard::Gate<Ctx>"
     kind: type
 
-  # --- Beginner Store Path (MODEL.md "Beginner Store Path" code block). ---
+  # --- Beginner Store Path (02_MODEL.md "Beginner Store Path" code block). ---
   - concept: Store::open
     doc_phrase: "Store::open"
     symbol: "pub fn batpak::store::Store<batpak::store::Open>::open("

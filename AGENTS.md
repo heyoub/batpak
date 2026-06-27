@@ -112,7 +112,7 @@ but are about *different* `async`es:
 - `bpk-lib/tools/integrity/`: traceability and structural detectors
 - `bpk-lib/tools/xtask/`: canonical developer command surface
 - `README.md`: primary repo entrypoint
-- `FACTORY.md`, `MODEL.md`, `INVARIANTS.md`, `BATTERIES.md`, `TERMINALS.md`, `EVENTS.md`, `RECEIPTS.md`, `CIRCUITS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, `CONFORMANCE.md`: canonical factory reading surface
+- `01_FACTORY.md`, `02_MODEL.md`, `03_INVARIANTS.md`, `04_BATTERIES.md`, `05_TERMINALS.md`, `06_EVENTS.md`, `07_RECEIPTS.md`, `08_CIRCUITS.md`, `09_REPLAY.md`, `10_PROJECTIONS.md`, `11_INTEGRATION.md`, `12_CONFORMANCE.md`: canonical factory reading surface
 - `cookbook/README.md`, `cookbook/200_*.md`: recipe library indexed by `cookbook/README.md`
 - `archive/decisions/099_DECISION_INDEX.md`, `archive/decisions/100_ADR_*.md`: historical decisions; not the public reading path
 - `bpk-lib/traceability/`: requirements, invariants, flows, artifacts
@@ -120,7 +120,7 @@ but are about *different* `async`es:
 ## Root Altitudes
 
 - Canonical source lives under `bpk-lib/crates/core/` and companion `bpk-lib/crates/*` members.
-- Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, and `bpk-lib/traceability/` (including the machine-law testing ledger `bpk-lib/traceability/testing_ledger.yaml`). The testing doctrine itself lives in `CONFORMANCE.md`.
+- Proof and validation live under `bpk-lib/crates/core/tests/`, `bpk-lib/crates/core/benches/`, `bpk-lib/crates/core/fixtures/`, and `bpk-lib/traceability/` (including the machine-law testing ledger `bpk-lib/traceability/testing_ledger.yaml`). The testing doctrine itself lives in `12_CONFORMANCE.md`.
 - Package-owned Cargo examples live under the owning crate. Today that means `bpk-lib/crates/core/examples/` for `batpak`; do not add root `examples/`.
 - Runtime/network crates (`syncbat`, `netbat`) must have integration `tests/`. Proc-macro/support crates may be tested through their owning consumer crates instead of carrying empty `tests/` folders.
 - Repo-owned Rust tools live under `bpk-lib/tools/`, with root `scripts/` reserved for CI/devcontainer boundary wrappers only.
@@ -193,7 +193,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 ## Change Map
 
 - Public API change:
-  - update `README.md`, `EVENTS.md`, `RECEIPTS.md`, `REPLAY.md`, `PROJECTIONS.md`, `INTEGRATION.md`, or `CONFORMANCE.md` as appropriate
+  - update `README.md`, `06_EVENTS.md`, `07_RECEIPTS.md`, `09_REPLAY.md`, `10_PROJECTIONS.md`, `11_INTEGRATION.md`, or `12_CONFORMANCE.md` as appropriate
   - update examples if onboarding changed
   - update traceability if invariants/flows changed
 - Store internals change:
@@ -216,7 +216,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   - keep JSON mode stdout-clean
   - keep retained artifacts under `bpk-lib/target/xtask-cover/last-run/`
 - Docs-only change:
-  - keep `README.md`, `MODEL.md`, `INVARIANTS.md`, `CONFORMANCE.md`, and related factory docs consistent
+  - keep `README.md`, `02_MODEL.md`, `03_INVARIANTS.md`, `12_CONFORMANCE.md`, and related factory docs consistent
 
 ## Guardrails
 

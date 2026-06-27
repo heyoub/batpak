@@ -19,7 +19,7 @@ tasks:
       - "typed append preserves the EventKind declared by the payload"
     docs:
       - "cookbook/200_TYPED_EVENT_STORE.md"
-      - "EVENTS.md"
+      - "06_EVENTS.md"
     scaffold:
       - "typed-store"
 
@@ -60,7 +60,7 @@ tasks:
       - "read evidence records selector, freshness intent, limit, and proof-ref scope deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
     scaffold:
       - "evidence-read"
 
@@ -105,7 +105,7 @@ tasks:
       - "projection observations bind to the frontier the mechanism used"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   cursor_replay:
     problem: "Replay events through the at-least-once cursor canal."
@@ -126,7 +126,7 @@ tasks:
       - "cursor replay exposes at-least-once delivery and optional durable checkpoints"
     docs:
       - "cookbook/200_CURSOR_REPLAY.md"
-      - "TERMINALS.md"
+      - "05_TERMINALS.md"
     scaffold:
       - "reactor"
 
@@ -148,7 +148,7 @@ tasks:
       - "lossy delivery witnesses never fake exactness"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   schema_snapshot:
     problem: "Compare expected and observed schema/fixture hashes."
@@ -168,7 +168,7 @@ tasks:
       - "schema snapshots report structural drift without downstream policy"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   chain_walk_evidence:
     problem: "Prove chain continuity from a selected event."
@@ -188,7 +188,7 @@ tasks:
       - "chain evidence reports missing starts, truncation, and hash mismatches deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   subscriber_frontier_evidence:
     problem: "Report subscriber frontier and loss observations."
@@ -208,7 +208,7 @@ tasks:
       - "subscriber evidence distinguishes known loss from unknown precision"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   projection_run_evidence:
     problem: "Report projection run boundary, freshness, cache, checkpoint, and output facts."
@@ -228,7 +228,7 @@ tasks:
       - "projection evidence binds report body identity to existing projection machinery"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
     scaffold:
       - "projection-cache"
 
@@ -372,10 +372,10 @@ tasks:
       - "downstream layers decode semantic payloads above BatPAK after bounded traversal"
       - "BatPAK names stay true for many downstream representations"
     docs:
-      - "INTEGRATION.md"
-      - "CONFORMANCE.md"
-      - "EVENTS.md"
-      - "REPLAY.md"
+      - "11_INTEGRATION.md"
+      - "12_CONFORMANCE.md"
+      - "06_EVENTS.md"
+      - "09_REPLAY.md"
 
   idempotent_pass:
     problem: "Make a keyed append a durable, re-runnable no-op that survives retention compaction and cold-start."
@@ -396,4 +396,4 @@ tasks:
       - "the durable idempotency sidecar survives compaction, cold-start, and snapshot"
     docs:
       - "cookbook/200_IDEMPOTENT_PASS.md"
-      - "EVENTS.md"
+      - "06_EVENTS.md"

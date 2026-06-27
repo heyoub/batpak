@@ -4,7 +4,7 @@ Replay reconstructs state from events.
 
 Replay is deterministic when the replay function, event order, payload decoding, and dependency versions are deterministic.
 
-Payload decoding is itself versioned: an older `PAYLOAD_VERSION` is upcast in memory during replay, while a payload whose version is newer than the reader understands is a hard error (replay fails closed rather than guessing). See [EVENTS.md](EVENTS.md).
+Payload decoding is itself versioned: an older `PAYLOAD_VERSION` is upcast in memory during replay, while a payload whose version is newer than the reader understands is a hard error (replay fails closed rather than guessing). See [06_EVENTS.md](06_EVENTS.md).
 
 batpak can preserve event history and receipt evidence. It cannot make non-deterministic user code deterministic.
 

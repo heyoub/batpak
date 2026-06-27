@@ -57,8 +57,8 @@ struct TypedWaiverEntry {
 
 // build.rs runs before every cargo build/check/test. Cannot be skipped.
 // It enforces live runtime invariants at build time so agents get English
-// errors instead of cryptic compiler failures. See README.md, MODEL.md,
-// INVARIANTS.md, and CONFORMANCE.md for the current truth hierarchy.
+// errors instead of cryptic compiler failures. See README.md, 02_MODEL.md,
+// 03_INVARIANTS.md, and 12_CONFORMANCE.md for the current truth hierarchy.
 fn main() -> Result<(), String> {
     // Register the intentionally-undeclared impossible-feature guard cfgs so
     // rustc's `unexpected_cfgs` lint recognizes them as known-but-disabled
@@ -576,7 +576,7 @@ fn check_no_tokio_in_deps() -> Result<(), String> {
              runtime-NEUTRAL channel library and is allowed. Remove tokio/async-std/smol/\n\
              async-executor (including renamed/optional/target-specific/transitive forms),\n\
              or move the async integration into a downstream adapter crate.\n\
-             See: INVARIANTS.md, ADR-0001, INV-STORE-SYNC-ONLY.",
+             See: 03_INVARIANTS.md, ADR-0001, INV-STORE-SYNC-ONLY.",
             hit.package,
             hit.pull_path.join(" -> "),
         )));
@@ -598,7 +598,7 @@ fn check_no_banned_patterns() -> Result<(), String> {
                     "RED FLAG VIOLATED in {path_str}: found `{banned}`.\n\
                      repr(C) is for field ordering, not a wire format.\n\
                      All serialization goes through rmp-serde. Always.\n\
-                     See: INVARIANTS.md."
+                     See: 03_INVARIANTS.md."
                 )));
             }
         }
@@ -610,7 +610,7 @@ fn check_no_banned_patterns() -> Result<(), String> {
                 "INVARIANT 2 VIOLATED in {path_str}: found `async fn`.\n\
                  Store API is sync. Async callers use spawn_blocking()\n\
                  or flume's recv_async(). See: store/subscription.rs.\n\
-                 See: INVARIANTS.md."
+                 See: 03_INVARIANTS.md."
             )));
         }
 
@@ -696,7 +696,7 @@ fn check_no_banned_patterns() -> Result<(), String> {
                          product concept `{noun}` in declaration:\n  {trimmed}\n\
                          Library vocabulary: coordinate, entity, event, outcome, \
                          gate, region, transition.\n\
-                         See: INVARIANTS.md."
+                         See: 03_INVARIANTS.md."
                     )));
                 }
             }
@@ -716,7 +716,7 @@ fn check_no_banned_patterns() -> Result<(), String> {
                          Lane-A exception: definitions only in `{INV3_ARTIFACT_ALLOWED_PATH}`; \
                          crate wiring may use `pub mod artifact;` in `src/lib.rs` and \
                          `pub use crate::artifact::{{...}}` in `src/prelude.rs`.\n\
-                         See: INVARIANTS.md."
+                         See: 03_INVARIANTS.md."
                     )));
                 }
             }
