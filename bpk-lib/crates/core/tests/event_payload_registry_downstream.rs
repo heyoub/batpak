@@ -2,7 +2,7 @@
 //! CATCHES: dependency-crate `inventory::submit!` registrations lost behind `cfg(test)` boundaries.
 //! SEEDED: deterministic / no randomness.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[test]
@@ -44,17 +44,34 @@ fn run_downstream_fixture(args: &[&str]) {
 }
 
 fn downstream_fixture_target_dir(manifest_dir: &std::path::Path) -> PathBuf {
+    downstream_fixture_target_dir_with_env(
+        manifest_dir,
+        std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from),
+    )
+}
+
+fn downstream_fixture_target_dir_with_env(
+    manifest_dir: &Path,
+    configured_target_dir: Option<PathBuf>,
+) -> PathBuf {
     let workspace_root = manifest_dir
         .parent()
         .and_then(std::path::Path::parent)
         .unwrap_or(manifest_dir);
-    let root_target = match std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from) {
+    let root_target = match configured_target_dir {
         Some(path) if path.is_absolute() => path,
         Some(path) => workspace_root.join(path),
-        None => workspace_root
-            .parent()
-            .map(|project_root| project_root.join("target"))
-            .unwrap_or_else(|| workspace_root.join("target")),
+        None => workspace_root.join("target"),
     };
     root_target.join("downstream-fixtures")
+}
+
+#[test]
+fn downstream_fixture_target_dir_defaults_to_workspace_target_not_repo_root() {
+    let manifest_dir = PathBuf::from("/repo/bpk-lib/crates/core");
+    let target = downstream_fixture_target_dir_with_env(&manifest_dir, None);
+    assert_eq!(
+        target,
+        PathBuf::from("/repo/bpk-lib/target/downstream-fixtures")
+    );
 }
