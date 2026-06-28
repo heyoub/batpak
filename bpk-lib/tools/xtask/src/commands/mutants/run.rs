@@ -45,10 +45,14 @@ fn resolve_smoke_diff() -> Result<Option<PathBuf>> {
         }
         // A CI-plumbed patch can still be empty (a PR touching no lib code).
         // Treat an empty patch as "no PR scope" so the gate does not silently pass
-        // on zero mutants.
-        let contents = std::fs::read_to_string(&path)
+        // on zero mutants. Read as bytes, not a String: a diff that spans binary
+        // fixtures (e.g. fuzz corpus seeds) carries non-UTF-8 bytes, and only the
+        // emptiness check matters here — cargo-mutants reads the file itself for
+        // `--in-diff`. (.gitattributes marks the corpus binary so the patch stays
+        // clean for that parse; this read stays robust regardless.)
+        let contents = std::fs::read(&path)
             .with_context(|| format!("read {MUTANTS_DIFF_ENV} patch at {}", path.display()))?;
-        if contents.trim().is_empty() {
+        if contents.iter().all(u8::is_ascii_whitespace) {
             return Ok(None);
         }
         return Ok(Some(path));

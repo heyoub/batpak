@@ -27,16 +27,30 @@ const RED_CFG: &str = "--cfg gauntlet_red_fixture";
 const MIN_FIXTURES: usize = 5;
 
 /// Resolve the cargo `--package` that owns a registry fixture reference from its
-/// `<repo-rel-file>::<test_fn>` path. ProductionFlip fixtures live under either
-/// `crates/core/tests/...` (the `batpak` crate) or `crates/<pkg>/tests/...` (a
-/// sibling crate, e.g. `bvisor`). Defaulting to `batpak` keeps the historical
-/// core fixtures working without per-entry annotation.
+/// `<repo-rel-file>::<test_fn>` path. ProductionFlip fixtures live under
+/// `crates/core/tests/...` (the `batpak` crate), `crates/<pkg>/tests/...` (a
+/// sibling crate, e.g. `bvisor`), or `tools/integrity/src/...` (the
+/// `batpak-integrity` binary's own unit tests). Defaulting to `batpak` keeps the
+/// historical core fixtures working without per-entry annotation.
 fn package_for(reference: &str) -> &'static str {
     if reference.starts_with("crates/bvisor/") {
         "bvisor"
+    } else if reference.starts_with("tools/integrity/") {
+        "batpak-integrity"
     } else {
         "batpak"
     }
+}
+
+/// Fixtures that live in `crates/<pkg>/tests/*.rs` are integration tests whose
+/// function name IS the full test path, so `--exact <fn>` selects exactly one.
+/// A fixture in the `batpak-integrity` binary is a unit test nested under its
+/// module path (e.g. `overclaim::production_flip::<fn>`), which `--exact <fn>`
+/// can never match — there we filter by the (unique) bare function name without
+/// `--exact` so cargo's substring match still selects it. The post-run
+/// `test result: FAILED` check keeps the lane honest either way.
+fn uses_exact_filter(package: &str) -> bool {
+    package != "batpak-integrity"
 }
 
 pub(crate) fn run() -> Result<()> {
@@ -87,18 +101,14 @@ pub(crate) fn run() -> Result<()> {
         outln!("prove-gates-bite: biting {reference} (package {package})");
         // Raw output() (NOT util::run_output, which bails on nonzero): we EXPECT a
         // nonzero exit here — a failing test is the success condition.
-        let output = Command::new("cargo")
-            .env("CARGO_TARGET_DIR", &bite_target)
+        let mut run = Command::new("cargo");
+        run.env("CARGO_TARGET_DIR", &bite_target)
             .env("RUSTFLAGS", RED_CFG)
-            .args([
-                "test",
-                "--package",
-                package,
-                "--all-features",
-                test_fn,
-                "--",
-                "--exact",
-            ])
+            .args(["test", "--package", package, "--all-features", test_fn]);
+        if uses_exact_filter(package) {
+            run.args(["--", "--exact"]);
+        }
+        let output = run
             .output()
             .with_context(|| format!("run red-cfg test for {reference}"))?;
         let combined = format!(
