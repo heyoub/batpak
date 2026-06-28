@@ -4,7 +4,7 @@ batpak owns a **local truth boundary** per journal: one `Store`, one `data_dir`,
 one exclusive writer. That scopes source truth to a single append-only journal;
 it does not mean distributed systems are out of scope. Larger hosts compose
 **multiple journals** through explicit circuits — `netbat` routes, `syncbat`
-dispatch, reference `refbat`, and cross-store observations — without one battery
+dispatch, a `hostbat` reference host, and cross-store observations — without one battery
 mutating another's state through a hidden path. See [08_CIRCUITS.md](08_CIRCUITS.md)
 for journal composition rules and [README.md](README.md) for the scale-out
 model. batpak does not own the whole application.
@@ -88,7 +88,7 @@ stream runtime sessions, and bounded request/response paths against `syncbat`.
 vectors, and subscription descriptor wiring stay aligned with the H-interface.
 
 **Living loop:** use `event.query` + `event.get` replay from a persistent store
-in your embedder or the workspace examples under `crates/batpak-examples/src/bin/`.
+in your embedder or the workspace examples under `bpk-lib/crates/batpak-examples/src/bin/`.
 Seed app-owned events, rebuild a rendered view from commit-order query pages,
 restart on the same store, and prove substrate replay without relying on commit
 acks alone.

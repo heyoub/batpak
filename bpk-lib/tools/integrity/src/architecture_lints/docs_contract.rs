@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_portable_context_links(repo_root)?;
@@ -13,7 +13,122 @@ pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_reference_doc_completeness(repo_root)?;
     check_terminal_manifest_doc_parity(repo_root)?;
     check_changelog_migration_contract(repo_root)?;
+    check_retired_terms(repo_root)?;
+    check_scoped_xtask_in_extended_docs(repo_root)?;
     Ok(())
+}
+
+/// Terms for crates/concepts that no longer exist. They are legitimate in
+/// release history (CHANGELOG) and frozen planning notes (archive/), but in a
+/// LIVE doc they mislead readers into looking for something retired. This is the
+/// same anti-rot pattern as the unprefixed-`FACTORY.md` ban — a banned string in
+/// a defined live-doc surface. (`refbat` retired in favor of `hostbat` +
+/// netbat reference host.)
+const RETIRED_DOC_TERMS: &[&str] = &["refbat"];
+
+fn check_retired_terms(repo_root: &Path) -> Result<()> {
+    for path in live_doc_set(repo_root) {
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = relative(repo_root, &path);
+        for term in RETIRED_DOC_TERMS {
+            ensure(
+                !content.contains(term),
+                format!(
+                    "live doc {rel} references retired `{term}`. Use the reference host / \
+                     `hostbat` naming. (Release history in CHANGELOG.md and archive/ are exempt.)"
+                ),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Extended live docs (cookbook, contributor surfaces, PR template) may reference
+/// `cargo xtask` only when the same line scopes it to the workspace (`bpk-lib`),
+/// since those commands run from `bpk-lib/`. A bare `cargo xtask` from a
+/// repo-root reader runs in the wrong directory. Factory docs (01–12 + README)
+/// keep the stricter `just`-only rule in `check_factory_docs_use_just_commands`.
+fn check_scoped_xtask_in_extended_docs(repo_root: &Path) -> Result<()> {
+    let doc_root = project_root(repo_root);
+    let mut docs = vec![
+        doc_root.join("CONTRIBUTING.md"),
+        doc_root.join("SUPPORT.md"),
+        doc_root.join(".github/pull_request_template.md"),
+    ];
+    docs.extend(markdown_files_in(&doc_root.join("cookbook")));
+    for path in docs {
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let rel = relative(repo_root, &path);
+        for (line_no, line) in content.lines().enumerate() {
+            if line.contains("cargo xtask") && !line.contains("bpk-lib") {
+                return Err(anyhow::anyhow!(
+                    "{rel}:{} references bare `cargo xtask`; scope it to the workspace \
+                     (`cd bpk-lib && cargo xtask …` or `just …`) so repo-root readers run it \
+                     from the right directory",
+                    line_no + 1
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The live-doc surface for retired-term scanning: the factory docs, root
+/// community docs, cookbook recipes, and the published crate READMEs. Excludes
+/// CHANGELOG.md (release history) and archive/ (frozen).
+fn live_doc_set(repo_root: &Path) -> Vec<PathBuf> {
+    let doc_root = project_root(repo_root);
+    let mut docs: Vec<PathBuf> = [
+        "README.md",
+        "01_FACTORY.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "04_BATTERIES.md",
+        "05_TERMINALS.md",
+        "06_EVENTS.md",
+        "07_RECEIPTS.md",
+        "08_CIRCUITS.md",
+        "09_REPLAY.md",
+        "10_PROJECTIONS.md",
+        "11_INTEGRATION.md",
+        "12_CONFORMANCE.md",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "SUPPORT.md",
+    ]
+    .iter()
+    .map(|name| doc_root.join(name))
+    .collect();
+    docs.extend(markdown_files_in(&doc_root.join("cookbook")));
+    for crate_name in [
+        "core",
+        "syncbat",
+        "netbat",
+        "hostbat",
+        "bvisor",
+        "batpak-examples",
+    ] {
+        docs.push(doc_root.join(format!("bpk-lib/crates/{crate_name}/README.md")));
+    }
+    docs
+}
+
+/// Sorted `.md` files directly in `dir` (non-recursive); empty if `dir` is absent.
+fn markdown_files_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
+        .collect();
+    files.sort();
+    files
 }
 
 fn check_portable_context_links(repo_root: &Path) -> Result<()> {
@@ -175,23 +290,50 @@ fn check_reference_doc_completeness(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The ten reference NETBAT operations, single-sourced here. The six core ops
+/// are named individually in README/05/12; the four `evidence.*` ops are named
+/// in the enumerating docs (05/12) and referenced collectively in README. This
+/// catches the "doc says ten but lists nine" drift (e.g. a missing
+/// `system.heartbeat`).
+const CORE_TERMINAL_OPS: &[&str] = &[
+    "bank.commit",
+    "event.query",
+    "event.get",
+    "receipt.verify",
+    "event.walk",
+    "system.heartbeat",
+];
+const EVIDENCE_TERMINAL_OPS: &[&str] = &[
+    "evidence.chain_walk",
+    "evidence.store_resource",
+    "evidence.read_walk",
+    "evidence.projection_run",
+];
+
 fn check_terminal_manifest_doc_parity(repo_root: &Path) -> Result<()> {
     let doc_root = project_root(repo_root);
-    let evidence_ops = [
-        "evidence.chain_walk",
-        "evidence.store_resource",
-        "evidence.read_walk",
-        "evidence.projection_run",
-    ];
+    // The enumerating docs name every operation, core and evidence.
     for doc in ["05_TERMINALS.md", "12_CONFORMANCE.md"] {
         let content =
             fs::read_to_string(doc_root.join(doc)).with_context(|| format!("read {doc}"))?;
-        for op in evidence_ops {
+        for op in CORE_TERMINAL_OPS.iter().chain(EVIDENCE_TERMINAL_OPS) {
             ensure(
                 content.contains(op),
                 format!("{doc} must mention manifest operation `{op}`"),
             )?;
         }
+    }
+    // README enumerates the six core ops by name (and the four `evidence.*`
+    // collectively); every core op must appear so the "ten" claim is honest.
+    let readme = fs::read_to_string(doc_root.join("README.md")).context("read README.md")?;
+    for op in CORE_TERMINAL_OPS {
+        ensure(
+            readme.contains(op),
+            format!(
+                "README.md claims the ten reference NETBAT terminals but does not name core \
+                 operation `{op}` — the list must enumerate all six core ops"
+            ),
+        )?;
     }
     Ok(())
 }

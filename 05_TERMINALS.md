@@ -37,7 +37,7 @@ terminals.
 - `evidence.store_resource` is the store-resource snapshot evidence terminal.
 - `evidence.read_walk` is the read-walk evidence report terminal.
 - `evidence.projection_run` is the projection-run evidence terminal. The
-  reference `refbat` host registers no projections, so this op is advertised on
+  reference host registers no projections, so this op is advertised on
   the wire but answers with an unknown-projection handler error unless an
   embedder registers projections.
 

@@ -71,7 +71,7 @@ composition rules live in [README.md](README.md) and [08_CIRCUITS.md](08_CIRCUIT
 
 ## Beginner Store Path
 
-The 0.8-facing Rust curriculum is one path through the substrate:
+The Rust curriculum is one path through the substrate:
 
 ```txt
 Store::open

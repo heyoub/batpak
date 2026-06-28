@@ -62,11 +62,13 @@ design.
 
 ## Trust
 
-Judge the evidence, not the 0.x version number: roughly one line of tests
-per line of source, deterministic concurrency proofs with `loom`,
-property-based tests over hash-chain integrity and canonical encoding,
-crash-recovery and fault-injection suites, mutation testing on critical
-seams, and 73 named invariants enforced by an executable integrity gate.
+Judge the evidence, not the 0.x version number: a deep test surface
+(integration, property, crash-recovery, cold-start), deterministic
+concurrency proofs with `loom`, property-based tests over hash-chain
+integrity and canonical encoding, crash-recovery and fault-injection
+suites, mutation testing on critical seams, and a catalog of named
+invariants enforced by an executable integrity gate. See the root
+README and `03_INVARIANTS.md` for the current counts.
 
 ## Docs
 

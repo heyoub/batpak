@@ -24,7 +24,7 @@ concepts:
     summary: basic typed append + retrieval (thin release-smoke entry; see store-path-full)
   - concept_id: store-path-full
     canonical_example: crates/batpak-examples/src/bin/eight_jobs.rs
-    summary: canonical full 0.8 store path including lifecycle open observation
+    summary: canonical full store path including lifecycle open observation
   - concept_id: batch-append-atomic
     canonical_example: crates/batpak-examples/src/bin/batch_append.rs
     summary: atomic batch commit with causation refs

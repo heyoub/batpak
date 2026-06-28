@@ -2,8 +2,8 @@
 
 ## Verification
 - [ ] `just verify`, `just ci-fast`, or scoped verification passes locally; reason documented below if not
-- [ ] `just inspect` or `cargo xtask structural` passes, or change does not touch structural surfaces
-- [ ] `cargo xtask traceability` passes, or change does not touch traced surfaces
+- [ ] `just inspect` passes, or change does not touch structural surfaces
+- [ ] `just traceability` passes, or change does not touch traced surfaces
 - [ ] Tests were added, strengthened, or verified as unnecessary
 
 ## Docs / Traceability
