@@ -29,7 +29,7 @@ flume = "0.12"
 tracing = "0.1"
 
 [dev-dependencies]
-batpak-testkit = { path = "../testkit" }
+batpak-testkit = { path = "../testkit", version = "0.8.3" }
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = ">=3.24, <3.25"
 trybuild = "1"

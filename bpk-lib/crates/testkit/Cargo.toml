@@ -25,7 +25,7 @@ dangerous-test-hooks = ["batpak/dangerous-test-hooks"]
 workspace = true
 
 [dependencies]
-batpak = { path = "../core" }
+batpak = { path = "../core", version = "0.8.3" }
 batpak-macros = { path = "../macros", version = "0.8.3" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

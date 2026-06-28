@@ -80,7 +80,7 @@ zeroize = "1"
 
 [dev-dependencies]
 batpak-bench-support = { path = "../bench-support", version = "0.8.3" }
-batpak-testkit = { path = "../testkit" }
+batpak-testkit = { path = "../testkit", version = "0.8.3" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
