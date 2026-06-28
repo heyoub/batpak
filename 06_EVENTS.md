@@ -62,7 +62,7 @@ When a change needs a version bump:
 
 ### Freezing a fixture
 
-Frozen fixtures are the payload MessagePack bytes (journal form) under `crates/core/tests/golden/payloads/<category>_<type_id>__v<N>.hex`, decoded by `assert_frozen_decode::<T>` with the current decoder to prove old bytes still decode. Regeneration is append-only: `GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test --test schema_evolution` writes a missing fixture but never overwrites an existing one — proof-of-compat bytes must not mutate. A new version writes `__v<N+1>` alongside the old file. Every `#[derive(EventPayload)]` type should have a fixture; the warn-first structural lint tracks the backlog in `FROZEN_FIXTURE_DEBT`.
+Frozen fixtures are the payload MessagePack bytes (journal form) under `bpk-lib/crates/core/tests/golden/payloads/<category>_<type_id>__v<N>.hex`, decoded by `assert_frozen_decode::<T>` with the current decoder to prove old bytes still decode. Regeneration is append-only: `GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test --test schema_evolution` writes a missing fixture but never overwrites an existing one — proof-of-compat bytes must not mutate. A new version writes `__v<N+1>` alongside the old file. Every `#[derive(EventPayload)]` type should have a fixture; the warn-first structural lint tracks the backlog in `FROZEN_FIXTURE_DEBT`.
 
 A wire version tag only helps frames written after it lands; pre-versioning frames are `0` forever, so a future upcaster cannot repair a breaking change to legacy data. Additive changes stay safe regardless.
 

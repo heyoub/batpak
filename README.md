@@ -54,7 +54,7 @@ cargo test -p netbat
 ```
 
 The ten reference NETBAT terminals — `bank.commit`, `event.query`, `event.get`,
-`receipt.verify`, `event.walk`, and the four `evidence.*` ops — are documented
+`receipt.verify`, `event.walk`, `system.heartbeat`, and the four `evidence.*` ops — are documented
 in [05_TERMINALS.md](05_TERMINALS.md). The Rust `hostbat` crate projects the live
 host contract through `ClientManifest`.
 
@@ -152,8 +152,8 @@ When batpak is the wrong tool:
 
 Judge the evidence, not the version number:
 
-- Roughly one line of tests per line of source, including crash-recovery
-  and cold-start suites.
+- A deep test surface — integration, property, crash-recovery, and
+  cold-start suites, not a thin unit-test layer.
 - Deterministic concurrency proofs with `loom`, not just stress tests.
 - Property-based tests over hash-chain integrity and canonical encoding.
 - Chaos testing with fault injection, including disk-fault integration.

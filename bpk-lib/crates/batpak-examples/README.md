@@ -10,7 +10,7 @@ Build all demos: `cargo build -p batpak-examples --bins`.
 
 ## Start Here
 
-- `eight_jobs.rs` - canonical 0.8 store path: open (with lifecycle observation), append, page, get, walk, verify, project, close. Run: `cargo run -p batpak-examples --bin eight_jobs`.
+- `eight_jobs.rs` - canonical full store path: open (with lifecycle observation), append, page, get, walk, verify, project, close. Run: `cargo run -p batpak-examples --bin eight_jobs`.
 - `quickstart.rs` - minimal open, append, read flow (thin release smoke; see `eight_jobs` for the full path). Run: `cargo run -p batpak-examples --bin quickstart`.
 - `batch_append.rs` - atomic multi-event append with intra-batch causation. Run: `cargo run -p batpak-examples --bin batch_append`.
 - `caller_defined_gates.rs` - guard decisions before commit. Run: `cargo run -p batpak-examples --bin caller_defined_gates`.

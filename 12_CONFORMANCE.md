@@ -46,8 +46,8 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Inspect | `just inspect` | structural, boundary, architecture IR, ast-grep | Optional/path-based | Fast shape checks before expensive proof. |
 | Host contract | `cargo test -p hostbat` | hostbat tests | No | `ClientManifest` projection, schema golden vectors, subscription descriptors. |
 | NETBAT wire | `cargo test -p netbat` | netbat tests | No | NETBAT/1 goldens, stream runtime sessions, bounded request/response paths. |
-| Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
-| Context packet | `just context` | `context` | No | Opt-in PCP-aligned handoff artifact under `target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
+| Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `bpk-lib/target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
+| Context packet | `just context` | `context` | No | Opt-in PCP-aligned handoff artifact under `bpk-lib/target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
 | Doctrine audit | traceability/docs artifact | traceability metadata | No | Records the substrate/product semantic firewall; not a CI or release gate unless promoted to an explicit command later. |
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
@@ -115,7 +115,7 @@ feels special; tighten the existing ones instead.
 
 ## Terminal Manifest
 
-The refbat manifest must expose the ten reference NETBAT operations — the six
+The reference host manifest (`hostbat::ClientManifest`) must expose the ten reference NETBAT operations — the six
 core ops plus the four domain-neutral `evidence.*` ops:
 
 - `system.heartbeat`

@@ -38,7 +38,7 @@ in test code too, which is why there are **zero** `panic!`/`.unwrap()` in `tests
 `.expect()` is denied in production but **allowed in tests BY DESIGN** — the lint is
 `#![cfg_attr(not(test), deny(clippy::expect_used))]`, and `invariants.yaml`
 (INV-TEST-PANIC-AS-ASSERTION) endorses `.expect()`/`.expect_err()` as the test failure
-signal. (Do NOT "cure" this by converting the ~4.4k `.expect()` sites to `?` — that is
+signal. (Do NOT "cure" this by converting the thousands of `.expect()` sites to `?` — that is
 ritual, not rigor: `.expect("what step failed")` gives BETTER diagnostics than a
 `?`-propagated error, changes no assertion's strictness, and the lint deliberately permits
 it.) So in **test code**:
@@ -239,7 +239,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   commit order. `after_global_sequence` is an exclusive resume point, not a
   stream cursor or server-held session; do not introduce ambiguous cursor names.
 - **Domain graph boundary** — do not add Moonwalker, workflow, mission, or
-  receipt-body verbs as batpak/refbat/netbat operations. Domain layers decode
+  receipt-body verbs as batpak/hostbat/netbat operations. Domain layers decode
   envelope payloads above batpak after `event.query` + `event.get`; substrate
   traversal returns metadata only.
 - **PCP boundary** — batpak may align with the sibling `PCP_SPEC`, but this crate
@@ -288,7 +288,7 @@ fn invalid_input_must_be_rejected() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 For an unconditional intentional failure inside non-`Result` test/handler bodies, use
-`assert!(std::hint::black_box(false), "PROPERTY: <what was violated>")` (24 sites today) — it
+`assert!(std::hint::black_box(false), "PROPERTY: <what was violated>")` (a few dozen sites) — it
 panics at runtime, isn't `clippy::panic`, and the non-constant condition dodges
 `assertions_on_constants`. Exception: do **not** use it near `Instant::now()`/`Duration`
 (trips the wall-clock flake detector GAUNT-FLAKE-7) — use `unreachable!()` there.
