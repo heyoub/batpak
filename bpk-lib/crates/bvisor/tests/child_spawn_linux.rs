@@ -250,6 +250,15 @@ fn deny_new_tasks_fork_is_refused_and_host_sees_seccomp_filter_or_skip() {
     }
 
     let obs = handle.join().expect("spawn-oracle launcher thread joins");
+    if launch::launch_confinement_unavailable(&obs) {
+        let _ = writeln!(
+            sink,
+            "SKIP deny_new_tasks_fork_is_refused_and_host_sees_seccomp_filter_or_skip: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let stdout = String::from_utf8_lossy(&obs.captured_stdout).into_owned();
     let _ = writeln!(
         sink,
@@ -398,6 +407,15 @@ fn a_deny_new_tasks_spec_runs_through_the_execute_path_or_skip() {
         ],
     ))
     .expect("a ChildSpawnDenyNewTasks spec must ADMIT (the cell is Enforced on this host)");
+    if launch::report_confinement_unavailable(&report.observed) {
+        let _ = writeln!(
+            sink,
+            "SKIP a_deny_new_tasks_spec_runs_through_the_execute_path_or_skip: kernel/container \
+             lacks landlock/userns/seccomp (ENOSYS); confinement cannot install here — exercised \
+             on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     let mut failures: Vec<String> = Vec::new();
     if report.outcome != Outcome::Completed {
@@ -467,6 +485,16 @@ fn allow_descendants_is_cgroup_confined_and_cgroup_kill_drains_the_tree_or_skip(
         );
         return;
     };
+
+    if launch::report_confinement_unavailable(&report.observed) {
+        let _ = writeln!(
+            sink,
+            "SKIP allow_descendants_is_cgroup_confined_and_cgroup_kill_drains_the_tree_or_skip: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); confinement cannot install \
+             here — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     // The lowering MUST have engaged (cgroup boundary, NO seccomp deny) + the run leaf prepared —
     // this is the admission/lowering half of the §4 path, asserted on EVERY cgroup-base host.
@@ -547,6 +575,17 @@ fn an_allow_descendants_spec_runs_through_the_execute_path_or_skip() {
         "-c".to_string(),
         "echo ran; true".to_string(),
     ]));
+    if let Some(ref report) = report {
+        if launch::report_confinement_unavailable(&report.observed) {
+            let _ = writeln!(
+                sink,
+                "SKIP an_allow_descendants_spec_runs_through_the_execute_path_or_skip: \
+                 kernel/container lacks landlock/userns/seccomp (ENOSYS); confinement cannot \
+                 install here — exercised on capable kernels + the bvisor-linux CI lane"
+            );
+            return;
+        }
+    }
     match report {
         Some(report) if report.outcome == Outcome::SupervisorFault => {
             // CLONE_INTO_CGROUP placement is unexercisable on this host (cgroup-delegation

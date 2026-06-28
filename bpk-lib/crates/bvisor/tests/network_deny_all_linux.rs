@@ -247,6 +247,15 @@ fn host_sees_only_loopback_in_the_child_netns_no_external_interface_or_skip() {
     }
 
     let obs = handle.join().expect("net-oracle launcher thread joins");
+    if launch::launch_confinement_unavailable(&obs) {
+        let _ = writeln!(
+            sink,
+            "SKIP host_sees_only_loopback_in_the_child_netns_no_external_interface_or_skip: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let _ = writeln!(
         sink,
         "NetworkDenyAll host-side: child interfaces={host_ifaces:?}; transcript={:?} notes={:?}",
@@ -327,6 +336,15 @@ fn workload_cannot_reach_the_network_from_the_empty_netns_or_skip() {
     let launcher = test_launcher_path();
     let obs = launch::run_launcher(&launcher, &plan(argv, true), vec![sh_authority()])
         .expect("the launcher runs the empty-netns self-report workload to a verdict");
+    if launch::launch_confinement_unavailable(&obs) {
+        let _ = writeln!(
+            sink,
+            "SKIP workload_cannot_reach_the_network_from_the_empty_netns_or_skip: kernel/container \
+             lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised \
+             on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let stdout = String::from_utf8_lossy(&obs.captured_stdout).into_owned();
     let _ = writeln!(
         sink,
@@ -460,6 +478,15 @@ fn a_deny_all_spec_runs_through_the_execute_path_or_skip() {
     // — the empty netns rides the production contract, not only a run_launcher-direct plan.
     let report = run_execute(&net_spec(NetPolicy::DenyAll))
         .expect("a NetworkDenyAll spec must ADMIT (the cell is Enforced on this host)");
+    if launch::report_confinement_unavailable(&report.observed) {
+        let _ = writeln!(
+            sink,
+            "SKIP a_deny_all_spec_runs_through_the_execute_path_or_skip: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); confinement cannot install here — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     let mut failures: Vec<String> = Vec::new();
     if report.outcome != Outcome::Completed {

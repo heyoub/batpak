@@ -17,7 +17,7 @@
 //! `launcher_landlock_linux.rs`; this file proves the SAME confinement through the
 //! production harness API `bvisor::linux::launch::run_launcher`.)
 
-use bvisor::linux::launch::{run_launcher, AuthorityFd};
+use bvisor::linux::launch::{launch_confinement_unavailable, run_launcher, AuthorityFd};
 use bvisor::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LauncherState,
     LinuxLaunchBodyV1, LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1,
@@ -334,6 +334,16 @@ fn harness_landlock_denies_secret_read_and_escape_write_allows_in_root() {
     }
 
     let obs = run_launcher(&launcher_bin(), &plan, authority).expect("run launcher harness");
+    if launch_confinement_unavailable(&obs) {
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP harness_landlock_denies_secret_read_and_escape_write_allows_in_root: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     // ── GroundTruth (REAL disk, NOT the transcript) ──────────────────────────────
     let g1 = FsGroundTruth {
@@ -414,6 +424,16 @@ fn harness_without_landlock_lets_the_escape_land() {
         handle: open_sh(),
     }];
     let obs = run_launcher(&launcher_bin(), &plan, authority).expect("run launcher harness");
+    if launch_confinement_unavailable(&obs) {
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP harness_without_landlock_lets_the_escape_land: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     let gt = FsGroundTruth {
         marker,

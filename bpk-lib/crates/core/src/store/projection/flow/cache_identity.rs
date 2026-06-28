@@ -132,10 +132,9 @@ mod relevant_kinds_hash_tests {
             projection_cache_key::<TwoKinds>("entity"),
             "PROPERTY: different EventSourced types must not share a cache key"
         );
-        assert_eq!(key[0], b'e');
-        assert_eq!(
-            key[1], 0,
-            "PROPERTY: cache key layout is entity\\0type_id..."
+        assert!(
+            key.starts_with(b"entity\0"),
+            "PROPERTY: cache key layout is entity\\0type_id... (entity bytes, then a NUL separator)"
         );
     }
 }

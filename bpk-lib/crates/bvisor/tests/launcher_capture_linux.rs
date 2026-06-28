@@ -186,6 +186,17 @@ fn assert_clean_capture(obs: &LaunchObservation) {
 fn launcher_captures_workload_streams_cleanly_and_deterministically() {
     for iteration in 0..5 {
         let obs = run_marker_workload();
+        if launch::launch_confinement_unavailable(&obs) {
+            use std::io::Write as _;
+            let mut sink = std::io::stderr();
+            let _ = writeln!(
+                sink,
+                "SKIP launcher_captures_workload_streams_cleanly_and_deterministically: \
+                 kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted \
+                 before exec — exercised on capable kernels + the bvisor-linux CI lane"
+            );
+            return;
+        }
         assert_clean_capture(&obs);
         // Determinism: the EXACT captured bytes are identical every iteration (the
         // workload is deterministic and the launcher adds nothing).
@@ -220,6 +231,17 @@ fn large_workload_output_is_fully_captured_without_deadlock() {
     let plan = exec_only_plan(argv);
     let obs = launch::run_launcher(&launcher_path(), &plan, vec![exe_authority()])
         .expect("the launcher harness runs the flood workload to a verdict");
+    if launch::launch_confinement_unavailable(&obs) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP large_workload_output_is_fully_captured_without_deadlock: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     assert!(
         obs.exec_succeeded(),
         "the flood workload must reach ExecSucceeded; terminal={:?} notes={:?}",

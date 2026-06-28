@@ -271,6 +271,17 @@ fn child_inherits_only_the_declared_fds_no_sentinel_leak() {
     }
 
     let obs = handle.join().expect("fd-oracle launcher thread joins");
+    if launch::launch_confinement_unavailable(&obs) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP child_inherits_only_the_declared_fds_no_sentinel_leak: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     // Drop every host-side WRITE end so the pipe read sees EOF.
     drop(sentinel);
     drop(writer);
@@ -405,6 +416,17 @@ fn a_none_policy_spec_runs_through_the_execute_path() {
     // recorded — the lowering rides the production contract, not only a launcher-direct plan.
     let report = run_execute(&fds_spec(FdPolicy::None))
         .expect("an InheritedFds::None spec must ADMIT (the cell is Enforced)");
+    if launch::report_confinement_unavailable(&report.observed) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP a_none_policy_spec_runs_through_the_execute_path: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); confinement cannot install here — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     let mut failures: Vec<String> = Vec::new();
     if report.outcome != Outcome::Completed {

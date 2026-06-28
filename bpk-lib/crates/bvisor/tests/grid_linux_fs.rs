@@ -47,6 +47,7 @@
 //! is FALSE because the escape really landed, so the red half FAILS, proving the
 //! oracle is anti-vacuous.
 
+use bvisor::linux::launch::report_confinement_unavailable;
 use bvisor::{
     Backend, BackendId, BackendRegistry, BoundaryPlanner, BoundaryReportBody, BoundaryRunner,
     BoundarySpec, BudgetFinding, BudgetRequirements, Capability, EvidenceRequirements, FsAccess,
@@ -102,6 +103,19 @@ fn skip(test: &str) {
         "SKIP {test}: live landlock ABI {} < floor {LANDLOCK_ABI_FLOOR} \
          (kernel lacks landlock or the sandbox blocks it)",
         live_landlock_abi()
+    );
+}
+
+/// Emit an explicit skip line when the launcher faulted because the kernel/container
+/// cannot install confinement at all (ENOSYS) — distinct from the live-ABI floor skip,
+/// which is decided BEFORE the run. Never a silent pass.
+fn skip_confinement_unavailable(test: &str) {
+    use std::io::Write;
+    let mut sink = std::io::stderr();
+    let _ = writeln!(
+        sink,
+        "SKIP {test}: kernel/container lacks landlock/userns/seccomp (ENOSYS); confinement \
+         cannot install here — exercised on capable kernels + the bvisor-linux CI lane"
     );
 }
 
@@ -246,6 +260,10 @@ fn g1_landlock_denies_secret_read_outside_declared_root() {
         exfil = exfil.to_string_lossy()
     );
     let body = run(&fs_spec(vec!["-c".into(), cmd], FsAccess::ReadWrite, &root));
+    if report_confinement_unavailable(&body.observed) {
+        skip_confinement_unavailable("g1");
+        return;
+    }
 
     let gt = FsGroundTruth {
         marker,
@@ -294,6 +312,10 @@ fn g3_landlock_denies_write_outside_quarantine() {
     );
 
     let body = run(&fs_spec(vec!["-c".into(), cmd], FsAccess::Write, &root));
+    if report_confinement_unavailable(&body.observed) {
+        skip_confinement_unavailable("g3");
+        return;
+    }
 
     let gt = FsGroundTruth {
         marker,
@@ -332,6 +354,10 @@ fn control_in_root_write_is_allowed_and_completes() {
     );
 
     let body = run(&fs_spec(vec!["-c".into(), cmd], FsAccess::Write, &root));
+    if report_confinement_unavailable(&body.observed) {
+        skip_confinement_unavailable("control");
+        return;
+    }
 
     // GroundTruth: the in-root write DID land (proving the sandbox is not a blanket
     // deny — the deny-tests above are therefore non-vacuous).
@@ -384,6 +410,10 @@ fn cgroup_leaf_is_created_and_reported_through_execute() {
         FsAccess::Write,
         &root,
     ));
+    if report_confinement_unavailable(&body.observed) {
+        skip_confinement_unavailable("cgroup_leaf");
+        return;
+    }
 
     assert_eq!(
         body.outcome,
@@ -459,6 +489,10 @@ fn launcher_identity_is_attested_by_its_content_digest() {
         FsAccess::Write,
         &root,
     ));
+    if report_confinement_unavailable(&body.observed) {
+        skip_confinement_unavailable("launcher_identity");
+        return;
+    }
 
     // INDEPENDENT oracle: hash the actual launcher binary ourselves and require a match.
     let bytes = std::fs::read(test_launcher_path()).expect("read launcher bin");

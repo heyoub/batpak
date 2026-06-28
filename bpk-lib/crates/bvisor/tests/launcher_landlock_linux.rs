@@ -29,6 +29,7 @@
 //! launcher-path mirror of grid_linux_fs.rs's red fixture, kept inline since it is a
 //! cheap second spawn.)
 
+use bvisor::linux::launch::transcript_confinement_unavailable;
 use bvisor::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
     LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1,
@@ -531,6 +532,16 @@ fn launcher_landlock_denies_secret_read_and_escape_write_allows_in_root() {
     let (mut child, control) = spawn_launcher(&plan, open_sh(), Some(roots));
     let transcript = read_all(control);
     let _ = child.wait();
+    if transcript_confinement_unavailable(&transcript) {
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP launcher_landlock_denies_secret_read_and_escape_write_allows_in_root: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     // ── GroundTruth (REAL disk, NOT the transcript) ──────────────────────────────
     let g1 = FsGroundTruth {
@@ -601,6 +612,16 @@ fn launcher_without_landlock_lets_the_escape_land() {
     let (mut child, control) = spawn_launcher(&plan, open_sh(), None);
     let transcript = read_all(control);
     let _ = child.wait();
+    if transcript_confinement_unavailable(&transcript) {
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP launcher_without_landlock_lets_the_escape_land: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     let gt = FsGroundTruth {
         marker,

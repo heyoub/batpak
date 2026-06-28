@@ -19,7 +19,9 @@
 //! ancestor the test SKIPS with an explicit message — never a silent pass.
 
 use bvisor::linux::cgroup::{probe_controller_base, CgroupLeaf, CgroupLimits};
-use bvisor::linux::launch::{resolve_launcher_path, run_launcher, AuthorityFd};
+use bvisor::linux::launch::{
+    launch_confinement_unavailable, resolve_launcher_path, run_launcher, AuthorityFd,
+};
 use bvisor::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
     LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1,
@@ -179,6 +181,15 @@ fn clone_into_cgroup_births_the_child_inside_the_prepared_leaf_or_skip() {
     let _ = leaf.remove();
 
     let observation = observation.expect("harness ran the launcher");
+    if launch_confinement_unavailable(&observation) {
+        let _ = writeln!(
+            sink,
+            "SKIP clone_into_cgroup_births_the_child_inside_the_prepared_leaf_or_skip: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let child_cgroup = unified_line(&String::from_utf8_lossy(&observation.captured_stdout));
     let _ = writeln!(
         sink,

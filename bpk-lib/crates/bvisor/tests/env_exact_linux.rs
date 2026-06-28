@@ -278,6 +278,17 @@ fn child_env_equals_the_admitted_table_with_no_ambient_leak() {
         .expect("spawn the launcher driver thread");
     let host_env = host_read_child_environ(&marker, expected.len(), deadline);
     let sleep_obs = handle.join().expect("sleep launcher thread joins");
+    if launch::launch_confinement_unavailable(&sleep_obs) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP child_env_equals_the_admitted_table_with_no_ambient_leak: kernel/container \
+             lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — \
+             exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     assert!(
         sleep_obs.exec_succeeded(),
         "the sleep workload must reach ExecSucceeded; terminal={:?} notes={:?}",
@@ -386,6 +397,17 @@ fn a_secret_lease_resolves_but_the_durable_plan_and_report_carry_only_the_ref() 
     ]);
     let resolver = MapSecretResolver::new().with(lease_ref, secret_value);
     let (report, plan_bytes) = run_execute(&env_spec(policy), resolver);
+    if launch::report_confinement_unavailable(&report.observed) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP a_secret_lease_resolves_but_the_durable_plan_and_report_carry_only_the_ref: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); confinement cannot install \
+             here — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     // The run COMPLETED (the secret resolved in the child, so the workload ran).
     assert_eq!(

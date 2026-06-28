@@ -8,6 +8,7 @@
 //! refusals (MissingPrimitive, HandleMismatch, bad plan). The PURE phase-honesty
 //! fixtures live in `launcher_protocol.rs` and are not duplicated here.
 
+use bvisor::linux::launch::transcript_confinement_unavailable;
 use bvisor::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
     LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1,
@@ -300,6 +301,17 @@ fn happy_path_execs_a_real_child_and_reports_success() {
 
     let transcript = read_all(control);
     let status = child.wait().expect("wait launcher");
+    if transcript_confinement_unavailable(&transcript) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP happy_path_execs_a_real_child_and_reports_success: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let coordinator_pid = i64::from(child.id());
 
     assert!(
@@ -541,6 +553,17 @@ fn scrub_closes_undeclared_inherited_fd_no_refusal() {
 
     let transcript = read_all(control);
     let status = child.wait().expect("wait launcher");
+    if transcript_confinement_unavailable(&transcript) {
+        use std::io::Write as _;
+        let mut sink = std::io::stderr();
+        let _ = writeln!(
+            sink,
+            "SKIP scrub_closes_undeclared_inherited_fd_no_refusal: kernel/container lacks \
+             landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised on \
+             capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
 
     // ── INDEPENDENT GroundTruth (the witness on disk, NOT the transcript) ──────────
     let recorded = std::fs::read_to_string(&witness).unwrap_or_default();

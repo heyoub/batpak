@@ -111,11 +111,21 @@ fn wait_for_read_only_open_after_release(
 fn helper_command(data_dir: &Path, ready: &Path, release: &Path) -> Command {
     let current = std::env::current_exe().expect("current test binary");
     let helper_name = format!("store_lock_helper{}", std::env::consts::EXE_SUFFIX);
-    let helper = current
+    // The test binary lives in `target/<profile>/deps/`; workspace `cargo`/`nextest`
+    // builds the `store_lock_helper` bin one level up in the profile root
+    // (`target/<profile>/`). Probe both so a pre-built helper is used directly —
+    // the nested `cargo run` fallback below only fires when the bin was never
+    // built (e.g. `cargo test -p batpak` alone) and can blow the ready deadline
+    // while it compiles.
+    let deps_dir = current
         .parent()
-        .expect("test binary lives under target profile")
-        .join(helper_name);
-    let mut cmd = if helper.exists() {
+        .expect("test binary lives under target profile");
+    let helper = [Some(deps_dir), deps_dir.parent()]
+        .into_iter()
+        .flatten()
+        .map(|dir| dir.join(&helper_name))
+        .find(|candidate| candidate.exists());
+    let mut cmd = if let Some(helper) = helper {
         Command::new(helper)
     } else {
         let mut cargo = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));

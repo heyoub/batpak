@@ -33,7 +33,10 @@
 //! assertions SKIP with an explicit message — never a silent pass (mirrors the
 //! landlock-ABI-floor SKIP).
 
-use bvisor::linux::launch::{resolve_launcher_path, unprivileged_userns_available, AuthorityFd};
+use bvisor::linux::launch::{
+    launch_confinement_unavailable, resolve_launcher_path, unprivileged_userns_available,
+    AuthorityFd,
+};
 use bvisor::linux::protocol::{
     DescriptorKind, DescriptorRole, DescriptorShape, DescriptorSlotV1, LinuxLaunchBodyV1,
     LinuxLaunchPlanV1, LoweringWireEntryV1, LoweringWireV1, TargetSpecV1, UserNsRequest,
@@ -188,6 +191,15 @@ fn rendezvous_maps_the_child_to_uid0_inside_a_new_userns_or_skip() {
 
     let (euid, egid) = effective_ids();
     let obs = run(Some(UserNsRequest::new()));
+    if launch_confinement_unavailable(&obs) {
+        let _ = writeln!(
+            sink,
+            "SKIP rendezvous_maps_the_child_to_uid0_inside_a_new_userns_or_skip: kernel/container \
+             lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before exec — exercised \
+             on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let stdout = String::from_utf8_lossy(&obs.captured_stdout).into_owned();
     let _ = writeln!(
         sink,
@@ -250,6 +262,15 @@ fn off_path_no_userns_shares_the_parent_namespace_and_is_unaffected() {
     let mut sink = std::io::stderr();
     let (euid, _egid) = effective_ids();
     let obs = run(None);
+    if launch_confinement_unavailable(&obs) {
+        let _ = writeln!(
+            sink,
+            "SKIP off_path_no_userns_shares_the_parent_namespace_and_is_unaffected: \
+             kernel/container lacks landlock/userns/seccomp (ENOSYS); the launcher faulted before \
+             exec — exercised on capable kernels + the bvisor-linux CI lane"
+        );
+        return;
+    }
     let stdout = String::from_utf8_lossy(&obs.captured_stdout).into_owned();
     let _ = writeln!(
         sink,

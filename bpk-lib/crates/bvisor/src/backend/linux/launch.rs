@@ -210,6 +210,67 @@ pub fn unprivileged_userns_available() -> bool {
     true
 }
 
+/// The `ENOSYS` capability-absence signature: the kernel — or a container's stripped
+/// kernel surface (Docker dropping landlock / user-namespaces / seccomp) — LACKS the
+/// syscall the launcher needs to INSTALL confinement, so setup faults with `ENOSYS`
+/// ("Function not implemented", errno 38). This is the ONLY signature the
+/// confinement-unavailable detectors below admit: a capable kernel that genuinely FAILS
+/// to confine for any other reason emits no `ENOSYS` and is therefore never skipped, so a
+/// real confinement regression still RED-fails the test that exercises it.
+fn detail_is_capability_absence(detail: &str) -> bool {
+    detail.contains("Function not implemented")
+        || detail.contains("os error 38")
+        || detail.contains("errno=38")
+}
+
+/// Whether a sealed [`crate::BoundaryReportBody`]'s observed facts show the launcher could
+/// not install confinement because the kernel/container LACKS the capability (`ENOSYS`),
+/// as opposed to a genuine confinement failure on a capable kernel.
+///
+/// Conservative by construction: it requires BOTH an `ENOSYS` capability-absence signature
+/// (in any observed fact's detail) AND honest evidence that confinement did NOT install —
+/// a `launcher_terminal` `SetupFaulted` with `confinement_installed=false`, or a
+/// `confinement_not_installed` fact. A capable kernel (confinement installs, the run
+/// proceeds) never matches, so the test still RUNS and PASSES there; only an environment
+/// that physically cannot install confinement trips it. A test that finds this true must
+/// SKIP LOUD (never a silent pass) rather than assert a guarantee it could not exercise.
+#[must_use]
+pub fn report_confinement_unavailable(observed: &[crate::contract::report::ObservedFact]) -> bool {
+    let capability_absent = observed
+        .iter()
+        .any(|f| detail_is_capability_absence(&f.detail));
+    let confinement_uninstalled = observed.iter().any(|f| {
+        f.kind == "launcher_terminal"
+            && f.detail.contains("SetupFaulted")
+            && f.detail.contains("confinement_installed=false")
+    }) || observed
+        .iter()
+        .any(|f| f.kind == "confinement_not_installed");
+    capability_absent && confinement_uninstalled
+}
+
+/// The [`LaunchObservation`] analogue of [`report_confinement_unavailable`], for tests
+/// that drive [`run_launcher`] directly (they hold the observation, not a sealed report).
+/// Same conservative posture: an `ENOSYS` capability-absence note AND a `SetupFaulted`
+/// terminal that installed no confinement.
+#[must_use]
+pub fn launch_confinement_unavailable(obs: &LaunchObservation) -> bool {
+    let capability_absent = obs.notes.iter().any(|n| detail_is_capability_absence(n));
+    let confinement_uninstalled =
+        obs.terminal == Some(LauncherState::SetupFaulted) && !obs.confinement_installed;
+    capability_absent && confinement_uninstalled
+}
+
+/// The raw-transcript analogue, for tests that read the launcher's control transcript as a
+/// single string (a hand-rolled spawn, not the harness). Same conservative posture: an
+/// `ENOSYS` capability-absence line AND a `SetupFaulted` terminal line.
+#[must_use]
+pub fn transcript_confinement_unavailable(transcript: &str) -> bool {
+    let capability_absent = transcript.lines().any(detail_is_capability_absence);
+    let setup_faulted = transcript.lines().any(|l| l.trim() == "SetupFaulted");
+    capability_absent && setup_faulted
+}
+
 /// Run the launcher over `plan` with the pre-opened `authority` handles, collecting the
 /// transcript + terminal into a [`LaunchObservation`]. SAFE end-to-end except the two
 /// ledgered basement calls (memfd seal + spawn pre_exec).
