@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; impossible-feature guards in src/lib.rs (async-store, sha256) use cfg attributes for features intentionally not declared in Cargo.toml; item-level allow is unreliable for cfg checks on some toolchain versions so we silence at crate root.
-#![allow(unexpected_cfgs)]
+// The impossible-feature guards below (async-store, sha256) reference features
+// intentionally not declared in Cargo.toml; build.rs registers them via
+// `cargo::rustc-check-cfg` so rustc recognizes them without any cfg-lint allow.
 // justifies: docs.rs builds with --cfg docsrs from Cargo.toml so feature-gated public API can show doc(cfg) badges; local stable docs add batpak_stable_docs to avoid nightly-only attributes.
 #![cfg_attr(all(docsrs, not(batpak_stable_docs)), feature(doc_cfg))]
 // justifies: src/lib.rs makes production expect() sites deliberate invariant escape hatches instead of ambient convenience panics.
@@ -26,7 +27,7 @@
 //! hash-chain ancestry with
 //! [`Store::walk_ancestors`](crate::store::Store::walk_ancestors), verify
 //! receipts with
-//! [`Store::verify_append_receipt_detailed`](crate::store::Store::verify_append_receipt_detailed),
+//! [`Store::verify_append_receipt`](crate::store::Store::verify_append_receipt),
 //! project derived state with [`Store::project`](crate::store::Store::project),
 //! then close the store. Gates and [`Pipeline`](crate::pipeline::Pipeline) are
 //! advanced batteries for caller-owned evaluation before commit.
@@ -63,6 +64,14 @@
 //! 5. [`artifact`], [`registry`], [`transition`], [`reservation`], and
 //!    [`schema`]: Advanced substrate batteries for envelopes, ledgers,
 //!    transition evidence, reservation mechanics, and drift reports.
+
+// Width invariant: batpak stores ids/offsets/lengths compactly as `u32`/`u64` and
+// converts to `usize` only transiently for slicing. `u32 -> usize` is lossless only
+// when `usize` is at least 32 bits, so a <32-bit target is rejected here at compile
+// time. This makes the `usize::try_from(u32).unwrap_or(..)` conversions throughout
+// the store provably-total (their `Err` arm is unreachable) without any `#[allow]`.
+#[cfg(target_pointer_width = "16")]
+compile_error!("batpak requires a >=32-bit target: u32 ids/offsets must fit usize losslessly");
 
 /// Crate-level substrate: canonical artifact body digest vs envelope digest.
 pub mod artifact;
@@ -116,6 +125,47 @@ pub mod __private {
     };
 }
 
+/// Fuzz-only decode entry points for the workspace-excluded `batpak-fuzz`
+/// cargo-fuzz crate (GAUNT-FUZZ-1). Gated behind `dangerous-test-hooks` and
+/// `#[doc(hidden)]`: a default build never compiles it, so there is no
+/// production API-surface change. See the module docs for the wrapper contract.
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __fuzz;
+
+/// Deterministic-simulation entry points for the `sim_is_deterministic`
+/// integration test (GAUNT-SIM-2c). Gated behind `dangerous-test-hooks` and
+/// `#[doc(hidden)]`: a default build never compiles it, so there is no
+/// production API-surface change. Exposes only the seeded-workload driver and
+/// `BATPAK_SEED` replay helper over the `pub(crate)` simulation backends.
+#[cfg(feature = "dangerous-test-hooks")]
+#[doc(hidden)]
+pub mod __sim {
+    pub use crate::store::sim::corpus::{
+        assert_corpus_rows_current, graduate_corpus_cell, graduate_corpus_seed,
+        run_fork_isolation_corpus_cell, run_import_reapply_corpus_cell, verify_corpus_row,
+        verify_corpus_row_cell, CorpusReplayPublic, CorpusRowDescriptor, GraduationRequest,
+    };
+    pub use crate::store::sim::fork_hostile::{
+        run_fork_dest_equals_source, run_fork_enospc_mid_copy, run_fork_stale_dest,
+        run_fork_symlink_dest, DestEqualsSourceOutcome, EnospcMidCopyOutcome, StaleDestOutcome,
+        SymlinkDestOutcome, STALE_RANGES_FILE, STALE_SEGMENT_FILE,
+    };
+    pub use crate::store::sim::fork_recovery::{
+        fork_fault_replay_seed, run_seeded_fork_fault_public, ForkFaultOutcomePublic,
+    };
+    pub use crate::store::sim::import_recovery::{
+        import_fault_replay_seed, run_seeded_import_fault_public, ImportFaultOutcomePublic,
+    };
+    pub use crate::store::sim::recovery::{
+        recovery_replay_seed, run_seeded_recovery, RecoveryOutcomePublic,
+    };
+    pub use crate::store::sim::recovery_matrix::{
+        matrix_replay_seed, run_recovery_matrix, MatrixCell, RecoveredClass,
+    };
+    pub use crate::store::sim::{replay_seed, run_seeded_workload};
+}
+
 // Self-alias for path hygiene in derive-generated code.
 // `batpak-macros` emits absolute `::batpak::...` paths (see ADR-0010 and
 // `crates/macros/src/lib.rs:151-166`). `pub extern crate self as batpak;`
@@ -138,8 +188,9 @@ pub use crate::event::{EventPayload, EventSourced, MultiReactive};
 pub use batpak_macros::{EventPayload, EventSourced, MultiEventReactor};
 
 /// compile_error guards for impossible configurations:
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; async-store is not a declared feature in src/lib.rs; this guard must survive cargo check without the crate-level lint silencing the cfg reference
-#[allow(unexpected_cfgs)]
+// async-store is intentionally undeclared in Cargo.toml; build.rs registers the
+// cfg via `cargo::rustc-check-cfg` so this INV-STORE-SYNC-ONLY guard (ADR-0001)
+// compiles warning-free in src/lib.rs.
 #[cfg(feature = "async-store")]
 compile_error!(
     "INVARIANT 2: batpak does not have an async Store API. \
@@ -147,8 +198,9 @@ compile_error!(
      See: src/store/delivery/subscription.rs for the async pattern."
 );
 
-// justifies: INV-STORE-SYNC-ONLY; sha256 is not a declared feature in src/lib.rs; this compile_error guard requires the cfg reference to reach codegen
-#[allow(unexpected_cfgs)]
+// sha256 is intentionally undeclared in Cargo.toml; build.rs registers the cfg
+// via `cargo::rustc-check-cfg` so this blake3-only guard (INV-STORE-SYNC-ONLY)
+// compiles warning-free in src/lib.rs.
 #[cfg(feature = "sha256")]
 compile_error!(
     "INVARIANT 5: blake3 is the only hash. No HashAlgorithm enum. \

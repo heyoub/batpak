@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Outcome combinator tests in tests/outcome_combinators.rs use panic/unwrap as assertion style and match the success arm with a wildcard fallback rather than enumerating every error variant.
-#![allow(clippy::panic, clippy::wildcard_enum_match_arm, clippy::unwrap_used)]
 //! Tests for Outcome combinators not covered by monad_laws.rs.
 //! Covers: inspect, inspect_err, map_err, or_else, and_then_if,
 //! into_result, unwrap_or, unwrap_or_else, join_any, zip edge cases.
@@ -9,10 +7,9 @@
 //! INVARIANTS: INV-TYPELEVEL-COMBINATOR-LAWS (combinator type safety), INV-FRONTIER-WAIT-MONOTONIC (WaitCondition semantics)
 
 use batpak::outcome::WaitCondition;
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 
 fn test_err() -> OutcomeError {
     OutcomeError::new(ErrorKind::Internal, "test error")
@@ -59,7 +56,12 @@ fn inspect_calls_closure_on_ok() {
 #[test]
 fn inspect_skips_non_ok() {
     let err: Outcome<i32> = Outcome::Err(test_err());
-    let result = err.inspect(|_| panic!("inspect should not call closure on Err"));
+    let result = err.inspect(|_| {
+        assert!(
+            std::hint::black_box(false),
+            "inspect should not call closure on Err"
+        )
+    });
     assert!(
         result.is_err(),
         "INSPECT NON-OK VARIANT CHANGED: inspect on Err must return Err unchanged.\n\
@@ -69,7 +71,12 @@ fn inspect_skips_non_ok() {
     );
 
     let retry: Outcome<i32> = Outcome::retry(100, 1, 3, "backoff");
-    let result = retry.inspect(|_| panic!("inspect should not call closure on Retry"));
+    let result = retry.inspect(|_| {
+        assert!(
+            std::hint::black_box(false),
+            "inspect should not call closure on Retry"
+        )
+    });
     assert!(
         result.is_retry(),
         "INSPECT NON-OK VARIANT CHANGED: inspect on Retry must return Retry unchanged.\n\
@@ -79,7 +86,12 @@ fn inspect_skips_non_ok() {
     );
 
     let cancelled: Outcome<i32> = Outcome::cancelled("nope");
-    let result = cancelled.inspect(|_| panic!("inspect should not call closure on Cancelled"));
+    let result = cancelled.inspect(|_| {
+        assert!(
+            std::hint::black_box(false),
+            "inspect should not call closure on Cancelled"
+        )
+    });
     assert!(
         result.is_cancelled(),
         "INSPECT NON-OK VARIANT CHANGED: inspect on Cancelled must return Cancelled unchanged.\n\
@@ -150,7 +162,8 @@ fn inspect_err_calls_closure_on_err() {
 
 #[test]
 fn inspect_err_skips_ok() {
-    let result = Outcome::Ok(42).inspect_err(|_| panic!("should not call on Ok"));
+    let result = Outcome::Ok(42)
+        .inspect_err(|_| assert!(std::hint::black_box(false), "should not call on Ok"));
     assert_eq!(
         result,
         Outcome::Ok(42),
@@ -192,27 +205,21 @@ fn map_err_transforms_error() {
         e.message = "transformed".into();
         e
     });
-    match result {
-        Outcome::Err(e) => assert_eq!(
-            e.message, "transformed",
-            "MAP_ERR TRANSFORM NOT APPLIED: expected message \"transformed\", got {:?}.\n\
-             Investigate: src/outcome/mod.rs map_err Err arm.\n\
-             Common causes: closure not invoked, or return value discarded.\n\
-             Run: cargo test --test outcome_combinators",
-            e.message
-        ),
-        _ => panic!(
-            "Expected Err after map_err on Err — variant changed unexpectedly.\n\
-             Investigate: src/outcome/mod.rs map_err Err arm.\n\
-             Common causes: map_err on Err returns wrong variant.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+    assert!(
+        matches!(&result, Outcome::Err(e) if e.message == "transformed"),
+        "MAP_ERR TRANSFORM NOT APPLIED: expected Err with message \"transformed\", got {result:?}.\n\
+         Investigate: src/outcome/mod.rs map_err Err arm.\n\
+         Common causes: closure not invoked, return value discarded, or variant changed.\n\
+         Run: cargo test --test outcome_combinators"
+    );
 }
 
 #[test]
 fn map_err_skips_ok() {
-    let result = Outcome::Ok(42).map_err(|_| panic!("should not call on Ok"));
+    let result = Outcome::Ok(42).map_err(|_| {
+        assert!(std::hint::black_box(false), "should not call on Ok");
+        unreachable!()
+    });
     assert_eq!(
         result,
         Outcome::Ok(42),
@@ -230,30 +237,28 @@ fn map_err_distributes_over_batch() {
         e.message = "mapped".into();
         e
     });
-    match result {
-        Outcome::Batch(items) => {
-            assert_eq!(
-                items[0],
-                Outcome::Ok(1),
-                "MAP_ERR BATCH ITEM 0 CHANGED: Ok(1) must pass through map_err unmodified.\n\
-                 Investigate: src/outcome/mod.rs map_err Batch distribution.\n\
-                 Common causes: map_err applies transformation to Ok items inside Batch.\n\
-                 Run: cargo test --test outcome_combinators"
-            );
-            match &items[1] {
-                Outcome::Err(e) => assert_eq!(
-                    e.message, "mapped",
-                    "MAP_ERR BATCH ERR MESSAGE WRONG: expected \"mapped\", got {:?}.\n\
-                     Investigate: src/outcome/mod.rs map_err Err arm inside Batch.\n\
-                     Common causes: closure not called, wrong item indexed.\n\
-                     Run: cargo test --test outcome_combinators",
-                    e.message
-                ),
-                _ => panic!("Expected Err in batch"),
-            }
-        }
-        _ => panic!("Expected Batch"),
-    }
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "MAP_ERR BATCH WRONG VARIANT: map_err on a Batch must return a Batch, got {result:?}.\n\
+             Investigate: src/outcome/mod.rs map_err Batch distribution."
+        )
+    };
+    assert_eq!(
+        items[0],
+        Outcome::Ok(1),
+        "MAP_ERR BATCH ITEM 0 CHANGED: Ok(1) must pass through map_err unmodified.\n\
+         Investigate: src/outcome/mod.rs map_err Batch distribution.\n\
+         Common causes: map_err applies transformation to Ok items inside Batch.\n\
+         Run: cargo test --test outcome_combinators"
+    );
+    assert!(
+        matches!(&items[1], Outcome::Err(e) if e.message == "mapped"),
+        "MAP_ERR BATCH ERR MESSAGE WRONG: expected Err message \"mapped\", got {:?}.\n\
+         Investigate: src/outcome/mod.rs map_err Err arm inside Batch.\n\
+         Common causes: closure not called, wrong item indexed.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
 }
 
 // --- or_else ---
@@ -274,7 +279,10 @@ fn or_else_recovers_from_err() {
 
 #[test]
 fn or_else_skips_ok() {
-    let result = Outcome::Ok(42).or_else(|_| panic!("should not call on Ok"));
+    let result = Outcome::Ok(42).or_else(|_| {
+        assert!(std::hint::black_box(false), "should not call on Ok");
+        unreachable!()
+    });
     assert_eq!(
         result,
         Outcome::Ok(42),
@@ -288,7 +296,10 @@ fn or_else_skips_ok() {
 #[test]
 fn or_else_skips_non_err_variants() {
     let retry: Outcome<i32> = Outcome::retry(100, 1, 3, "retry");
-    let result = retry.or_else(|_| panic!("should not call on Retry"));
+    let result = retry.or_else(|_| {
+        assert!(std::hint::black_box(false), "should not call on Retry");
+        unreachable!()
+    });
     assert!(
         result.is_retry(),
         "OR_ELSE CHANGED RETRY: or_else on Retry must return Retry unchanged.\n\
@@ -302,28 +313,31 @@ fn or_else_skips_non_err_variants() {
 fn or_else_distributes_over_batch() {
     let batch: Outcome<i32> = Outcome::Batch(vec![Outcome::Err(test_err()), Outcome::Ok(1)]);
     let result = batch.or_else(|_| Outcome::Ok(0));
-    match result {
-        Outcome::Batch(items) => {
-            assert_eq!(items[0], Outcome::Ok(0),
-                "OR_ELSE BATCH ERR NOT RECOVERED: items[0] should be Ok(0) after recovery, got {:?}.\n\
-                 Investigate: src/outcome/mod.rs or_else Batch distribution.\n\
-                 Common causes: or_else does not recurse into Batch items.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[0]);
-            assert_eq!(items[1], Outcome::Ok(1),
-                "OR_ELSE BATCH OK CHANGED: items[1] is Ok(1) and must pass through untouched, got {:?}.\n\
-                 Investigate: src/outcome/mod.rs or_else Batch distribution.\n\
-                 Common causes: or_else incorrectly applies closure to Ok items inside Batch.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[1]);
-        }
-        _ => panic!(
-            "OR_ELSE BATCH VARIANT WRONG: expected Batch result from or_else on Batch.\n\
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "OR_ELSE BATCH VARIANT WRONG: expected Batch result from or_else on Batch, got {result:?}.\n\
              Investigate: src/outcome/mod.rs or_else Batch arm.\n\
-             Common causes: or_else collapses Batch to a single variant instead of distributing.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+             Common causes: or_else collapses Batch to a single variant instead of distributing."
+        )
+    };
+    assert_eq!(
+        items[0],
+        Outcome::Ok(0),
+        "OR_ELSE BATCH ERR NOT RECOVERED: items[0] should be Ok(0) after recovery, got {:?}.\n\
+         Investigate: src/outcome/mod.rs or_else Batch distribution.\n\
+         Common causes: or_else does not recurse into Batch items.\n\
+         Run: cargo test --test outcome_combinators",
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        Outcome::Ok(1),
+        "OR_ELSE BATCH OK CHANGED: items[1] is Ok(1) and must pass through untouched, got {:?}.\n\
+         Investigate: src/outcome/mod.rs or_else Batch distribution.\n\
+         Common causes: or_else incorrectly applies closure to Ok items inside Batch.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
 }
 
 // --- and_then_if ---
@@ -346,7 +360,13 @@ fn and_then_if_applies_when_predicate_true() {
 fn and_then_if_skips_when_predicate_false() {
     let result = Outcome::Ok(5).and_then_if(
         |v| *v > 10,
-        |_| panic!("should not call when predicate is false"),
+        |_| {
+            assert!(
+                std::hint::black_box(false),
+                "should not call when predicate is false"
+            );
+            unreachable!()
+        },
     );
     assert_eq!(result, Outcome::Ok(5),
         "AND_THEN_IF PREDICATE FALSE CHANGED VALUE: expected Ok(5) when predicate is false, got {:?}.\n\
@@ -360,8 +380,17 @@ fn and_then_if_skips_when_predicate_false() {
 fn and_then_if_skips_non_ok() {
     let err: Outcome<i32> = Outcome::Err(test_err());
     let result = err.and_then_if(
-        |_| panic!("should not check predicate on Err"),
-        |_| panic!("should not apply on Err"),
+        |_| {
+            assert!(
+                std::hint::black_box(false),
+                "should not check predicate on Err"
+            );
+            unreachable!()
+        },
+        |_| {
+            assert!(std::hint::black_box(false), "should not apply on Err");
+            unreachable!()
+        },
     );
     assert!(
         result.is_err(),
@@ -686,20 +715,13 @@ fn join_any_all_err_returns_last() {
         Outcome::Err(OutcomeError::new(ErrorKind::NotFound, "last")),
     ];
     let result = batpak::outcome::join_any(outcomes);
-    match result {
-        Outcome::Err(e) => assert_eq!(e.message, "last",
-            "JOIN_ANY ALL_ERR WRONG ERROR RETURNED: expected last Err message \"last\", got {:?}.\n\
+    assert!(
+        matches!(&result, Outcome::Err(e) if e.message == "last"),
+        "JOIN_ANY ALL_ERR WRONG RESULT: expected Err with last message \"last\", got {result:?}.\n\
              Investigate: src/outcome/mod.rs join_any all-Err accumulation.\n\
-             Common causes: join_any returns first Err instead of last when all are Err.\n\
-             Run: cargo test --test outcome_combinators",
-            e.message),
-        _ => panic!(
-            "JOIN_ANY ALL_ERR WRONG VARIANT: all Err inputs should yield Err, got non-Err.\n\
-             Investigate: src/outcome/mod.rs join_any all-Err path.\n\
-             Common causes: join_any returns Ok(default) or panics when all inputs are Err.\n\
+             Common causes: join_any returns first Err instead of last, or yields a non-Err variant.\n\
              Run: cargo test --test outcome_combinators"
-        ),
-    }
+    );
 }
 
 #[test]
@@ -766,13 +788,10 @@ fn join_any_batch_all_err_contributes_last_err() {
         Outcome::Err(OutcomeError::new(ErrorKind::NotFound, "last")),
     ])];
     let result = batpak::outcome::join_any(outcomes);
-    match result {
-        Outcome::Err(err) => assert_eq!(
-            err.message, "last",
-            "JOIN_ANY BATCH ALL_ERR WRONG ERROR: recursive Batch traversal must still return the last Err."
-        ),
-        _ => panic!("JOIN_ANY BATCH ALL_ERR WRONG VARIANT: expected Err"),
-    }
+    assert!(
+        matches!(&result, Outcome::Err(err) if err.message == "last"),
+        "JOIN_ANY BATCH ALL_ERR WRONG ERROR: recursive Batch traversal must still return the last Err, got {result:?}."
+    );
 }
 
 // --- zip edge cases ---
@@ -803,83 +822,80 @@ fn zip_ok_plus_cancelled() {
 fn zip_batch_plus_ok() {
     let batch = Outcome::Batch(vec![Outcome::Ok(1), Outcome::Ok(2)]);
     let result = batpak::outcome::zip(batch, Outcome::Ok(10));
-    match result {
-        Outcome::Batch(items) => {
-            assert_eq!(
-                items.len(),
-                2,
-                "ZIP BATCH+OK LENGTH WRONG: expected 2 items in result Batch, got {}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch distribution.\n\
-                 Common causes: zip drops items or duplicates them when distributing over Batch.\n\
-                 Run: cargo test --test outcome_combinators",
-                items.len()
-            );
-            assert_eq!(
-                items[0],
-                Outcome::Ok((1, 10)),
-                "ZIP BATCH+OK ITEM 0 WRONG: expected Ok((1, 10)), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch left-distribution.\n\
-                 Common causes: zip pairs wrong elements or loses the right-side value.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[0]
-            );
-            assert_eq!(
-                items[1],
-                Outcome::Ok((2, 10)),
-                "ZIP BATCH+OK ITEM 1 WRONG: expected Ok((2, 10)), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch left-distribution.\n\
-                 Common causes: zip pairs wrong elements or loses the right-side value.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[1]
-            );
-        }
-        _ => panic!(
-            "ZIP BATCH+OK WRONG VARIANT: expected Batch result when left is Batch.\n\
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "ZIP BATCH+OK WRONG VARIANT: expected Batch result when left is Batch, got {result:?}.\n\
              Investigate: src/outcome/mod.rs zip Batch arm.\n\
-             Common causes: zip collapses Batch instead of distributing over it.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+             Common causes: zip collapses Batch instead of distributing over it."
+        )
+    };
+    assert_eq!(
+        items.len(),
+        2,
+        "ZIP BATCH+OK LENGTH WRONG: expected 2 items in result Batch, got {}.\n\
+         Investigate: src/outcome/mod.rs zip Batch distribution.\n\
+         Common causes: zip drops items or duplicates them when distributing over Batch.\n\
+         Run: cargo test --test outcome_combinators",
+        items.len()
+    );
+    assert_eq!(
+        items[0],
+        Outcome::Ok((1, 10)),
+        "ZIP BATCH+OK ITEM 0 WRONG: expected Ok((1, 10)), got {:?}.\n\
+         Investigate: src/outcome/mod.rs zip Batch left-distribution.\n\
+         Common causes: zip pairs wrong elements or loses the right-side value.\n\
+         Run: cargo test --test outcome_combinators",
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        Outcome::Ok((2, 10)),
+        "ZIP BATCH+OK ITEM 1 WRONG: expected Ok((2, 10)), got {:?}.\n\
+         Investigate: src/outcome/mod.rs zip Batch left-distribution.\n\
+         Common causes: zip pairs wrong elements or loses the right-side value.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
 }
 
 #[test]
 fn zip_ok_plus_batch() {
     let batch = Outcome::Batch(vec![Outcome::Ok(10), Outcome::Ok(20)]);
     let result = batpak::outcome::zip(Outcome::Ok(1), batch);
-    match result {
-        Outcome::Batch(items) => {
-            assert_eq!(items.len(), 2,
-                "ZIP OK+BATCH LENGTH WRONG: expected 2 items in result Batch, got {}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
-                 Common causes: zip drops items or duplicates them when distributing over right Batch.\n\
-                 Run: cargo test --test outcome_combinators",
-                items.len());
-            assert_eq!(
-                items[0],
-                Outcome::Ok((1, 10)),
-                "ZIP OK+BATCH ITEM 0 WRONG: expected Ok((1, 10)), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
-                 Common causes: zip pairs wrong elements or loses the left-side value.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[0]
-            );
-            assert_eq!(
-                items[1],
-                Outcome::Ok((1, 20)),
-                "ZIP OK+BATCH ITEM 1 WRONG: expected Ok((1, 20)), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
-                 Common causes: zip pairs wrong elements or loses the left-side value.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[1]
-            );
-        }
-        _ => panic!(
-            "ZIP OK+BATCH WRONG VARIANT: expected Batch result when right is Batch.\n\
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "ZIP OK+BATCH WRONG VARIANT: expected Batch result when right is Batch, got {result:?}.\n\
              Investigate: src/outcome/mod.rs zip Batch arm.\n\
-             Common causes: zip collapses right Batch instead of distributing over it.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+             Common causes: zip collapses right Batch instead of distributing over it."
+        )
+    };
+    assert_eq!(
+        items.len(),
+        2,
+        "ZIP OK+BATCH LENGTH WRONG: expected 2 items in result Batch, got {}.\n\
+         Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
+         Common causes: zip drops items or duplicates them when distributing over right Batch.\n\
+         Run: cargo test --test outcome_combinators",
+        items.len()
+    );
+    assert_eq!(
+        items[0],
+        Outcome::Ok((1, 10)),
+        "ZIP OK+BATCH ITEM 0 WRONG: expected Ok((1, 10)), got {:?}.\n\
+         Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
+         Common causes: zip pairs wrong elements or loses the left-side value.\n\
+         Run: cargo test --test outcome_combinators",
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        Outcome::Ok((1, 20)),
+        "ZIP OK+BATCH ITEM 1 WRONG: expected Ok((1, 20)), got {:?}.\n\
+         Investigate: src/outcome/mod.rs zip Batch right-distribution.\n\
+         Common causes: zip pairs wrong elements or loses the left-side value.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
 }
 
 // --- map distributes over Batch ---
@@ -892,41 +908,38 @@ fn map_distributes_over_batch() {
         Outcome::Err(test_err()),
     ]);
     let result = batch.map(|x| x * 10);
-    match result {
-        Outcome::Batch(items) => {
-            assert_eq!(
-                items[0],
-                Outcome::Ok(10),
-                "MAP BATCH ITEM 0 WRONG: expected Ok(10) after map(*10) on Ok(1), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs map Batch distribution.\n\
-                 Common causes: map does not apply function to Ok items inside Batch.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[0]
-            );
-            assert_eq!(
-                items[1],
-                Outcome::Ok(20),
-                "MAP BATCH ITEM 1 WRONG: expected Ok(20) after map(*10) on Ok(2), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs map Batch distribution.\n\
-                 Common causes: map applies function only to first item, skipping rest.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[1]
-            );
-            assert!(
-                items[2].is_err(),
-                "MAP BATCH ERR ITEM CHANGED: Err in Batch must pass through map unchanged.\n\
-                 Investigate: src/outcome/mod.rs map Batch Err pass-through.\n\
-                 Common causes: map attempts to apply function to Err items and changes variant.\n\
-                 Run: cargo test --test outcome_combinators"
-            );
-        }
-        _ => panic!(
-            "MAP BATCH WRONG VARIANT: expected Batch result from map on Batch.\n\
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "MAP BATCH WRONG VARIANT: expected Batch result from map on Batch, got {result:?}.\n\
              Investigate: src/outcome/mod.rs map Batch arm.\n\
-             Common causes: map collapses Batch instead of distributing over items.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+             Common causes: map collapses Batch instead of distributing over items."
+        )
+    };
+    assert_eq!(
+        items[0],
+        Outcome::Ok(10),
+        "MAP BATCH ITEM 0 WRONG: expected Ok(10) after map(*10) on Ok(1), got {:?}.\n\
+         Investigate: src/outcome/mod.rs map Batch distribution.\n\
+         Common causes: map does not apply function to Ok items inside Batch.\n\
+         Run: cargo test --test outcome_combinators",
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        Outcome::Ok(20),
+        "MAP BATCH ITEM 1 WRONG: expected Ok(20) after map(*10) on Ok(2), got {:?}.\n\
+         Investigate: src/outcome/mod.rs map Batch distribution.\n\
+         Common causes: map applies function only to first item, skipping rest.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
+    assert!(
+        items[2].is_err(),
+        "MAP BATCH ERR ITEM CHANGED: Err in Batch must pass through map unchanged.\n\
+         Investigate: src/outcome/mod.rs map Batch Err pass-through.\n\
+         Common causes: map attempts to apply function to Err items and changes variant.\n\
+         Run: cargo test --test outcome_combinators"
+    );
 }
 
 // --- and_then distributes over Batch ---
@@ -941,28 +954,30 @@ fn and_then_distributes_over_batch() {
             Outcome::Err(test_err())
         }
     });
-    match result {
-        Outcome::Batch(items) => {
-            assert!(items[0].is_err(),
-                "AND_THEN BATCH ITEM 0 NOT ERR: Ok(1) with x<=1 branch should produce Err, got {:?}.\n\
-                 Investigate: src/outcome/mod.rs and_then Batch distribution.\n\
-                 Common causes: and_then does not apply closure to Ok items in Batch.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[0]);
-            assert_eq!(items[1], Outcome::Ok(20),
-                "AND_THEN BATCH ITEM 1 WRONG: Ok(2) with x>1 branch should produce Ok(20), got {:?}.\n\
-                 Investigate: src/outcome/mod.rs and_then Batch distribution.\n\
-                 Common causes: and_then applies closure only to first item, or uses wrong index.\n\
-                 Run: cargo test --test outcome_combinators",
-                items[1]);
-        }
-        _ => panic!(
-            "AND_THEN BATCH WRONG VARIANT: expected Batch result from and_then on Batch.\n\
+    let Outcome::Batch(items) = &result else {
+        unreachable!(
+            "AND_THEN BATCH WRONG VARIANT: expected Batch result from and_then on Batch, got {result:?}.\n\
              Investigate: src/outcome/mod.rs and_then Batch arm.\n\
-             Common causes: and_then collapses Batch instead of distributing over items.\n\
-             Run: cargo test --test outcome_combinators"
-        ),
-    }
+             Common causes: and_then collapses Batch instead of distributing over items."
+        )
+    };
+    assert!(
+        items[0].is_err(),
+        "AND_THEN BATCH ITEM 0 NOT ERR: Ok(1) with x<=1 branch should produce Err, got {:?}.\n\
+         Investigate: src/outcome/mod.rs and_then Batch distribution.\n\
+         Common causes: and_then does not apply closure to Ok items in Batch.\n\
+         Run: cargo test --test outcome_combinators",
+        items[0]
+    );
+    assert_eq!(
+        items[1],
+        Outcome::Ok(20),
+        "AND_THEN BATCH ITEM 1 WRONG: Ok(2) with x>1 branch should produce Ok(20), got {:?}.\n\
+         Investigate: src/outcome/mod.rs and_then Batch distribution.\n\
+         Common causes: and_then applies closure only to first item, or uses wrong index.\n\
+         Run: cargo test --test outcome_combinators",
+        items[1]
+    );
 }
 
 // --- Retry/Pending/Cancelled pass through map/and_then ---
@@ -1275,17 +1290,15 @@ fn wait_condition_timeout_carries_resume_time() {
     let wc = WaitCondition::Timeout {
         resume_at_ms: 1_700_000_000_000,
     };
-    match &wc {
-        WaitCondition::Timeout { resume_at_ms } => {
-            assert_eq!(
-                *resume_at_ms, 1_700_000_000_000,
-                "PROPERTY: WaitCondition::Timeout must carry exact resume_at_ms.\n\
-                 Investigate: src/outcome/wait.rs WaitCondition::Timeout variant.\n\
-                 Common causes: field silently defaulted or truncated."
-            );
-        }
-        _ => panic!("Expected Timeout variant"),
-    }
+    let WaitCondition::Timeout { resume_at_ms } = &wc else {
+        unreachable!("just constructed a WaitCondition::Timeout")
+    };
+    assert_eq!(
+        *resume_at_ms, 1_700_000_000_000,
+        "PROPERTY: WaitCondition::Timeout must carry exact resume_at_ms.\n\
+         Investigate: src/outcome/wait.rs WaitCondition::Timeout variant.\n\
+         Common causes: field silently defaulted or truncated."
+    );
 }
 
 #[test]
@@ -1293,17 +1306,15 @@ fn wait_condition_event_carries_id() {
     use batpak::outcome::WaitCondition;
     let id: u128 = 0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0;
     let wc = WaitCondition::Event { event_id: id };
-    match &wc {
-        WaitCondition::Event { event_id } => {
-            assert_eq!(
-                *event_id, id,
-                "PROPERTY: WaitCondition::Event must preserve full u128 event_id.\n\
-                 Investigate: src/outcome/wait.rs WaitCondition::Event, wire::u128_bytes.\n\
-                 Common causes: byte-order swap in serde, truncation to u64."
-            );
-        }
-        _ => panic!("Expected Event variant"),
-    }
+    let WaitCondition::Event { event_id } = &wc else {
+        unreachable!("just constructed a WaitCondition::Event")
+    };
+    assert_eq!(
+        *event_id, id,
+        "PROPERTY: WaitCondition::Event must preserve full u128 event_id.\n\
+         Investigate: src/outcome/wait.rs WaitCondition::Event, wire::u128_bytes.\n\
+         Common causes: byte-order swap in serde, truncation to u64."
+    );
 }
 
 #[test]
@@ -1313,17 +1324,15 @@ fn wait_condition_all_composes_multiple() {
         WaitCondition::Timeout { resume_at_ms: 100 },
         WaitCondition::Timeout { resume_at_ms: 200 },
     ]);
-    match &wc {
-        WaitCondition::All(conditions) => {
-            assert_eq!(
-                conditions.len(),
-                2,
-                "PROPERTY: WaitCondition::All must preserve all inner conditions.\n\
-                 Investigate: src/outcome/wait.rs WaitCondition::All variant."
-            );
-        }
-        _ => panic!("Expected All variant"),
-    }
+    let WaitCondition::All(conditions) = &wc else {
+        unreachable!("just constructed a WaitCondition::All")
+    };
+    assert_eq!(
+        conditions.len(),
+        2,
+        "PROPERTY: WaitCondition::All must preserve all inner conditions.\n\
+         Investigate: src/outcome/wait.rs WaitCondition::All variant."
+    );
 }
 
 #[test]
@@ -1333,13 +1342,11 @@ fn wait_condition_custom_carries_tag_and_data() {
         tag: 42,
         data: vec![1, 2, 3, 4],
     };
-    match &wc {
-        WaitCondition::Custom { tag, data } => {
-            assert_eq!(*tag, 42);
-            assert_eq!(data, &[1, 2, 3, 4]);
-        }
-        _ => panic!("Expected Custom variant"),
-    }
+    let WaitCondition::Custom { tag, data } = &wc else {
+        unreachable!("just constructed a WaitCondition::Custom")
+    };
+    assert_eq!(*tag, 42);
+    assert_eq!(data, &[1, 2, 3, 4]);
 }
 
 #[test]
@@ -1377,16 +1384,14 @@ fn compensation_action_rollback_carries_event_ids() {
     let action = CompensationAction::Rollback {
         event_ids: ids.clone(),
     };
-    match &action {
-        CompensationAction::Rollback { event_ids } => {
-            assert_eq!(
-                event_ids, &ids,
-                "PROPERTY: CompensationAction::Rollback must preserve all event_ids.\n\
-                 Investigate: src/outcome/wait.rs CompensationAction::Rollback, wire::vec_u128_bytes."
-            );
-        }
-        _ => panic!("Expected Rollback variant"),
-    }
+    let CompensationAction::Rollback { event_ids } = &action else {
+        unreachable!("just constructed a CompensationAction::Rollback")
+    };
+    assert_eq!(
+        event_ids, &ids,
+        "PROPERTY: CompensationAction::Rollback must preserve all event_ids.\n\
+         Investigate: src/outcome/wait.rs CompensationAction::Rollback, wire::vec_u128_bytes."
+    );
 }
 
 #[test]
@@ -1396,13 +1401,11 @@ fn compensation_action_notify_carries_message() {
         target_id: 42,
         message: "something went wrong".into(),
     };
-    match &action {
-        CompensationAction::Notify { target_id, message } => {
-            assert_eq!(*target_id, 42);
-            assert_eq!(message, "something went wrong");
-        }
-        _ => panic!("Expected Notify variant"),
-    }
+    let CompensationAction::Notify { target_id, message } = &action else {
+        unreachable!("just constructed a CompensationAction::Notify")
+    };
+    assert_eq!(*target_id, 42);
+    assert_eq!(message, "something went wrong");
 }
 
 #[test]

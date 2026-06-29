@@ -1,5 +1,6 @@
 use super::*;
 use crate::store::cold_start::rebuild::OpenIndexReport;
+use std::collections::BTreeMap;
 
 struct OpenComponents {
     runtime: Arc<config::ValidatedStoreConfig>,
@@ -36,7 +37,7 @@ fn open_components(
     lock_mode: StoreLockMode,
 ) -> Result<OpenComponents, StoreError> {
     validate_payload_registry_for_open(&config)?;
-    platform::fs::create_dir_all(&config.data_dir)?;
+    config.fs().create_dir_all(&config.data_dir)?;
     config.data_dir = platform::fs::canonicalize(&config.data_dir).map_err(StoreError::Io)?;
     let configured_signing_keys = config.signing_keys.len();
     tracing::debug!(
@@ -63,12 +64,19 @@ fn open_components(
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
     // Segment files are named so lexicographic order matches replay order.
+    // The fault injector only exists when `dangerous-test-hooks` is enabled;
+    // otherwise the cold-start path takes an inert `&()` (see FaultInjectorRef).
+    #[cfg(feature = "dangerous-test-hooks")]
+    let cold_start_fault_injector = &config.fault_injector;
+    #[cfg(not(feature = "dangerous-test-hooks"))]
+    let cold_start_fault_injector = &();
     let open_outcome = cold_start::rebuild::open_index(
         &index,
         &reader,
         &config.data_dir,
         runtime.cold_start,
         runtime.clock(),
+        cold_start_fault_injector,
     )?;
 
     // Tell the reader which segment is active (for mmap dispatch).
@@ -137,8 +145,45 @@ fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
             wall_ms: entry.wall_ms,
             global_sequence: entry.global_sequence,
         })
-        .max()
+        .reduce(HlcPoint::max_by_sequence)
         .unwrap_or(HlcPoint::ORIGIN)
+}
+
+fn highest_visible_index_hlc(index: &StoreIndex) -> HlcPoint {
+    index
+        .visible_entries()
+        .into_iter()
+        .map(|entry| HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        })
+        .reduce(HlcPoint::max_by_sequence)
+        .unwrap_or(HlcPoint::ORIGIN)
+}
+
+fn highest_index_hlc_by_lane(
+    entries: impl IntoIterator<Item = crate::store::index::IndexEntry>,
+) -> BTreeMap<u32, HlcPoint> {
+    let mut lanes = BTreeMap::new();
+    for entry in entries {
+        let point = HlcPoint {
+            wall_ms: entry.wall_ms,
+            global_sequence: entry.global_sequence,
+        };
+        lanes
+            .entry(entry.dag_lane)
+            .and_modify(|current: &mut HlcPoint| *current = (*current).max_by_sequence(point))
+            .or_insert(point);
+    }
+    lanes
+}
+
+fn highest_durable_index_hlc_by_lane(index: &StoreIndex) -> BTreeMap<u32, HlcPoint> {
+    highest_index_hlc_by_lane(index.all_entries())
+}
+
+fn highest_visible_index_hlc_by_lane(index: &StoreIndex) -> BTreeMap<u32, HlcPoint> {
+    highest_index_hlc_by_lane(index.visible_entries())
 }
 
 fn last_close_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
@@ -213,6 +258,12 @@ fn bootstrap_open_hlc(
     Ok(open_hlc)
 }
 
+fn bootstrap_read_only_hlc(index: &StoreIndex) -> Result<HlcPoint, StoreError> {
+    let max_recovered_hlc = highest_index_hlc(index);
+    let _last_close_hlc = last_close_hlc(index)?;
+    Ok(max_recovered_hlc)
+}
+
 pub(super) fn timestamp_us_for_hlc(point: HlcPoint) -> Result<i64, StoreError> {
     let timestamp_us =
         point
@@ -257,6 +308,9 @@ fn append_open_completed_event(
         .tx
         .send(command)
         .map_err(|_| StoreError::WriterCrashed)?;
+    // Cooperative mode: drive the queued command inline before awaiting its
+    // reply (no-op under the threaded path, so production is unaffected).
+    store.writer_handle()?.pump();
     let receipt = recv_writer_reply(&rx)?;
     let receipt_event_id_raw = {
         use crate::id::EntityIdType;
@@ -288,6 +342,27 @@ impl Store<Open> {
     /// Returns `StoreError::Io` if the data directory cannot be created or segments cannot be read.
     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
         Self::open_with_cache(config, Box::new(NoCache))
+    }
+
+    /// Test-only: open a store in cooperative (single-threaded) writer mode.
+    ///
+    /// There is NO writer thread — the writer pipeline runs inline on the
+    /// calling thread, driven by pumping the command queue at every reply-await
+    /// funnel. Exposed under `dangerous-test-hooks` because `WriterMode` and
+    /// its builder are crate-internal; this is not a public API surface.
+    ///
+    /// # Errors
+    /// Same as [`Store::open`].
+    #[cfg(feature = "dangerous-test-hooks")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "dangerous-test-hooks"))
+    )]
+    pub fn open_cooperative(config: StoreConfig) -> Result<Self, StoreError> {
+        Self::open_with_cache(
+            config.with_writer_mode(crate::store::config::WriterMode::Cooperative),
+            Box::new(NoCache),
+        )
     }
 
     /// Open a store with the built-in file-backed projection cache.
@@ -326,14 +401,25 @@ impl Store<Open> {
         let open_candidate = bootstrap_open_hlc(&runtime, &index)?;
         let subscribers = Arc::new(SubscriberList::new());
         let reactor_subscribers = Arc::new(ReactorSubscriberList::new());
-        let writer = WriterHandle::spawn(
-            &config,
-            &runtime,
-            &index,
-            &subscribers,
-            &reactor_subscribers,
-            &reader,
-        )?;
+        let writer = match config.writer_mode() {
+            crate::store::config::WriterMode::Threaded => WriterHandle::spawn(
+                &config,
+                &runtime,
+                &index,
+                &subscribers,
+                &reactor_subscribers,
+                &reader,
+            )?,
+            #[cfg(feature = "dangerous-test-hooks")]
+            crate::store::config::WriterMode::Cooperative => WriterHandle::cooperative(
+                &config,
+                &runtime,
+                &index,
+                &subscribers,
+                &reactor_subscribers,
+                &reader,
+            )?,
+        };
         let watermark_handle = writer.watermark_handle();
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
 
@@ -341,7 +427,6 @@ impl Store<Open> {
             index,
             reader,
             cache,
-            writer: Some(writer),
             watermark_handle,
             projection_registry,
             lifecycle_gate: Mutex::new(()),
@@ -350,14 +435,19 @@ impl Store<Open> {
             should_shutdown_on_drop: true,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
-            _state: std::marker::PhantomData,
+            state: Open(writer),
             _store_lock: store_lock,
         };
 
         emit_open_report_observability(&store.config, &open_report);
         let open_hlc = append_open_completed_event(&store, &open_report, open_candidate)?;
         lifecycle::sync(&store)?;
-        store.watermark_handle.lock().reset_to_bootstrap(open_hlc);
+        store.watermark_handle.lock().reset_to_bootstrap_lanes(
+            open_hlc,
+            open_hlc,
+            highest_durable_index_hlc_by_lane(&store.index),
+            highest_visible_index_hlc_by_lane(&store.index),
+        );
 
         Ok(store)
     }
@@ -407,14 +497,19 @@ impl Store<ReadOnly> {
             store_lock,
         } = open_components(config, StoreLockMode::ReadOnly)?;
 
-        let open_hlc = bootstrap_open_hlc(&runtime, &index)?;
-        let watermark_handle = WatermarkState::bootstrap_handle(open_hlc, runtime.clock_arc());
+        let recovered_hlc = bootstrap_read_only_hlc(&index)?;
+        let watermark_handle = WatermarkState::bootstrap_handle(recovered_hlc, runtime.clock_arc());
+        watermark_handle.lock().reset_to_bootstrap_lanes(
+            recovered_hlc,
+            highest_visible_index_hlc(&index),
+            highest_durable_index_hlc_by_lane(&index),
+            highest_visible_index_hlc_by_lane(&index),
+        );
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
         let store = Self {
             index,
             reader,
             cache,
-            writer: None,
             watermark_handle,
             projection_registry,
             lifecycle_gate: Mutex::new(()),
@@ -423,7 +518,7 @@ impl Store<ReadOnly> {
             should_shutdown_on_drop: false,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
-            _state: std::marker::PhantomData,
+            state: ReadOnly,
             _store_lock: store_lock,
         };
 

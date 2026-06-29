@@ -14,9 +14,15 @@ pub(crate) fn ci_fast() -> Result<()> {
     run_family_clippy()?;
     run_workspace_and_family_checks()?;
     deny_split()?;
-    run_nextest_ci(["--all-features"])?;
+    // `--workspace` is mandatory here for the same reason as the clippy gate:
+    // without it nextest runs only `default-members` (crates/core), leaving
+    // tools/integrity and the macro crates outside the test net. That
+    // hole let a stale integrity self-test fixture rot undetected until a
+    // workspace-wide run surfaced it.
+    run_nextest_ci(["--workspace", "--all-features"])?;
     cargo(["test", "--doc", "--all-features"])?;
     run_family_tests()?;
+    templates()?;
     integrity("traceability-check", [])?;
     integrity("structural-check", [])?;
     // L2+ contract gates on the DEFAULT PR path (P1-1). These used to live only
@@ -57,7 +63,6 @@ pub(crate) fn ci_fast() -> Result<()> {
 /// release-oriented extras on top of the fast lane.
 pub(crate) fn ci() -> Result<()> {
     ci_fast()?;
-    templates()?;
     doc_deny_warnings()?;
     bench::bench_compile(BenchSurface::Neutral)?;
     bench::bench_compile(BenchSurface::Native)?;
@@ -75,8 +80,13 @@ pub(crate) fn ci_windows_surface() -> Result<()> {
 }
 
 fn run_workspace_clippy() -> Result<()> {
+    // `--workspace` is mandatory: without it cargo lints only `default-members`
+    // (crates/core), silently leaving tools/integrity and tools/xtask outside
+    // the clippy net. A 0.9.0 PR1 review caught 14 clippy errors hiding in
+    // tools/integrity precisely because this gate skipped them.
     cargo([
         "clippy",
+        "--workspace",
         "--all-features",
         "--all-targets",
         "--",
@@ -103,8 +113,11 @@ fn run_family_clippy() -> Result<()> {
 }
 
 fn run_workspace_and_family_checks() -> Result<()> {
-    cargo(["check", "--all-features"])?;
-    cargo(["check", "--no-default-features"])?;
+    // `--workspace` for the same reason as run_workspace_clippy: the bare form
+    // only checks default-members (crates/core), leaving the tooling crates
+    // unchecked under both the default and no-default-features axes.
+    cargo(["check", "--workspace", "--all-features"])?;
+    cargo(["check", "--workspace", "--no-default-features"])?;
     for package in FAMILY_CRATES {
         cargo(["check", "-p", package, "--all-features"])?;
         cargo(["check", "-p", package, "--no-default-features"])?;
@@ -141,7 +154,7 @@ fn doc_deny_warnings() -> Result<()> {
 
 fn unused_deps_advisory() {
     if let Err(error) = super::unused_deps() {
-        eprintln!("xtask ci: unused-deps advisory pass reported: {error}");
+        errln!("xtask ci: unused-deps advisory pass reported: {error}");
     }
 }
 

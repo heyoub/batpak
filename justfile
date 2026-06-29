@@ -1,5 +1,10 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 
+# Integration tests (netbat TCP listeners, temp dirs) need a host temp root.
+# Cursor sandboxes and some CI images block binds under the default TMPDIR;
+# override by exporting TMPDIR before `just`.
+export TMPDIR := env_var_or_default("TMPDIR", "/tmp")
+
 default:
     just --list
 
@@ -88,12 +93,6 @@ mutants-smoke:
 mutants-full:
     cd bpk-lib; cargo xtask mutants full
 
-host-dev:
-    cd bpk-lib; cargo xtask host-dev
-
-host-loop:
-    cd bpk-lib; cargo xtask host-loop
-
 ledger-list:
     cd bpk-lib; cargo xtask factory-ledger list
 
@@ -121,6 +120,7 @@ verify:
 seal:
     cd bpk-lib; cargo xtask check-version-pins
     cd bpk-lib; cargo xtask evidence-audit
+    cd bpk-lib; cargo xtask release-status --strict --active
     cd bpk-lib; cargo xtask release-manifest --strict
 
 ship mode="dry":
@@ -186,9 +186,3 @@ doc: docs
 
 cargo +args:
     cd bpk-lib; cargo {{args}}
-
-pnpm +args:
-    pnpm {{args}}
-
-npm +args:
-    npm {{args}}

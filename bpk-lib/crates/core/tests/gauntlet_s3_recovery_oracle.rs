@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Phase 0B recovery-oracle sentinel uses expect/panic as the assertion style when a recovered state falls outside the legal Committed/RolledBack/CanonicalRefusal set
-#![allow(clippy::panic, clippy::unwrap_used)]
 // The fault injector (and the symbols it needs) live behind `dangerous-test-hooks`.
 // This sentinel runs in that lane; without the feature the whole file is empty.
 #![cfg(feature = "dangerous-test-hooks")]
@@ -100,7 +98,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
     // Op 1: a normal, plainly-committed pre-event to establish durable history.
     {
         let store = Store::open(config(&dir)).expect("open baseline store");
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({ "pre": 1 }))
             .expect("append committed pre-event");
         store.close().expect("close baseline store");
@@ -145,7 +143,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
         | Err(StoreError::DataDirMalformed { .. }) => {
             return (RecoveredState::CanonicalRefusal, false);
         }
-        Err(other) => panic!(
+        Err(other) => unreachable!(
             "ILLEGAL RECOVERED STATE: reopen after a post-fsync crash failed with a \
              non-canonical error (not a typed refusal): {other:?}"
         ),
@@ -154,7 +152,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
     let pre_present = store.query(&Region::all()).into_iter().any(|entry| {
         entry.event_kind() == KIND && {
             store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .map(|loaded| loaded.event.payload.get("pre") == Some(&serde_json::json!(1)))
                 .unwrap_or(false)
         }
@@ -172,7 +170,7 @@ fn run_post_fsync_crash_oracle(batch_n: u32) -> (RecoveredState, bool) {
     } else {
         // Anything else is a HALF-GHOST: a partial batch, an undead receipt, or
         // a lost-after-fsync event. This is the bug the oracle exists to catch.
-        panic!(
+        unreachable!(
             "HALF-GHOST RECOVERED STATE: after a post-fsync crash the store came back with \
              {visible} visible events; the only legal counts are {expected_committed} \
              (Committed) or 1 (RolledBack). A partial/torn batch is forbidden."

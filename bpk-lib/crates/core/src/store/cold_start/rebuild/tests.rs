@@ -49,8 +49,8 @@ fn sample_index_entries(count: u64, segment_id: u64) -> (Vec<IndexEntry>, Vec<St
     let mut entries = Vec::new();
     for i in 0..count {
         let coord = Coordinate::new(format!("entity:{i}"), "scope:rebuild").expect("valid coord");
-        let entity_id = interner.intern(coord.entity());
-        let scope_id = interner.intern(coord.scope());
+        let entity_id = interner.intern(coord.entity()).expect("intern");
+        let scope_id = interner.intern(coord.scope()).expect("intern");
         entries.push(IndexEntry {
             event_id: (i + 1) as u128,
             correlation_id: (i + 1) as u128,
@@ -84,7 +84,7 @@ fn parallel_sidx_footer_read_matches_sequential_footer_read() {
     });
 
     for n in 0..64u32 {
-        store
+        let _ = store
             .append(
                 &coord,
                 kind,
@@ -112,8 +112,9 @@ fn parallel_sidx_footer_read_matches_sequential_footer_read() {
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
     );
-    let (parallel, _) = read_sealed_sidx_entries_parallel(&reader, &sealed_segments)
-        .expect("parallel SIDX footer read should succeed");
+    let (parallel, _) =
+        read_sealed_sidx_entries_parallel(&reader, &sealed_segments, NO_FAULT_INJECTOR)
+            .expect("parallel SIDX footer read should succeed");
     let sequential = read_sealed_sidx_entries_sequential(&reader, &sealed_segments)
         .expect("sequential SIDX footer read should succeed");
 
@@ -139,6 +140,7 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
         data_dir: dir.path(),
         policy: ColdStartPolicy::new(false, false),
         clock: &clock,
+        fault_injector: NO_FAULT_INJECTOR,
     };
     let (entries, interner_strings) = sample_index_entries(0, 0);
     let routing = RoutingSummary::from_sorted_entries(&entries, 1);
@@ -190,6 +192,7 @@ fn build_snapshot_plan_rejects_snapshot_entries_without_backing_frames() {
         data_dir: dir.path(),
         policy: ColdStartPolicy::new(false, false),
         clock: &clock,
+        fault_injector: NO_FAULT_INJECTOR,
     };
     let (entries, interner_strings) = sample_index_entries(1, 0);
     let routing = RoutingSummary::from_sorted_entries(&entries, 1);
@@ -224,7 +227,7 @@ fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
     let coord = Coordinate::new("entity:tail-plan", "scope:rebuild").expect("coord");
     let kind = EventKind::custom(0xE, 8);
     for n in 0..16u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append tail event");
     }
@@ -253,6 +256,7 @@ fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
         data_dir: dir.path(),
         policy: ColdStartPolicy::new(false, false),
         clock: &clock,
+        fault_injector: NO_FAULT_INJECTOR,
     };
     let routing = RoutingSummary::from_sorted_entries(&[], 1);
 
@@ -450,7 +454,7 @@ fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
         .expect("coord");
     let kind = crate::event::EventKind::custom(0xE, 1);
     for i in 0..20u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append");
     }
@@ -473,6 +477,7 @@ fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
         dir.path(),
         ColdStartPolicy::new(true, false),
         &crate::store::SystemClock::new(),
+        NO_FAULT_INJECTOR,
     )
     .expect("open index with pending compaction");
 
@@ -491,7 +496,7 @@ fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
     let kind = EventKind::custom(0xE, 7);
 
     for n in 0..64u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append");
     }
@@ -528,6 +533,7 @@ fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
             watermark_offset: 0,
         },
         0,
+        NO_FAULT_INJECTOR,
     )
     .expect("collect tail entries");
 

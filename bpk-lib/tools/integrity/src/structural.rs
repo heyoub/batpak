@@ -1,20 +1,21 @@
 use crate::repo_surface::{
-    core_benches_root, core_examples_root, core_src_root, core_tests_root, ensure,
-    production_rust_roots, relative, repo_root, rust_files, tracked_repo_files,
+    core_benches_root, core_examples_root, core_tests_root, ensure, production_rust_roots,
+    relative, repo_root, rust_files, tracked_repo_files,
 };
-use crate::shared_checks::{
-    collect_dead_code_silencer_sites, line_carries_justification,
-    load_dead_code_silencer_allowlist, load_known_invariants,
-};
+use crate::shared_checks::{collect_dead_code_silencer_sites, load_dead_code_silencer_allowlist};
 use crate::source_cache::SourceCache;
 use crate::{
-    agent_surface, architecture_lints, ci_parity, harness_lints, invariant_bridge, public_surface,
-    store_pub_fn_coverage,
+    agent_surface, architecture_lints, chaos_contract, ci_container_contract, ci_parity,
+    complexity, dangerous_hooks_contract, docs_catalog, glob_coverage, harness_lints,
+    invariant_bridge, literal_regex_contract, mutation_exclusion_registry, public_surface,
+    scope_exclusion_contract, store_pub_fn_coverage, wallclock,
 };
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeSet;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use syn::spanned::Spanned;
+use syn::visit::Visit;
 
 #[cfg(test)]
 #[path = "structural_tests.rs"]
@@ -38,10 +39,15 @@ pub(crate) fn run() -> Result<()> {
         ))
     })?;
 
+    // GAUNTLET-DOCS-CURRENCY: the 03_INVARIANTS.md catalog block must be a current
+    // view of traceability/invariants.yaml (drift => fail), and every declared
+    // witness_test must resolve to a real test. `check=true` => never rewrite.
+    docs_catalog::run(&repo_root, true)?;
+
     // The structural source lints share one receipt: they all walk the
     // production-Rust surface and each file is the unit of work + the assertion.
     let started = crate::receipts::iso8601_now();
-    let source_files = production_rust_files(&repo_root);
+    let source_files = production_rust_files(&repo_root)?;
     check_no_dead_code_silencers(&repo_root, &mut source_cache)?;
     check_no_placeholder_runtime_macros(&repo_root, &mut source_cache)?;
     check_canonical_encoding_boundary(&repo_root, &mut source_cache)?;
@@ -51,17 +57,66 @@ pub(crate) fn run() -> Result<()> {
     check_rust_file_size_pressure(&repo_root, &mut source_cache)?;
     check_inline_test_island_pressure(&repo_root, &mut source_cache)?;
     check_event_payload_frozen_fixtures(&repo_root, &mut source_cache)?;
+    crate::test_assertions::check(&repo_root, &mut source_cache)?;
+    complexity::check(&repo_root, &mut source_cache)?;
+    wallclock::check(&repo_root, &mut source_cache)?;
+    glob_coverage::check(&repo_root)?;
+    mutation_exclusion_registry::check(&repo_root)?;
+    crate::mutation_debt::check(&repo_root)?;
+    crate::dst_corpus::check(&repo_root)?;
     public_surface::check(&repo_root, &mut source_cache)?;
     store_pub_fn_coverage::check(&repo_root, &mut source_cache)?;
-    // Eight blocking source lints ran over every production file; record the
+    // Twelve blocking source lints ran over every production file; record the
     // real files-examined count and assertions (one structural lint per file).
     crate::receipts::record_pass(
         "structural-source-lints",
-        source_files.iter().cloned().collect(),
+        &source_files.iter().cloned().collect(),
         source_files.len(),
-        source_files.len().saturating_mul(8),
+        source_files.len().saturating_mul(12),
         started,
     )?;
+
+    crate::receipts::run_gate("examples-observable-output", || {
+        let inputs = check_examples_observable_output(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("perf-gates-contract", || {
+        let inputs = crate::perf_gates_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("dangerous-hooks-contract", || {
+        let inputs = dangerous_hooks_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("chaos-linux-only-contract", || {
+        let inputs = chaos_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("literal-regex-contract", || {
+        let inputs = literal_regex_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("canonical-container-ci", || {
+        let inputs = ci_container_contract::check(&repo_root)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("cross-directory-scope-contract", || {
+        let inputs = scope_exclusion_contract::check(&repo_root, &mut source_cache)?;
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
 
     // ci-parity: receipt over the ci.yml + xtask source surface it cross-checks.
     crate::receipts::run_gate("ci-parity", || {
@@ -71,12 +126,43 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(files, files.max(1), inputs))
     })?;
 
+    // triangulation: cross-oracle check of non-type facts (GAUNTLET-TRIANGULATION).
+    // The wired fact is workspace crate-graph acyclicity, cross-checked by two
+    // independent graph derivations; a disagreement OR an agreed cycle fails.
+    crate::receipts::run_gate("triangulation", || {
+        crate::triangulation::check(&repo_root)?;
+        // The declarative rule surface must stay in lockstep with the code roster.
+        crate::fitness_functions::check(&repo_root)?;
+        let mut inputs: BTreeSet<PathBuf> = workspace_manifest_inputs(&repo_root);
+        inputs.insert(repo_root.join("Cargo.toml"));
+        inputs.insert(crate::triangulation::dependency_direction_path(&repo_root));
+        inputs.insert(crate::fitness_functions::fitness_functions_path(&repo_root));
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("overclaim", || crate::overclaim::check(&repo_root))?;
+
+    crate::receipts::run_gate("release-status", || {
+        crate::release_status::check(
+            &repo_root,
+            &crate::release_status::ReleaseCheckOptions::structural(),
+        )
+    })?;
+
+    // repo-ir-fitness (D9): fold the BLOCKING fitnesses over the live repo-IR and
+    // additionally assert every seam glob PARSED from seam_registry.yaml resolves
+    // to a tracked file. A finding fails the run — the IR is a real gate now, not
+    // an advisory skeleton; its seam column is parsed (not mirrored).
+    crate::receipts::run_gate("repo-ir-fitness", || crate::repo_ir::check(&repo_root))?;
+
     // assurance-level-check: receipt over the manifest + the production files it
     // resolves to assurance levels.
     crate::receipts::run_gate("assurance-level-check", || {
         crate::assurance::check(&repo_root)?;
         let manifest = crate::assurance::manifest_path(&repo_root);
-        let mut inputs: BTreeSet<PathBuf> = production_rust_files(&repo_root).into_iter().collect();
+        let mut inputs: BTreeSet<PathBuf> =
+            production_rust_files(&repo_root)?.into_iter().collect();
         inputs.insert(manifest);
         let files = inputs.len();
         Ok(crate::receipts::GateWork::new(files, files, inputs))
@@ -91,7 +177,58 @@ pub(crate) fn run() -> Result<()> {
         Ok(crate::receipts::GateWork::new(1, 1, inputs))
     })?;
 
-    println!("structural-check: ok");
+    // no-runtime-dep-graph (D10): the PRODUCTION dependency graph of every runtime
+    // crate must contain NO async runtime (tokio/async-std/smol/async-executor),
+    // including renamed/optional/target-specific/transitive forms a Cargo.toml grep
+    // misses. The SAME shared scanner is the build.rs early sentinel. Input is the
+    // workspace manifest surface (the resolved graph cargo metadata reads).
+    crate::receipts::run_gate("no-runtime-dep-graph", || {
+        crate::no_runtime_gate::check(&repo_root)?;
+        let inputs = workspace_manifest_inputs(&repo_root);
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    // store-sync-only (D11): the STRUCTURAL (AST) half — no public async Store API,
+    // no impl-Future/boxed-Future return, no #[async_trait], no .await/async block
+    // in production store code — PLUS the dep-graph half (no async executor in the
+    // store's production graph). Replaces the old `async fn` substring grep.
+    crate::receipts::run_gate("store-sync-only", || {
+        crate::store_sync_gate::check(&repo_root, &mut source_cache)?;
+        crate::no_runtime_gate::check_store(&repo_root)?;
+        let inputs: BTreeSet<PathBuf> = crate::store_sync_gate::store_production_files(&repo_root)
+            .into_iter()
+            .collect();
+        let files = inputs.len().max(1);
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    // capability-snapshot (GAUNT-CAPSNAP): the committed capability FLOOR must be
+    // an exact mirror of every backend's `support_matrix()` best-case table + the
+    // witnessed-invariant set. Drift => fail+regenerate; a downgrade diff is
+    // blocked by the meta-gate. Inputs: the snapshot + the four backend tables.
+    crate::receipts::run_gate("capability-snapshot", || {
+        crate::capability_snapshot::check(&repo_root)?;
+        let mut inputs = BTreeSet::new();
+        inputs.insert(repo_root.join(crate::capability_snapshot::SNAPSHOT_REL));
+        for backend in ["linux", "wasm", "windows", "macos"] {
+            inputs.insert(repo_root.join(format!("crates/bvisor/src/backend/{backend}/mod.rs")));
+        }
+        let files = inputs.len();
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    crate::receipts::run_gate("bvisor-platform-matrix", || {
+        crate::platform_qualification_matrix::check(&repo_root)?;
+        let mut inputs = BTreeSet::new();
+        inputs.insert(repo_root.join(crate::platform_qualification_matrix::MATRIX_REL));
+        inputs.insert(repo_root.join("tools/integrity/src/platform_qualification_matrix.rs"));
+        let files = inputs.len();
+        Ok(crate::receipts::GateWork::new(files, files, inputs))
+    })?;
+
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "structural-check: ok");
     Ok(())
 }
 
@@ -116,6 +253,30 @@ fn ci_parity_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
     inputs
 }
 
+/// The member `Cargo.toml` manifests the triangulation crate-graph oracles read
+/// (every workspace member's manifest, plus the root). Used to give the
+/// triangulation receipt a real `files_examined` count + `inputs_hash`.
+fn workspace_manifest_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
+    let mut inputs = BTreeSet::new();
+    for rel in [
+        "crates/core",
+        "crates/syncbat",
+        "crates/netbat",
+        "crates/bvisor",
+        "crates/macros",
+        "crates/macros-support",
+        "crates/bench-support",
+        "tools/integrity",
+        "tools/xtask",
+    ] {
+        let manifest = repo_root.join(rel).join("Cargo.toml");
+        if manifest.exists() {
+            inputs.insert(manifest);
+        }
+    }
+    inputs
+}
+
 /// Absolute, non-overridable production file cap. There is no per-file escape
 /// hatch and no per-file ceiling: a file over this cap must be split, never
 /// bumped ("split, don't bump"); a file under the cap passes regardless of its
@@ -123,7 +284,7 @@ fn ci_parity_inputs(repo_root: &Path) -> BTreeSet<PathBuf> {
 const DEFAULT_LINE_BUDGET: usize = 850;
 
 fn check_rust_file_size_pressure(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    check_rust_file_size_pressure_over(repo_root, &production_rust_files(repo_root), source_cache)
+    check_rust_file_size_pressure_over(repo_root, &production_rust_files(repo_root)?, source_cache)
 }
 
 /// Testable core of [`check_rust_file_size_pressure`]: assert every file in
@@ -161,7 +322,7 @@ fn check_inline_test_island_pressure(
 ) -> Result<()> {
     check_inline_test_island_pressure_over(
         repo_root,
-        &production_rust_files(repo_root),
+        &production_rust_files(repo_root)?,
         source_cache,
     )
 }
@@ -211,116 +372,18 @@ struct FrozenFixtureDebt {
     target: &'static str,
 }
 
-/// Pre-seeded so Phase 1 lands green (warn-first). Every hbat manifest payload
-/// is here; they gain frozen fixtures in Phase 2. batpak core's own typed kinds
-/// already have fixtures under `tests/golden/payloads/`, so they are NOT debted.
-const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[
-    FrozenFixtureDebt {
-        type_name: "SystemHeartbeatRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "SystemHeartbeatAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "BankCommitRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "BankCommitAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventGetRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventGetAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventQueryRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventSummary",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventQueryAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventWalkRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "EventWalkAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ReceiptVerifyRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ReceiptVerifyAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ChainWalkEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ChainWalkEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "StoreResourceEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "StoreResourceEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ReadWalkEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ReadWalkEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ProjectionRunEvidenceRequest",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-    FrozenFixtureDebt {
-        type_name: "ProjectionRunEvidenceAck",
-        reason: "hbat manifest payload predates the frozen-decode fixture regime",
-        target: "freeze a v1 fixture + frozen_decode test in Phase 2",
-    },
-];
+/// `BoundaryStartedEvent` (0xE/0x001) is intentionally fixture-less while its
+/// payload is PROVISIONAL: it embeds the full `BoundaryPlan`, whose budget surface
+/// is being widened to the seven-dimensional model. Its provisional golden was
+/// deleted (not version-bumped) and is regenerated once the final admission surface
+/// is integrated — see `crates/bvisor/tests/frozen_goldens.rs` (`PAYLOAD_MANIFEST`).
+/// The anti-rot check below forces this entry's removal once `e_001__v1.hex` is
+/// re-frozen. The other 0xE payloads keep their v1 goldens.
+const FROZEN_FIXTURE_DEBT: &[FrozenFixtureDebt] = &[FrozenFixtureDebt {
+    type_name: "BoundaryStartedEvent",
+    reason: "provisional: embeds BoundaryPlan whose 7-dimensional budget surface is mid-widening",
+    target: "regenerate e_001__v1.hex after the final admission surface + plan identity land",
+}];
 
 /// Warn-first frozen-fixture lint (`ART-EVENT-PAYLOAD-FROZEN-GOLDENS`).
 ///
@@ -339,7 +402,7 @@ fn check_event_payload_frozen_fixtures(
     let payloads_dir = core_tests_root(repo_root).join("golden").join("payloads");
 
     let mut discovered: Vec<(String, Option<(u8, u16)>)> = Vec::new();
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         let file = source_cache
             .parse_rust(&path)
@@ -373,7 +436,7 @@ fn check_event_payload_frozen_fixtures(
         warnings.push(format!(
             "structural-check (warn): EventPayload type `{name}` has no frozen payload fixture under \
              {} and is not in FROZEN_FIXTURE_DEBT. Freeze a v1 fixture + a frozen_decode test \
-             (see EVENTS.md -> Schema Evolution), or add a debt entry. \
+             (see 06_EVENTS.md -> Schema Evolution), or add a debt entry. \
              [ART-EVENT-PAYLOAD-FROZEN-GOLDENS; warn-first this minor]",
             relative(repo_root, &payloads_dir)
         ));
@@ -397,8 +460,9 @@ fn check_event_payload_frozen_fixtures(
         }
     }
 
+    let mut out = std::io::stdout().lock();
     for warning in &warnings {
-        println!("{warning}");
+        let _ = writeln!(out, "{warning}");
     }
     Ok(())
 }
@@ -482,9 +546,12 @@ fn parse_batpak_kind(attrs: &[syn::Attribute]) -> Option<(u8, u16)> {
         Ok(())
     })
     .ok()?;
-    // justifies: crates/macros/src/event_payload.rs already validates category fits 4 bits and type_id fits 12 bits, so these casts mirror that bounded narrowing.
-    #[allow(clippy::cast_possible_truncation)]
-    Some((category? as u8, type_id? as u16))
+    // crates/macros/src/event_payload.rs already validates category fits 4 bits
+    // and type_id fits 12 bits; try_from mirrors that bounded narrowing and
+    // drops the value (None) if a malformed attribute somehow exceeds it.
+    let category = u8::try_from(category?).ok()?;
+    let type_id = u16::try_from(type_id?).ok()?;
+    Some((category, type_id))
 }
 
 /// A fixture for `(category, type_id)` exists when any `<cat>_<type_id>__v*.hex`
@@ -509,7 +576,7 @@ fn check_no_placeholder_runtime_macros(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.push(repo_root.join("crates/core/build.rs"));
@@ -544,7 +611,7 @@ fn check_no_placeholder_runtime_macros(
 }
 
 fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
@@ -552,6 +619,87 @@ fn check_no_dead_code_silencers(repo_root: &Path, source_cache: &mut SourceCache
     paths.extend(rust_files(&core_benches_root(repo_root)));
     paths.push(repo_root.join("crates/core/build.rs"));
     check_no_dead_code_silencers_over(repo_root, &paths, source_cache)
+}
+
+fn check_examples_observable_output(
+    repo_root: &Path,
+    source_cache: &mut SourceCache,
+) -> Result<BTreeSet<PathBuf>> {
+    let paths = rust_files(&core_examples_root(repo_root));
+    let inputs = paths.iter().cloned().collect::<BTreeSet<_>>();
+    check_examples_observable_output_over(repo_root, &paths, source_cache)?;
+    Ok(inputs)
+}
+
+/// Testable core for INV-EXAMPLES-OBSERVABLE-OUTPUT. Examples must use the
+/// explicit `Write` API (`writeln!(stdout().lock(), ..)` or an equivalent locked
+/// handle), not `print!`/`println!`, so observable output remains visible to
+/// static review and cannot be hidden behind the formatting macros' global lock.
+fn check_examples_observable_output_over(
+    repo_root: &Path,
+    paths: &[PathBuf],
+    source_cache: &mut SourceCache,
+) -> Result<()> {
+    for path in paths {
+        let rel = relative(repo_root, path);
+        let file = source_cache
+            .parse_rust(path)
+            .map_err(|err| anyhow!("parse example output gate target {rel}: {err}"))?;
+        let offenders = collect_print_macro_sites(&file);
+        if let Some(offender) = offenders.first() {
+            bail!(
+                "structural-check (INV-EXAMPLES-OBSERVABLE-OUTPUT): `{}` macro in {}:{}.\n\
+                 Examples must emit observable output through the explicit Write API, e.g. \
+                 `let mut out = std::io::stdout().lock(); let _ = writeln!(out, ...)`.",
+                offender.macro_name,
+                rel,
+                offender.line,
+            );
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct PrintMacroSite {
+    line: usize,
+    macro_name: &'static str,
+}
+
+fn collect_print_macro_sites(file: &syn::File) -> Vec<PrintMacroSite> {
+    let mut visitor = PrintMacroVisitor::default();
+    visitor.visit_file(file);
+    visitor.sites.sort_by_key(|site| site.line);
+    visitor.sites
+}
+
+#[derive(Default)]
+struct PrintMacroVisitor {
+    sites: Vec<PrintMacroSite>,
+}
+
+impl<'ast> Visit<'ast> for PrintMacroVisitor {
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        if macro_ends_with(&node.path, "println") {
+            self.sites.push(PrintMacroSite {
+                line: node.span().start().line,
+                macro_name: "println!",
+            });
+        }
+        if macro_ends_with(&node.path, "print") {
+            self.sites.push(PrintMacroSite {
+                line: node.span().start().line,
+                macro_name: "print!",
+            });
+        }
+        syn::visit::visit_macro(self, node);
+    }
+}
+
+fn macro_ends_with(path: &syn::Path, ident: &str) -> bool {
+    path.segments
+        .last()
+        .is_some_and(|segment| segment.ident == ident)
 }
 
 /// Testable core of [`check_no_dead_code_silencers`]: scan `paths` for
@@ -573,16 +721,15 @@ fn check_no_dead_code_silencers_over(
                 continue;
             }
             bail!(
-                "dead_code silencers are not tolerated in {}:{}:{}.\n\
-                 Found `{}`.\n\
+                "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                 Found `{}` in {}:{}:{}.\n\
+                 The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.\n\
                  If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
-                 If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
-                 If this is the rare legitimate exception, add `{}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
+                 If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.",
+                site.rendered,
                 relative(repo_root, path),
                 site.line,
                 site.column,
-                site.rendered,
-                allowlist_site,
             );
         }
     }
@@ -590,7 +737,7 @@ fn check_no_dead_code_silencers_over(
 }
 
 fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
-    let mut paths = production_rust_files(repo_root);
+    let mut paths = production_rust_files(repo_root)?;
     paths.extend(rust_files(&repo_root.join("tools/xtask/src")));
     paths.extend(rust_files(&repo_root.join("tools/integrity/src")));
     paths.extend(rust_files(&core_tests_root(repo_root)));
@@ -600,62 +747,35 @@ fn check_allow_justifications(repo_root: &Path, source_cache: &mut SourceCache) 
     check_allow_justifications_over(repo_root, &paths, source_cache)
 }
 
-/// Testable core of [`check_allow_justifications`]: assert every lint-suppression
-/// attribute in `paths` carries a resolvable `// justifies:` anchor. Split out so
-/// a RED fixture can run the gate over a planted temp tree.
+/// Testable core of [`check_allow_justifications`]: under the zero-allow
+/// doctrine (INV-ALLOW-IS-DESIGN) there are no allows to justify. This is now a
+/// HARD BAN — any `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attribute in
+/// `paths` (including cfg_attr-wrapped) fails. It routes through the same
+/// AST-based detector as the dead-code gate, so raw-string fixtures are
+/// correctly excluded and multi-line attributes are caught. The gate name and
+/// signature are kept stable for build.rs `run_surface_lint` and the RED
+/// fixtures. Split out so a RED fixture can run the gate over a planted temp tree.
 fn check_allow_justifications_over(
     repo_root: &Path,
     paths: &[PathBuf],
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    let known_invariants = load_known_invariants(repo_root).map_err(|err| anyhow!(err))?;
     for path in paths {
         let content = source_cache.read_to_string(path)?;
-        let lines: Vec<&str> = content.lines().collect();
-        let mut index = 0;
-        while index < lines.len() {
-            let start_index = index;
-            let line = lines[index];
-            let trimmed = line.trim();
-            let mut attr_text = trimmed.to_owned();
-            let starts_suppression_attr = trimmed.starts_with("#![allow(")
-                || trimmed.starts_with("#[allow(")
-                || trimmed.starts_with("#![expect(")
-                || trimmed.starts_with("#[expect(")
-                || trimmed.starts_with("#![cfg_attr(")
-                || trimmed.starts_with("#[cfg_attr(");
-            if starts_suppression_attr {
-                while attr_text.contains("cfg_attr(")
-                    && !attr_text.contains(']')
-                    && index + 1 < lines.len()
-                {
-                    index += 1;
-                    attr_text.push('\n');
-                    attr_text.push_str(lines[index].trim());
-                }
-            }
-            if starts_suppression_attr
-                && (attr_text.contains("allow(") || attr_text.contains("expect("))
-            {
-                let justified = line_carries_justification(line, repo_root, &known_invariants)
-                    || start_index
-                        .checked_sub(1)
-                        .and_then(|prev| lines.get(prev))
-                        .map(|prev| line_carries_justification(prev, repo_root, &known_invariants))
-                        .unwrap_or(false);
-                ensure(
-                    justified,
-                    format!(
-                        "unjustified lint suppression in {}:{} — every #[allow(...)], #[expect(...)], or cfg_attr-wrapped allow/expect must carry a `// justifies: <>=5 words + >=1 resolvable anchor>` comment. \
-                         An anchor is an INV-id from traceability/invariants.yaml, an ADR-NNNN whose file exists as a root ADR file, \
-                         or a concrete repo path (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/..., benches/..., tools/..., build.rs). \
-                        See INV-ALLOW-IS-DESIGN.",
-                        relative(repo_root, path),
-                        start_index + 1
-                    ),
-                )?;
-            }
-            index += 1;
+        let sites = collect_dead_code_silencer_sites(&content)
+            .map_err(|err| anyhow!("parse {}: {}", relative(repo_root, path), err))?;
+        if let Some(site) = sites.into_iter().next() {
+            ensure(
+                false,
+                format!(
+                    "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV. \
+                     Found `{}` in {}:{}:{}. The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.",
+                    site.rendered,
+                    relative(repo_root, path),
+                    site.line,
+                    site.column,
+                ),
+            )?;
         }
     }
     Ok(())
@@ -665,7 +785,7 @@ fn check_canonical_encoding_boundary(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if rel == "crates/core/src/encoding.rs" {
             continue;
@@ -692,7 +812,7 @@ fn check_no_store_read_dir_entry_error_swallowing(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if !rel.starts_with("crates/core/src/store/") {
             continue;
@@ -716,7 +836,7 @@ fn check_store_segment_classification_boundary(
     repo_root: &Path,
     source_cache: &mut SourceCache,
 ) -> Result<()> {
-    for path in production_rust_files(repo_root) {
+    for path in production_rust_files(repo_root)? {
         let rel = relative(repo_root, &path);
         if !rel.starts_with("crates/core/src/store/")
             || rel == "crates/core/src/store/file_classification.rs"
@@ -832,12 +952,18 @@ fn nonblank_line_count_in_range(lines: &[&str], start_line: usize, end_line: usi
         .count()
 }
 
-fn production_rust_files(repo_root: &Path) -> Vec<PathBuf> {
-    let mut paths = rust_files(&core_src_root(repo_root));
-    for root in production_rust_roots(repo_root) {
+pub(crate) fn production_rust_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = BTreeSet::new();
+    for root in production_rust_roots(repo_root)? {
         paths.extend(rust_files(&root));
     }
-    paths
+    Ok(paths.into_iter().collect())
+}
+
+/// True when `attrs` carries `#[cfg(test)]`. Shared with the complexity gate so
+/// both detectors skip the same test-only module surface.
+pub(crate) fn module_is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+    is_cfg_test(attrs)
 }
 
 #[cfg(test)]

@@ -650,13 +650,6 @@ mod tests {
     // These unit tests prove the window-priority eviction rule directly on
     // synthetic entries — the correctness-critical "cake-and-eat-it" property
     // in isolation from the store machinery.
-    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW; eviction-rule unit tests use unwrap on infallible setup
-    #![allow(clippy::unwrap_used)]
-    // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW; synthetic loop indices are tiny u128 keys cast to u64 sequences, truncation impossible at these magnitudes
-    #![allow(clippy::cast_possible_truncation)]
-    // justifies: INV-TEST-PANIC-AS-ASSERTION; admission unit tests assert via panic on the must-not-happen Ok branch
-    #![allow(clippy::panic)]
-
     use super::*;
 
     fn entry(key: u128, recorded_global_sequence: u64) -> IdempEntry {
@@ -691,7 +684,8 @@ mod tests {
             OverflowPolicy::Warn,
         );
         for i in 0..10u128 {
-            store.record(entry(i, 90 + i as u64));
+            let seq = u64::try_from(i).expect("loop index 0..10 fits u64");
+            store.record(entry(i, 90 + seq));
         }
         let report = store.evict(100);
         assert!(report.within_window_exceeds_cap, "residual pigeonhole");
@@ -710,10 +704,16 @@ mod tests {
         // Old keys at sequences 0..5, recent keys at 95..100; frontier 100, so
         // window floor is 90. Old keys age out; recent keys remain.
         for i in 0..5u128 {
-            store.record(entry(i, i as u64));
+            store.record(entry(
+                i,
+                u64::try_from(i).expect("loop index 0..5 fits u64"),
+            ));
         }
         for i in 95..100u128 {
-            store.record(entry(i, i as u64));
+            store.record(entry(
+                i,
+                u64::try_from(i).expect("loop index 95..100 fits u64"),
+            ));
         }
         let report = store.evict(100);
         assert_eq!(report.aged_out, 5, "five out-of-window keys aged out");
@@ -728,7 +728,10 @@ mod tests {
     fn unbounded_never_evicts() {
         let store = IdempotencyStore::new(IdempotencyRetention::Unbounded, OverflowPolicy::Warn);
         for i in 0..50u128 {
-            store.record(entry(i, i as u64));
+            store.record(entry(
+                i,
+                u64::try_from(i).expect("loop index 0..50 fits u64"),
+            ));
         }
         let report = store.evict(1_000_000);
         assert_eq!(report.aged_out, 0);
@@ -779,10 +782,9 @@ mod tests {
         // (1) Duplicate new keys within one batch are rejected (they would
         // otherwise derive duplicate event ids).
         let dup_store = fail_closed(1000, 1000);
-        let dup_err = match dup_store.admit_new_keys([7u128, 7u128].into_iter(), 0) {
-            Ok(()) => panic!("PROPERTY: two identical new keys in a batch must be rejected"),
-            Err(e) => e,
-        };
+        let dup_err = dup_store
+            .admit_new_keys([7u128, 7u128].into_iter(), 0)
+            .expect_err("PROPERTY: two identical new keys in a batch must be rejected");
         assert!(
             matches!(dup_err, StoreError::IdempotencyPartialBatch { .. }),
             "duplicate new key must surface IdempotencyPartialBatch, got {dup_err:?}"
@@ -794,10 +796,9 @@ mod tests {
         let store = fail_closed(1000, 3);
         store.record(entry(1, 1));
         store.record(entry(2, 2));
-        let err = match store.admit_new_keys([10u128, 11u128].into_iter(), 2) {
-            Ok(()) => panic!("PROPERTY: a unique-new batch exceeding the cap must be rejected"),
-            Err(e) => e,
-        };
+        let err = store
+            .admit_new_keys([10u128, 11u128].into_iter(), 2)
+            .expect_err("PROPERTY: a unique-new batch exceeding the cap must be rejected");
         assert!(
             matches!(err, StoreError::IdempotencyOverflowFailClosed { .. }),
             "over-cap unique batch must surface IdempotencyOverflowFailClosed, got {err:?}"
@@ -821,11 +822,11 @@ mod tests {
         // Event 1 stays live; event 2's frame was dropped.
         store.mark_evicted(|event_id| event_id == 1);
 
-        let one = store.get(1).unwrap();
+        let one = store.get(1).expect("event 1 was recorded and is live");
         assert!(!one.is_event_evicted() && !one.event_evicted);
         assert_eq!(one.disk_pos_segment, 7);
 
-        let two = store.get(2).unwrap();
+        let two = store.get(2).expect("event 2 was recorded");
         assert!(two.is_event_evicted() && two.event_evicted);
         // disk_pos is UNCHANGED after eviction: the reconstructed receipt must
         // carry the ORIGINAL frame position. The rest of the tuple is preserved.
@@ -836,12 +837,14 @@ mod tests {
 
     #[test]
     fn flush_then_read_roundtrips() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("create temp dir");
         let store = IdempotencyStore::new(IdempotencyRetention::default(), OverflowPolicy::Warn);
         store.record(entry(7, 7));
         store.record(entry(8, 8));
-        store.flush(dir.path()).unwrap();
-        let loaded = read_idemp_file(dir.path()).unwrap();
+        store
+            .flush(dir.path())
+            .expect("flush idempotency store to disk");
+        let loaded = read_idemp_file(dir.path()).expect("read back the flushed idempotency file");
         assert!(matches!(&loaded, IdempLoad::Loaded(e) if e.len() == 2));
     }
 

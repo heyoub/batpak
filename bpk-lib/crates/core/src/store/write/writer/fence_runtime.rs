@@ -1,7 +1,7 @@
 use super::super::fanout::CommittedEventEnvelope;
 use super::{
     ignore_closed_response_channel, AppendGuards, AppendReceipt, BatchAppendItem, Coordinate,
-    Event, EventKind, Notification, StoreError, WriterState,
+    Event, EventKind, Notification, StoreError, WriterCore,
 };
 use crate::store::stats::HlcPoint;
 use flume::Sender;
@@ -117,7 +117,7 @@ pub(super) enum DeferredReply {
 impl DeferredReply {
     pub(super) fn send(
         self,
-        state: &mut WriterState<'_>,
+        state: &mut WriterCore,
         sync_result: Result<(), StoreError>,
     ) -> Result<(), StoreError> {
         match self {
@@ -204,7 +204,7 @@ impl CommandResult {
     }
 }
 
-impl WriterState<'_> {
+impl WriterCore {
     pub(super) fn auto_cancel_fence_on_shutdown(&mut self) {
         if let Some(fence) = self.fence_ledger.take() {
             tracing::warn!(

@@ -1,22 +1,13 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store pipeline and reactive-flow integration tests.
 
 use batpak::event::Reactive;
-mod support;
+use batpak::id::EntityIdType;
 use batpak::store::{Store, StoreConfig, StoreError};
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -57,9 +48,7 @@ fn pipeline_commit_bypass_persists() {
         .expect("commit_bypass should retain bypass audit");
 
     // Verify persisted
-    let stored = store
-        .get(batpak::id::EventId::from(committed_event_id))
-        .expect("get");
+    let stored = store.get(committed_event_id).expect("get");
     assert_eq!(
         stored.event.event_kind(),
         kind,
@@ -108,13 +97,15 @@ fn react_loop_spawns_and_processes() {
     let store = Arc::new(Store::open(config).expect("open store"));
 
     let region = Region::entity("entity:trigger");
-    let _handle = store
+    // The opaque handle type is part of the sealed public surface; bind it by
+    // name so this surface is witnessed.
+    let _handle: batpak::store::ReactLoopHandle = store
         .react_loop(&region, TestReactor)
         .expect("spawn reactor");
 
     // Append a trigger event
     let coord = Coordinate::new("entity:trigger", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append(
             &coord,
             EventKind::custom(0xA, 1),
@@ -129,13 +120,12 @@ fn react_loop_spawns_and_processes() {
         if !r.is_empty() {
             break r;
         }
-        if std::time::Instant::now() >= deadline {
-            panic!(
-                "PROPERTY: react_loop must produce reaction events when the reactor emits them. \
-                 Got nothing after 5s deadline. \
-                 Investigate: src/store/mod.rs react_loop, src/event/sourcing.rs Reactive."
-            );
-        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "PROPERTY: react_loop must produce reaction events when the reactor emits them. \
+             Got nothing after 5s deadline. \
+             Investigate: src/store/mod.rs react_loop, src/event/sourcing.rs Reactive."
+        );
         std::thread::yield_now();
     };
     assert_eq!(
@@ -147,6 +137,43 @@ fn react_loop_spawns_and_processes() {
     );
 
     store.sync().expect("sync");
+}
+
+#[test]
+fn react_loop_handle_is_opaque_and_detaches_on_drop() {
+    use batpak::event::sourcing::Reactive;
+    use batpak::store::ReactLoopHandle;
+
+    struct NoopReactor;
+    impl Reactive<serde_json::Value> for NoopReactor {
+        fn react(
+            &self,
+            _event: &batpak::prelude::Event<serde_json::Value>,
+        ) -> Vec<(Coordinate, EventKind, serde_json::Value)> {
+            vec![]
+        }
+    }
+
+    let dir = TempDir::new().expect("create temp dir");
+    let config = StoreConfig::new(dir.path()).with_sync_every_n_events(1);
+    let store = Arc::new(Store::open(config).expect("open store"));
+
+    let region = Region::entity("entity:trigger");
+    let handle: ReactLoopHandle = store
+        .react_loop(&region, NoopReactor)
+        .expect("spawn reactor");
+
+    // The handle is opaque: its only observable surface is Debug. It does NOT
+    // expose the concrete background-thread type, and it carries no join() —
+    // the legacy reactor is fire-and-detach (the worker holds its own store
+    // Arc, so it cannot be joined to completion). Dropping the handle detaches
+    // the loop without panicking; the store teardown at scope end reaps it.
+    let rendered = format!("{handle:?}");
+    assert!(
+        rendered.starts_with("ReactLoopHandle"),
+        "PROPERTY: ReactLoopHandle Debug must not leak the inner thread handle type; got {rendered}"
+    );
+    drop(handle); // detach — must not panic or block
 }
 // ================================================================
 // Reactive pattern
@@ -209,7 +236,7 @@ fn reactive_subscribe_react_append_pattern() {
     let reactor = OrderReactor;
     // Build a minimal event for the reactor (it only needs kind + event_id)
     let header = EventHeader::new(
-        notif.event_id,
+        notif.event_id.as_u128(),
         notif.correlation_id,
         notif.causation_id,
         0,
@@ -232,7 +259,7 @@ fn reactive_subscribe_react_append_pattern() {
 
     // Append reactions via append_reaction (the causal link)
     for (react_coord, react_kind, react_payload) in reactions {
-        store
+        let _ = store
             .append_reaction(
                 &react_coord,
                 react_kind,

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; wait API tests use panic! through assert macros and explicit error extraction to pin blocking invariants.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-WAIT-MONOTONIC. `Store::wait_for_durable`,
 //! `Store::wait_for_applied`, and `Store::wait_for_visible` return only after
@@ -12,8 +10,7 @@
 //! background threads; the R3 writer-crash case seeds a terminal restart policy
 //! so the panic is non-transient.
 
-#[path = "support/durable_frontier_waits.rs"]
-mod dfw_support;
+use batpak_testkit::durable_frontier_waits as dfw_support;
 
 use batpak::prelude::Region;
 use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError, WatermarkKind};
@@ -27,7 +24,7 @@ use tempfile::TempDir;
 /// in this binary because only the wait surfaces exercise it (the append-gate
 /// family appends through the gated `append_with_options`/batch paths).
 fn append_number(store: &Store, entity: &str, n: u32) -> HlcPoint {
-    store
+    let _ = store
         .append(&coord(entity), kind(), &serde_json::json!({ "n": n }))
         .expect("append wait event");
     let entries = store.query(&Region::entity(entity));
@@ -59,10 +56,8 @@ fn open_store_terminal_on_panic(sync_every_n_events: u32) -> (TempDir, Store) {
 
 /// Wait-family helper: assert a wait result is the expected `WaitTimeout`.
 fn assert_wait_timeout(result: Result<(), StoreError>, watermark: WatermarkKind, target: HlcPoint) {
-    let err = match result {
-        Ok(()) => panic!("PROPERTY: wait must not succeed before target reaches {watermark:?}"),
-        Err(err) => err,
-    };
+    let err =
+        result.expect_err("PROPERTY: wait must not succeed before target reaches the watermark");
     assert!(
         matches!(
             err,

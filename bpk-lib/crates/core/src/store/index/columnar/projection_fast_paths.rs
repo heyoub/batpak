@@ -7,9 +7,7 @@ impl ColumnarIndex {
     pub(crate) fn entity_generation(&self, entity: &str) -> Option<u64> {
         match &self.inner {
             ColumnarVariant::SoAoS(lock) => lock.read().entity_generation(entity),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -22,9 +20,7 @@ impl ColumnarIndex {
     ) -> Option<CachedProjectionSlot> {
         match &self.inner {
             ColumnarVariant::SoAoS(lock) => lock.read().cached_projection(entity, type_id),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -45,9 +41,9 @@ impl ColumnarIndex {
                 true => ProjectionCacheStoreStatus::Stored,
                 false => ProjectionCacheStoreStatus::MissingEntity,
             },
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => ProjectionCacheStoreStatus::UnsupportedTopology,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => {
+                ProjectionCacheStoreStatus::UnsupportedTopology
+            }
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => {
                 ProjectionCacheStoreStatus::UnsupportedTopology
@@ -64,9 +60,7 @@ impl ColumnarIndex {
             ColumnarVariant::SoAoS(lock) => {
                 lock.read().projection_candidates(entity, relevant_kinds)
             }
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }

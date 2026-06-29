@@ -1,5 +1,3 @@
-// justifies: pins NativeCache backend mechanics, anchors INV-CACHE-CAPABILITIES-EXPLICIT in src/store/projection/mod.rs
-#![allow(clippy::too_many_lines)]
 //! Direct ProjectionCache backend MECHANICS: the NoCache no-op contract and the
 //! built-in file-backed NativeCache (get/put round-trips, prefix deletes,
 //! reopen persistence, and the Store + NativeCache projection round-trip).
@@ -16,8 +14,7 @@
 //! INVARIANTS: INV-CACHE-CAPABILITIES-EXPLICIT (cache round-trip fidelity),
 //!   INV-NATIVE-DELETE-IDEMPOTENT (native cache deletion).
 
-#[path = "support/projection_cache.rs"]
-mod pc_support;
+use batpak_testkit::projection_cache as pc_support;
 
 use batpak::store::projection::{CacheMeta, NoCache, ProjectionCache};
 use pc_support::*;
@@ -299,10 +296,10 @@ mod native_tests {
 
         let coord = Coordinate::new("entity:native1", "scope:test").expect("coord");
         let kind = EventKind::custom(0xF, 1);
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
 
@@ -323,7 +320,7 @@ mod native_tests {
         assert_eq!(result2, Some(MaybeStaleCounter { count: 2 }));
 
         // Append more → cache should be stale → re-replay
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
         let result3: Option<MaybeStaleCounter> = store
@@ -351,10 +348,10 @@ mod native_tests {
         {
             let store =
                 Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"x": 1}))
                 .expect("append 1");
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"x": 2}))
                 .expect("append 2");
             let _: Option<MaybeStaleCounter> = store

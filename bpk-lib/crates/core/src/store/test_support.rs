@@ -10,9 +10,8 @@ impl Store {
     /// Test-only: trigger a panic in the writer thread to exercise restart_policy.
     pub fn panic_writer_for_test(&self) -> Result<(), StoreError> {
         let (tx, rx) = flume::bounded(1);
-        self.writer
-            .as_ref()
-            .ok_or(StoreError::WriterCrashed)?
+        self.state
+            .0
             .tx
             .send(WriterCommand::PanicForTest { respond: tx })
             .map_err(|_| StoreError::WriterCrashed)?;

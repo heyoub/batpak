@@ -8,7 +8,7 @@ callsite.
 Correct API: `#[derive(EventPayload)]`, `Coordinate`, `Store::append_typed`.
 
 Minimal code is mirrored by `bpk-lib/templates/minimal-store` and
-`bpk-lib/crates/core/examples/quickstart.rs`.
+`bpk-lib/crates/batpak-examples/src/bin/quickstart.rs`.
 
 Wrong tempting move: `serde_json::Value` plus a hand-picked `EventKind` for a
 payload whose type is known at compile time.

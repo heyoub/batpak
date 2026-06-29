@@ -1,17 +1,17 @@
 use anyhow::{anyhow, Context, Result};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 enum ParsedRust {
-    Ok(Arc<syn::File>),
+    Ok(Rc<syn::File>),
     Err(String),
 }
 
 /// One cached Rust source file keyed by repo-relative path.
 pub(crate) struct CachedSource {
-    pub(crate) relative_path: PathBuf,
     pub(crate) text: Arc<str>,
     parsed_rust: Option<ParsedRust>,
 }
@@ -46,7 +46,6 @@ impl SourceCache {
             self.files.insert(
                 key.clone(),
                 CachedSource {
-                    relative_path: key.clone(),
                     text,
                     parsed_rust: None,
                 },
@@ -57,51 +56,17 @@ impl SourceCache {
             .ok_or_else(|| anyhow!("source cache failed to retain {}", display_relative(&key)))
     }
 
-    /// Walk a repo-relative directory, preload every `.rs` file, and return
-    /// their normalized paths in deterministic sorted order.
-    pub(crate) fn rust_files_under(
-        &mut self,
-        relative_dir: impl AsRef<Path>,
-    ) -> Result<Vec<PathBuf>> {
-        let dir = self.root.join(relative_dir.as_ref());
-        if !dir.is_dir() {
-            return Ok(Vec::new());
-        }
-
-        let mut relative_paths = BTreeSet::new();
-        for entry in walkdir::WalkDir::new(&dir)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| entry.file_type().is_file())
-        {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
-                continue;
-            }
-            let relative = path
-                .strip_prefix(&self.root)
-                .with_context(|| format!("strip repo root from {}", path.display()))?;
-            relative_paths.insert(normalize_relative_path(relative));
-        }
-
-        let paths: Vec<PathBuf> = relative_paths.into_iter().collect();
-        for relative in &paths {
-            self.rust_file(relative)?;
-        }
-        Ok(paths)
-    }
-
     pub(crate) fn read_to_string(&mut self, path: &Path) -> Result<Arc<str>> {
         let relative = self.relative_key(path)?;
         Ok(Arc::clone(&self.rust_file(&relative)?.text))
     }
 
-    pub(crate) fn parse_rust(&mut self, path: &Path) -> Result<Arc<syn::File>> {
+    pub(crate) fn parse_rust(&mut self, path: &Path) -> Result<Rc<syn::File>> {
         let relative = self.relative_key(path)?;
         self.parse_rust_relative(&relative)
     }
 
-    pub(crate) fn parse_rust_if_valid(&mut self, path: &Path) -> Result<Option<Arc<syn::File>>> {
+    pub(crate) fn parse_rust_if_valid(&mut self, path: &Path) -> Result<Option<Rc<syn::File>>> {
         let relative = self.relative_key(path)?;
         Ok(match self.parse_rust_relative_result(&relative)? {
             ParsedRust::Ok(file) => Some(file),
@@ -109,7 +74,7 @@ impl SourceCache {
         })
     }
 
-    fn parse_rust_relative(&mut self, relative: &Path) -> Result<Arc<syn::File>> {
+    fn parse_rust_relative(&mut self, relative: &Path) -> Result<Rc<syn::File>> {
         match self.parse_rust_relative_result(relative)? {
             ParsedRust::Ok(file) => Ok(file),
             ParsedRust::Err(error) => Err(anyhow!(
@@ -128,12 +93,12 @@ impl SourceCache {
             .ok_or_else(|| anyhow!("source cache failed to retain {}", display_relative(&key)))?;
         if cached.parsed_rust.is_none() {
             cached.parsed_rust = Some(match syn::parse_file(&cached.text) {
-                Ok(file) => ParsedRust::Ok(Arc::new(file)),
+                Ok(file) => ParsedRust::Ok(Rc::new(file)),
                 Err(error) => ParsedRust::Err(error.to_string()),
             });
         }
         match cached.parsed_rust.as_ref() {
-            Some(ParsedRust::Ok(file)) => Ok(ParsedRust::Ok(Arc::clone(file))),
+            Some(ParsedRust::Ok(file)) => Ok(ParsedRust::Ok(Rc::clone(file))),
             Some(ParsedRust::Err(error)) => Ok(ParsedRust::Err(error.clone())),
             None => Err(anyhow!(
                 "source cache failed to retain parse result {}",
@@ -186,6 +151,7 @@ fn display_relative(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
     use std::sync::Arc;
 
     fn write_temp_rust(dir: &Path, relative: &str, contents: &str) {
@@ -213,27 +179,7 @@ mod tests {
 
         let parsed_a = cache.parse_rust(&root.join("a.rs")).expect("parse a");
         let parsed_b = cache.parse_rust(&root.join("a.rs")).expect("parse b");
-        assert!(Arc::ptr_eq(&parsed_a, &parsed_b));
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn rust_files_under_is_sorted() {
-        let root = std::env::temp_dir().join(format!(
-            "batpak-integrity-source-cache-walk-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).expect("create temp root");
-        write_temp_rust(&root, "src/z.rs", "fn z() {}\n");
-        write_temp_rust(&root, "src/nested/a.rs", "fn a() {}\n");
-        write_temp_rust(&root, "src/m.rs", "fn m() {}\n");
-
-        let mut cache = SourceCache::new(&root);
-        let paths = cache.rust_files_under("src").expect("walk src");
-        let displayed: Vec<_> = paths.iter().map(|path| display_relative(path)).collect();
-        assert_eq!(displayed, vec!["src/m.rs", "src/nested/a.rs", "src/z.rs"]);
+        assert!(Rc::ptr_eq(&parsed_a, &parsed_b));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -278,13 +224,6 @@ mod tests {
         let parsed = cache.parse_rust(&absolute).expect("parse absolute path");
         assert_eq!(parsed.items.len(), 1);
 
-        let cached = cache
-            .rust_file("tools/integrity/src/lib.rs")
-            .expect("repo-relative cache key");
-        assert_eq!(
-            display_relative(&cached.relative_path),
-            "tools/integrity/src/lib.rs"
-        );
         assert!(!cache
             .files
             .contains_key(Path::new("bpk-lib/tools/integrity/src/lib.rs")));

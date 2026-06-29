@@ -61,20 +61,35 @@
 #[doc(hidden)]
 pub extern crate self as syncbat;
 
+pub mod admission;
 pub mod builder;
 pub mod core;
+pub mod effect;
+pub mod effect_backend;
 pub mod error;
 pub mod handler;
 pub mod module;
 pub mod operation;
 pub mod operation_name;
+pub mod operation_status;
+pub mod operation_status_sink;
 pub mod receipt;
 pub mod register;
 pub mod register_store;
+pub mod store_effect;
 pub mod store_sink;
+pub mod subscription_runtime;
 
+pub use admission::{AdmissionDecision, AdmissionGuard};
+pub use batpak_macros::operation;
 pub use builder::CoreBuilder;
-pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, Ctx};
+pub use core::{Checkout, CheckoutFrame, CheckoutResult, Core, CoreFactory, Ctx};
+pub use effect::{
+    append_target, EffectIdentity, EffectIdentityError, EventAppendHandle, EventReadHandle,
+    HostControlHandle, ObservedEffectViolation, OperationEffectRow, ProjectionReadHandle,
+    ReceiptEmitHandle,
+};
+pub use effect_backend::{EffectBackend, EffectError};
 pub use error::{BuildError, ReceiptSinkHandlerCause, RuntimeError};
 pub use handler::{Handler, HandlerError, HandlerResult};
 pub use module::Module;
@@ -83,9 +98,17 @@ pub use operation::{
     OperationRegisterItem, MAX_DESCRIPTOR_REF_BYTES, MAX_OPERATION_NAME_BYTES,
 };
 pub use operation_name::{OperationName, OperationNameError};
+pub use operation_status::{
+    OperationStatusFactV1, OperationStatusLifecycle, OperationStatusView,
+    SYNCBAT_OPERATION_STATUS_EVENT_KIND,
+};
+pub use operation_status_sink::{
+    operation_status_entity, OperationStatusSink, OperationStatusSinkError,
+    StoreOperationStatusSink,
+};
 pub use receipt::{
     BatpakReceiptFields, ReceiptEnvelope, ReceiptExtensionDrawer, ReceiptHash, ReceiptHashPolicy,
-    ReceiptHasher, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,
+    ReceiptHasher, ReceiptMetadata, ReceiptOutcome, ReceiptSink, ReceiptSinkError, RecordedReceipt,
     SYNCBAT_RECEIPT_EVENT_KIND,
 };
 pub use register::{CacheRegister, Register, RegisterValidationError};
@@ -93,8 +116,25 @@ pub use register_store::{
     rebuild_register_from_store, RegisterOperationActionV1, RegisterOperationRowV1,
     StoreRegisterCatalog, StoreRegisterCatalogError, SYNCBAT_REGISTER_EVENT_KIND,
 };
+pub use store_effect::StoreEffectBackend;
 pub use store_sink::{StoreReceiptSink, StoreReceiptSinkError};
-pub use syncbat_macros::operation;
+pub use subscription_runtime::{
+    cursor_invalid_error, cursor_mismatch_error, unknown_subscription_error,
+    CompositeSubscriptionRuntime, EntityStreamCursorV1, EntityStreamEnvelopeV1,
+    EntityStreamRouteBinding, EntityStreamSession, EventStreamCursorV1, EventStreamEnvelopeV1,
+    EventStreamSession, EventSubscriptionRuntime, OperationStatusRouteBinding,
+    OperationStatusStreamCursorV1, OperationStatusStreamEnvelopeV1, OperationStatusStreamSession,
+    ProjectionStreamCursorV1, ProjectionStreamEnvelopeV1, ProjectionStreamSession,
+    ReceiptStreamCursorV1, ReceiptStreamEnvelopeV1, ReceiptStreamRouteBinding,
+    ReceiptStreamSession, RuntimeCursor, SessionControl, SessionDelivery, SessionEnd, SessionError,
+    SessionEventDelivery, SessionPoll, SessionWatermarkDelivery, SubscriptionId,
+    SubscriptionRegistry, SubscriptionRoute, SubscriptionRuntimeConfig, SubscriptionRuntimeError,
+    SubscriptionSession, SubscriptionSessionFactory, SubscriptionStore, TypedProjectionProjector,
+    CURSOR_V1_LEN, ENTITY_STREAM_CURSOR_V1_LEN, OPERATION_STATUS_CURSOR_V1_LEN,
+    PROJECTION_CURSOR_V1_LEN, RECEIPT_STREAM_CURSOR_V1_LEN, SOURCE_KIND_ENTITY_STREAM,
+    SOURCE_KIND_EVENT_CATEGORY, SOURCE_KIND_OPERATION_STATUS, SOURCE_KIND_PROJECTION,
+    SOURCE_KIND_RECEIPT_STREAM,
+};
 
 /// Receipt-extension namespace owned by the syncbat runtime layer.
 pub const SYNCBAT_EXTENSION_NAMESPACE: &str = "syncbat";

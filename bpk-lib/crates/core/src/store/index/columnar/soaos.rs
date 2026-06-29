@@ -2,6 +2,7 @@ use super::ProjectionCandidates;
 use crate::event::EventKind;
 use crate::store::index::projection_bridge::projection_kind_matches;
 use crate::store::index::{IndexEntry, QueryHit, RoutingSummary};
+use crate::store::StoreError;
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -39,24 +40,21 @@ impl SoAoSInner {
         }
     }
 
-    // justifies: src/store/index/restore.rs and src/store/index/columnar/soaos.rs keep routing runs u32-backed; supported targets index them losslessly as usize.
-    #[allow(clippy::expect_used)]
     pub(super) fn from_restore_base(
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,
-    ) -> Self {
+    ) -> Result<Self, StoreError> {
         let mut groups = HashMap::with_capacity(routing.entity_runs.len());
         let mut scope_entities = HashMap::<Arc<str>, HashSet<Arc<str>>>::new();
 
         for run in &routing.entity_runs {
-            let start = usize::try_from(run.start)
-                .expect("invariant: entity run index fits usize on any supported target");
-            let len = usize::try_from(run.len)
-                .expect("invariant: entity run length fits usize on any supported target");
-            let end = start
-                .checked_add(len)
-                .expect("invariant: entity run start+len fits usize on supported targets");
-            let slice = &entries_by_entity[start..end];
+            let range = run.usize_range()?;
+            let slice = entries_by_entity.get(range).ok_or_else(|| {
+                StoreError::corrupt_segment_with_detail(
+                    0,
+                    "routing entity-run range out of bounds for restored entries",
+                )
+            })?;
             if slice.is_empty() {
                 continue;
             }
@@ -78,10 +76,10 @@ impl SoAoSInner {
             groups.insert(entity, group);
         }
 
-        Self {
+        Ok(Self {
             groups,
             scope_entities,
-        }
+        })
     }
 
     pub(super) fn push(&mut self, entry: &Arc<IndexEntry>) {
@@ -168,7 +166,7 @@ impl SoAoSInner {
             }
             let sequence = entry.global_sequence;
             watermark = Some(sequence);
-            candidates.push((sequence, entry.disk_pos));
+            candidates.push(QueryHit::from_entry(entry));
         }
 
         Some((watermark?, group.generation, candidates))

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Lane B4 reservation ledger doctrine uses panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: reservation simulation is deterministic on transition order normalization; ledger and
 //! reconciliation report `body_hash` are stable; invalid ops emit sorted structural findings.
 //! CATCHES: double commit, refund-after-commit, orphan/reconcile buckets.

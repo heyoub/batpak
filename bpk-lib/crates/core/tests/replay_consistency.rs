@@ -1,16 +1,12 @@
 //! Replay and checkpoint consistency proofs.
 //! Harness pattern: Equivalence Harness (live vs reopen lane).
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test bodies in tests/replay_consistency.rs treat invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 
-mod support;
-use batpak::store::{ReadOnly, Store, StoreConfig};
+use batpak::store::{ReadOnly, Store, StoreConfig, StoreState};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 use bounded_writer_reply::writer_reply;
@@ -22,6 +18,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("replay-consistency-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -35,6 +33,10 @@ impl EventSourced for Counter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -98,7 +100,7 @@ fn event_kind(spec: &AppendSpec) -> EventKind {
     EventKind::custom(spec.category, spec.type_id)
 }
 
-fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
+fn capture_snapshot<State: StoreState>(store: &Store<State>) -> StoreSnapshot {
     let visible: Vec<_> = store
         .query(&Region::all())
         .into_iter()
@@ -110,7 +112,7 @@ fn capture_snapshot<State>(store: &Store<State>) -> StoreSnapshot {
         })
         .map(|entry| {
             let payload = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("visible query result must be readable from disk")
                 .event
                 .payload;
@@ -140,7 +142,7 @@ fn populate_specs(store: &Store, specs: &[AppendSpec]) {
     for spec in specs {
         let coord = Coordinate::new(entity_name(spec.entity_idx), scope_name(spec.scope_idx))
             .expect("generated coordinates must be valid");
-        store
+        let _ = store
             .append(
                 &coord,
                 event_kind(spec),
@@ -167,10 +169,9 @@ fn add_cancelled_fence_event(store: &Store, tag: &str) {
         )
         .expect("submit hidden event");
     drop(fence);
-    let err = match writer_reply(ticket.receiver(), "writer ticket") {
-        Ok(_) => panic!("PROPERTY: cancelled fence work must not resolve as visible success"),
-        Err(err) => err,
-    };
+    let err = writer_reply(ticket.receiver(), "writer ticket")
+        .map(|_| ())
+        .expect_err("PROPERTY: cancelled fence work must not resolve as visible success");
     assert!(
         matches!(err, batpak::store::StoreError::VisibilityFenceCancelled),
         "cancelled fence work must surface VisibilityFenceCancelled, got {err:?}"
@@ -192,7 +193,7 @@ fn seeded_store() -> (TempDir, Store) {
     let coord = Coordinate::new("entity:replay", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for n in 0..6 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append");
     }
@@ -216,6 +217,115 @@ fn cold_start_replay_matches_live_projection() {
     assert_eq!(
         replayed, live,
         "Cold-start replay must match the live store projection exactly."
+    );
+}
+
+/// INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH: the durable sidecars (mmap index,
+/// checkpoint, idempotency index, visibility ranges) are PROJECTIONS — every
+/// bit of authoritative truth is reconstructible from the segment event log
+/// alone via `query` + `get` + payload decode. We prove this by capturing the
+/// live snapshot (built purely through that authoritative path), physically
+/// DELETING every sidecar artifact on disk, then reopening and reconstructing
+/// the same snapshot. If a sidecar held truth that the event log did not, the
+/// post-deletion reconstruction would diverge and this test would fail.
+#[test]
+fn authoritative_reconstruction_survives_sidecar_deletion() {
+    // Sidecars enabled so they are actually written to disk, then deleted.
+    let dir = TempDir::new().expect("temp dir");
+    let store = Store::open(seeded_config(&dir, true, true)).expect("open seeded store");
+
+    // A spread of coordinates/kinds across multiple entities and scopes, so the
+    // authoritative snapshot has non-trivial visible content for the mmap and
+    // checkpoint sidecars to (redundantly) record. Plain committed events only:
+    // fence-driven visibility hiding is a separate projection concern with its
+    // own dedicated cold-start tests, and conflating it here would muddy what
+    // this witness asserts (committed-event truth lives in the segment log).
+    populate_specs(
+        &store,
+        &[
+            AppendSpec {
+                entity_idx: 0,
+                scope_idx: 0,
+                category: 0x1,
+                type_id: 1,
+                payload: 7,
+            },
+            AppendSpec {
+                entity_idx: 1,
+                scope_idx: 2,
+                category: 0xF,
+                type_id: 3,
+                payload: -11,
+            },
+            AppendSpec {
+                entity_idx: 3,
+                scope_idx: 1,
+                category: 0x2,
+                type_id: 5,
+                payload: 42,
+            },
+        ],
+    );
+    store.sync().expect("sync");
+
+    // Authoritative truth, built purely from event.query + event.get + decode.
+    let live_snapshot = capture_snapshot(&store);
+    assert!(
+        live_snapshot.event_count >= 3,
+        "PROPERTY: the authoritative snapshot must contain the appended visible events; \
+         got {} visible.",
+        live_snapshot.event_count
+    );
+    store.close().expect("close");
+
+    // Physically remove every sidecar projection from the data directory. After
+    // this, ONLY the segment event log (and its directory structure) remains as
+    // a source of truth.
+    let data_dir = dir.path();
+    let sidecars = [
+        "index.fbati",           // mmap index snapshot
+        "index.ckpt",            // checkpoint snapshot
+        "index.idemp",           // durable idempotency index
+        "visibility_ranges.fbv", // hidden-range projection
+    ];
+    let mut deleted = 0usize;
+    for name in sidecars {
+        let path = data_dir.join(name);
+        if path.exists() {
+            std::fs::remove_file(&path).expect("remove sidecar artifact");
+            deleted += 1;
+        }
+    }
+    assert!(
+        deleted >= 2,
+        "PROPERTY: the run must have produced and then deleted real sidecar \
+         artifacts (mmap/checkpoint/visibility); otherwise the no-sidecar-truth \
+         claim is vacuous. deleted={deleted}."
+    );
+    for name in sidecars {
+        assert!(
+            !data_dir.join(name).exists(),
+            "PROPERTY: sidecar {name} must be gone before authoritative replay."
+        );
+    }
+
+    // Reopen with sidecars DISABLED so the store cannot recreate or consult any
+    // sidecar: reconstruction is forced through the segment-scan rebuild, i.e.
+    // the authoritative event.query + event.get + decode path.
+    let reopened = Store::<ReadOnly>::open_read_only(
+        StoreConfig::new(data_dir)
+            .with_enable_checkpoint(false)
+            .with_enable_mmap_index(false),
+    )
+    .expect("reopen read-only with sidecars disabled");
+    let reconstructed = capture_snapshot(&reopened);
+
+    assert_eq!(
+        reconstructed, live_snapshot,
+        "INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH: authoritative reconstruction from \
+         the event log alone (after every sidecar was deleted) must equal the \
+         live snapshot exactly. A divergence here means a sidecar carried truth \
+         that event.query + event.get + decode could not reproduce."
     );
 }
 

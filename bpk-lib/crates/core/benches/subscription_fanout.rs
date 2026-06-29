@@ -35,7 +35,7 @@ fn bench_fanout_workload_append(c: &mut Criterion) {
                     },
                     |(store, dir, coord, kind)| {
                         for i in 0..FANOUT_WORKLOAD_EVENTS {
-                            store
+                            let _ = store
                                 .append(&coord, kind, &serde_json::json!({"i": i}))
                                 .expect("append");
                         }
@@ -74,7 +74,7 @@ fn bench_fanout_workload_drain(c: &mut Criterion) {
                             receivers.push(store.subscribe_lossy(&region));
                         }
                         for i in 0..FANOUT_WORKLOAD_EVENTS {
-                            store
+                            let _ = store
                                 .append(&coord, kind, &serde_json::json!({"i": i}))
                                 .expect("append");
                         }
@@ -125,7 +125,7 @@ fn bench_fanout_micro_append(c: &mut Criterion) {
             &subscribers,
             |b, &_subscribers| {
                 b.iter(|| {
-                    store
+                    let _ = store
                         .append(&coord, kind, &serde_json::json!({"i": next_i}))
                         .expect("append");
                     next_i += 1;
@@ -162,7 +162,7 @@ fn bench_fanout_micro_drain(c: &mut Criterion) {
             &subscribers,
             |b, &_subscribers| {
                 b.iter(|| {
-                    store
+                    let _ = store
                         .append(&coord, kind, &serde_json::json!({"i": next_i}))
                         .expect("append");
                     next_i += 1;

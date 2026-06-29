@@ -1,7 +1,7 @@
 # netbat semver-check classification (baseline: crates.io 0.7.0 train posture).
 # netbat is not published on crates.io yet; `cargo semver-checks` registry lookup
 # fails. No netbat-specific semver breaks are documented in CHANGELOG for the 0.8.0
-# release. hbat is reference-host only (`publish = false`); out of scope.
+# release.
 package: netbat
 baseline_version: 0.7.0
 current_version: 0.8.2

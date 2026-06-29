@@ -1,0 +1,557 @@
+# release 0.9.0 — terminal status ledger (Truth Gate program board).
+#
+# Each row is a release milestone or blocker with a terminal status:
+#   PROVEN | FAIL-CLOSED | WAIVED | FAULT-INJECTED | INCOMPLETE
+#
+# Normal `just inspect` validates schema + witness references + `justifies:` headers.
+# Strict release mode (`just seal`, `cargo xtask release --dry-run`) additionally
+# requires every `terminal_required: true` row to reach a terminal status.
+#
+# Row IDs use stable track prefixes (not version numbers):
+#   STORE-* GAUNTLET-* S12-* NETBAT-* BVISOR-* CLOUD-* CUT-*
+
+release: "0.9.0"
+active: true
+
+rows:
+  # ── Store / gauntlet loose-thread cut (batpak release surface) ─────────────
+
+  - id: STORE-FORK-CRASH-ATOMIC
+    title: Fork crash-atomicity offensive witness (INV-FORK-CRASH-ATOMIC)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-FORK-CRASH-ATOMIC
+    witness_tests:
+      - crates/core/tests/fork_under_fault.rs::fork_under_fault_is_legal_and_deterministic
+    proof_commands:
+      - just inspect
+
+  - id: STORE-FORK-HOSTILE-FS
+    title: Fork hostile destination refusal (symlink/ENOSPC/canonicalize)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-FORK-HOSTILE-FS-REFUSAL
+    witness_tests:
+      - crates/core/tests/fork_hostile_fs.rs::fork_enospc_mid_copy_publishes_nothing
+
+  - id: STORE-IMPORT-CRASH-IDEMPOTENT
+    title: Import survives StoreFs crash and re-import deduplicates
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-IMPORT-CRASH-IDEMPOTENT
+    witness_tests:
+      - crates/core/tests/import_under_fault.rs::import_under_fault_crash_reimport_deduplicates
+
+  - id: STORE-IMPORT-NO-RUNAWAY
+    title: Same-store import terminates at call-time ceiling
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-IMPORT-NO-RUNAWAY
+    witness_tests:
+      - crates/core/tests/import_same_store_ceiling.rs::same_store_import_terminates_under_segment_rotation
+
+  - id: STORE-64C-HYBRID-MUTATION
+    title: L4 mutation kill-test uses graduated DST corpus sweep (#64-C)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+      - writer-commit
+    witness_tests:
+      - tools/xtask/src/commands/mutants/mod.rs::dst_coverage_seams_get_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::non_dst_coverage_seams_do_not_get_corpus_augmented
+      - tools/xtask/src/commands/mutants/mod.rs::dst_coverage_unknown_seam_fails_closed
+      - tools/xtask/src/commands/mutants/mod.rs::fork_isolation_command_includes_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::cursor_delivery_command_omits_batpak_test_package
+      - tools/xtask/src/commands/mutants/mod.rs::no_primary_lane_narrows_to_dst_corpus_only
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
+    proof_commands:
+      - just inspect
+
+  - id: STORE-DST-FORK-IMPORT-CORPUS
+    title: Graduated corpus covers fork-isolation and import-reapply seams
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    witness_tests:
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
+      - crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_covers_committed_rows
+    proof_commands:
+      - just inspect
+
+  - id: STORE-68-EXAMPLE-DEDUP
+    title: Full #68 example dedup (one canonical runnable per concept)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - tools/integrity/src/traceability.rs::live_concept_catalog_is_clean
+      - tools/integrity/src/traceability.rs::rejects_durability_family_over_cap
+      - crates/core/tests/event_payload_registry_policy.rs::startup_validate_event_payload_registry_before_fail_fast_open
+    proof_commands:
+      - just inspect
+
+  - id: STORE-LOOSE-EQUIV-MUTANT-AUDIT
+    title: Re-audit fork/import equivalent mutants after offensive fixtures
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    blocked_by:
+      - cloud mutation lane not re-run post-offensive fixtures
+
+  # ── Gauntlet / integrity meta (done locally) ───────────────────────────────
+
+  - id: GAUNTLET-WITNESS-CATALOG
+    title: Every catalog INV declares a resolved witness_test
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-INVARIANT-WITNESS-TEST
+    witness_gates:
+      - invariant-bridge
+
+  - id: GAUNTLET-OVERCLAIM
+    title: Over-claim detector (gate/doc/name-vs-behavior triangulation)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_gates:
+      - overclaim
+
+  - id: GAUNTLET-TRIANGULATION
+    title: Workspace DAG + dependency-direction oracles
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-WORKSPACE-DAG-ACYCLIC
+      - INV-DEPENDENCY-DIRECTION
+    witness_tests:
+      - tools/integrity/src/triangulation_tests.rs::live_workspace_crate_graph_is_acyclic_and_oracles_agree
+      - tools/integrity/src/triangulation_tests.rs::dependency_direction_rejects_upward_edge
+
+  - id: GAUNTLET-RELEASE-STATUS
+    title: Release terminal-status ledger gate (this board)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_gates:
+      - release-status
+    witness_tests:
+      - tools/integrity/src/release_status_tests.rs::committed_release_ledger_passes_structural_validation
+
+  # ── S12 hostbat / subscriptions / schema ────────────────────────────────────
+
+  - id: S12-P1-SUBSCRIPTION-DESCRIPTORS
+    title: hostbat subscription descriptor types + module registration
+    status: PROVEN
+    terminal_required: true
+    surface: hostbat
+    witness_tests:
+      - crates/hostbat/src/subscription_tests.rs::red_duplicate_subscription_id_within_module_fails_exact_variant
+      - crates/hostbat/src/subscription_tests.rs::subscription_id_rejects_bad_grammar
+      - crates/hostbat/src/subscription_tests.rs::reserved_event_categories_are_rejected
+      - crates/hostbat/src/subscription_tests.rs::red_missing_payload_schema_fails_exact_variant
+    proof_commands:
+      - just cargo test -p hostbat subscription
+
+  - id: S12-P1-H-INTERFACE-SUBSCRIPTIONS
+    title: Subscriptions folded into H_interface
+    status: PROVEN
+    terminal_required: true
+    surface: hostbat
+    witness_tests:
+      - crates/hostbat/src/subscription_tests.rs::adding_subscription_flips_h_interface
+      - crates/hostbat/src/subscription_tests.rs::changing_subscription_source_flips_h_interface
+      - crates/hostbat/src/subscription_tests.rs::hook_change_does_not_flip_h_interface
+    proof_commands:
+      - just cargo test -p hostbat subscription
+
+  - id: S12-P3D-EVENT-PAYLOAD-BINDINGS
+    title: Hostbat event payload schema bindings for mediated appends
+    status: PROVEN
+    terminal_required: true
+    surface: hostbat
+    witness_tests:
+      - crates/hostbat/src/event_payload_binding_tests.rs::binding_rejects_empty_schema_reference
+      - crates/hostbat/src/event_payload_binding_tests.rs::module_rejects_duplicate_binding_within_module
+      - crates/hostbat/src/event_payload_binding_tests.rs::module_digest_changes_when_event_payload_binding_is_added
+      - crates/hostbat/src/event_payload_binding_tests.rs::composition_rejects_duplicate_event_kind_across_modules
+      - crates/hostbat/src/event_payload_binding_tests.rs::composition_rejects_conflicting_bindings_for_same_kind
+      - crates/hostbat/src/event_payload_binding_tests.rs::host_build_rejects_binding_to_missing_schema
+      - crates/hostbat/src/event_payload_binding_tests.rs::interface_fingerprint_changes_when_event_payload_binding_is_added
+    proof_commands:
+      - just cargo test -p hostbat event_payload_binding
+      - just cargo clippy -p hostbat --all-targets -- -D warnings
+
+  - id: S12-P3D-APPEND-SCHEMA-VALIDATION
+    title: Append-time schema validation on hostbat-mediated effect backends
+    status: PROVEN
+    terminal_required: true
+    surface: hostbat
+    witness_tests:
+      - crates/hostbat/src/append_validation_tests.rs::bound_payload_append_reaches_backend
+      - crates/hostbat/src/append_validation_tests.rs::unbound_event_kind_fails_before_backend
+      - crates/hostbat/src/append_validation_tests.rs::non_canonical_payload_fails_before_backend
+      - crates/hostbat/src/append_validation_tests.rs::raw_store_append_remains_unvalidated_by_hostbat
+    proof_commands:
+      - just cargo test -p hostbat append_validation
+      - just cargo clippy -p hostbat --all-targets -- -D warnings
+
+  - id: S12-P3E-EFFECT-ROW-COMPLETE
+    title: Mediated effect-row enforcement for all observed effect axes
+    status: PROVEN
+    terminal_required: true
+    surface: syncbat
+    witness_tests:
+      - crates/syncbat/tests/effect_enforcement.rs::declared_read_event_through_handle_completes_and_is_performed
+      - crates/syncbat/tests/effect_enforcement.rs::read_event_without_a_bound_backend_is_denied
+      - crates/syncbat/tests/effect_enforcement.rs::read_event_backend_reject_does_not_record_observation
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_read_event_outside_declared_row
+      - crates/syncbat/tests/effect_enforcement.rs::declared_projection_query_through_handle_completes_and_is_performed
+      - crates/syncbat/tests/effect_enforcement.rs::query_projection_without_a_bound_backend_is_denied
+      - crates/syncbat/tests/effect_enforcement.rs::query_projection_backend_reject_does_not_record_observation
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_projection_query_outside_declared_row
+      - crates/syncbat/tests/effect_enforcement.rs::declared_receipt_emit_through_handle_completes_and_is_performed
+      - crates/syncbat/tests/effect_enforcement.rs::emit_receipt_without_a_bound_backend_is_denied
+      - crates/syncbat/tests/effect_enforcement.rs::emit_receipt_backend_reject_does_not_record_observation
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_receipt_emit_outside_declared_row
+      - crates/syncbat/tests/effect_enforcement.rs::declared_host_control_through_handle_completes_and_is_performed
+      - crates/syncbat/tests/effect_enforcement.rs::use_host_control_without_a_bound_backend_is_denied
+      - crates/syncbat/tests/effect_enforcement.rs::use_host_control_backend_reject_does_not_record_observation
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_host_control_without_declared_authority
+      - crates/syncbat/tests/effect_enforcement.rs::declared_append_through_handle_completes_and_is_performed
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_append_outside_declared_row
+      - crates/syncbat/tests/effect_enforcement.rs::append_without_a_bound_backend_is_denied
+    proof_commands:
+      - just cargo test -p syncbat --test effect_enforcement
+      - just cargo test -p hostbat append_validation
+      - just cargo clippy -p syncbat -p hostbat --all-targets -- -D warnings
+
+  - id: NETBAT-2-STREAM-FRAMES
+    title: NETBAT/2 subscription streaming frame layer
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/netbat/tests/stream_frame.rs::stream_frame_goldens_match_encoder
+      - crates/netbat/tests/stream_frame.rs::stream_frame_goldens_decode_to_expected_frames
+      - crates/netbat/tests/stream_frame.rs::stream_frame_encode_decode_roundtrip_for_all_variants
+      - crates/netbat/tests/stream_frame.rs::encoded_stream_frames_use_lowercase_hex
+      - crates/netbat/tests/stream_frame.rs::decode_line_rejects_netbat2_stream_frames_as_call_requests
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_rejects_netbat1_call_frames
+      - crates/netbat/tests/stream_frame.rs::red_unsupported_stream_protocol_version
+      - crates/netbat/tests/stream_frame.rs::red_unknown_stream_verb
+      - crates/netbat/tests/stream_frame.rs::red_wrong_field_count_and_invalid_subscription_id
+      - crates/netbat/tests/stream_frame.rs::red_zero_delivery_index_and_client_window
+      - crates/netbat/tests/stream_frame.rs::red_cursor_payload_and_message_limits
+      - crates/netbat/tests/stream_frame.rs::red_invalid_hex_and_reason_code_and_line_too_long
+      - crates/netbat/tests/stream_frame.rs::red_subscription_id_too_long_uses_typed_error
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_is_total_on_arbitrary_bytes
+      - crates/netbat/tests/stream_frame.rs::decode_stream_line_is_total_on_netbat2_prefix_plus_garbage
+      - crates/netbat/tests/stream_frame.rs::stream_frame_encoder_is_deterministic
+      - crates/netbat/tests/stream_frame.rs::stream_frame_roundtrip
+    proof_commands:
+      - just cargo test -p netbat stream
+
+  - id: S12-SUBSCRIPTION-RUNTIME-EVENTS
+    title: Subscription runtime event stream delivery (NETBAT/2 serving)
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_replay_live_ack_and_watermark
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cancel_emits_client_cancelled_end
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_resume_honors_cursor_after_global_sequence
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_registry_rejects_duplicate_subscription_id
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_registry_rejects_invalid_event_route
+      - crates/syncbat/src/subscription_runtime/event_stream_tests.rs::subscription_runtime_event_open_rejects_zero_runtime_limits
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_tcp_maps_replay_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_event.rs::stream_runtime_event_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat subscription_runtime_event
+      - just cargo test -p netbat stream_runtime_event
+
+  - id: S12-SUBSCRIPTION-RUNTIME-PROJECTIONS
+    title: Subscription runtime projection stream delivery
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_catch_up_snapshot_and_live_update
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_watermark_for_empty_fold
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cancel_emits_client_cancelled_end
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_unknown_route_rejected_at_open
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/projection_stream_tests.rs::subscription_runtime_projection_resume_honors_cursor_after_entity_generation
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_tcp_maps_snapshot_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_projection.rs::stream_runtime_projection_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat subscription_runtime_projection
+      - just cargo test -p netbat stream_runtime_projection
+
+  - id: S12-SUBSCRIPTION-RUNTIME-OPERATION-STATUS
+    title: Subscription runtime operation-status stream delivery
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_checkout_writes_started_and_completed_facts
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_catch_up_snapshot_and_live_update
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_watermark_for_empty_fold
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_cancel_emits_client_cancelled_end
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_unknown_route_rejected_at_open
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_status_sink_failure_before_handler_fails_closed
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_denied_after_started_counts_one_attempt
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_missing_handler_records_failed_terminal_status
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/operation_status_stream_tests.rs::subscription_runtime_operation_status_resume_honors_cursor_after_entity_generation
+      - crates/netbat/tests/stream_runtime_operation_status.rs::stream_runtime_operation_status_tcp_maps_snapshot_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_operation_status.rs::stream_runtime_operation_status_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_operation_status.rs::stream_runtime_operation_status_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_operation_status.rs::stream_runtime_operation_status_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat subscription_runtime_operation_status
+      - just cargo test -p netbat stream_runtime_operation_status
+
+  - id: S12-SUBSCRIPTION-RUNTIME-RECEIPTS
+    title: Subscription runtime receipt stream delivery
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_unknown_route_rejected_at_open
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_replay_delivers_matching_receipt_kind
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_live_delivery_after_core_checkout_receipt
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_wrong_receipt_kind_skipped
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_nonmatching_page_does_not_watermark_past_later_matching_receipt
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_malformed_receipt_payload_emits_receipt_decode_failed
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_watermark_after_filtered_stream_catches_up
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_cancel_emits_client_cancelled
+      - crates/syncbat/src/subscription_runtime/receipt_stream_tests.rs::subscription_runtime_receipt_disconnect_without_cancel_ends_session
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_tcp_maps_receipt_sub_event_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_receipt.rs::stream_runtime_receipt_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat --lib subscription_runtime_receipt
+      - just cargo test -p netbat stream_runtime_receipt
+
+  - id: S12-SUBSCRIPTION-RUNTIME-ENTITY
+    title: Subscription runtime entity stream delivery
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cursor_v1_roundtrip_and_resume_rules
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_replay_delivers_exact_coordinate_events
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_live_delivery_after_append
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_descendant_entity_skipped_exact_entity_later_delivered
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_wrong_scope_skipped
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_open_rejects_invalid_cursor
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_open_rejects_cursor_mismatch
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_watermark_only_after_source_exhaustion
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cumulative_ack_frees_delivery_window
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_resume_after_cursor_does_not_redeliver_acknowledged_event
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_slow_consumer_closes_with_err
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_cancel_emits_client_cancelled
+      - crates/syncbat/src/subscription_runtime/entity_stream_tests.rs::subscription_runtime_entity_disconnect_without_cancel_ends_session
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_tcp_maps_entity_sub_event_watermark_and_ack_wake
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_unknown_subscription_emits_sub_err
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_slow_consumer_emits_sub_err
+      - crates/netbat/tests/stream_runtime_entity.rs::stream_runtime_entity_client_disconnect_without_cancel_exits_server
+    proof_commands:
+      - just cargo test -p syncbat --lib subscription_runtime_entity
+      - just cargo test -p netbat stream_runtime_entity
+      - just cargo test -p syncbat --lib subscription_runtime_receipt
+
+  # ── Cloud-only proof batch ───────────────────────────────────────────────────
+
+  - id: CLOUD-MUTATION-PHASE4
+    title: Repo-wide mutation smoke confirms Phase4 floor (75%)
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+    blocked_by:
+      - cloud lane only; D3 survivor cure pending
+
+  - id: CLOUD-SEAM-SMOKE-85
+    title: fork-isolation + import-reapply critical seams ≥85% on cloud
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    witness_seams:
+      - fork-isolation
+      - import-reapply
+
+  # ── 0.8.3 audit carryover (terminal on 0.9.0; closed by H1–H7 packets) ─────
+
+  - id: STORE-DIR-LOCK-TWO-PROCESS
+    title: Cross-process store dir lock refuses second writer (audit C3)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_invariants:
+      - INV-JOURNAL-SINGLE-LIVE-OWNER
+    witness_tests:
+      - crates/core/tests/dir_lock_two_process.rs::second_writer_open_refuses_while_other_process_holds_lock
+    proof_commands:
+      - just cargo test -p batpak --test dir_lock_two_process
+
+  - id: NETBAT-TCP-CONCURRENT-ACCEPT
+    title: TCP listener accepts concurrent clients without head-of-line blocking (audit C2)
+    status: PROVEN
+    terminal_required: true
+    surface: netbat
+    witness_tests:
+      - crates/netbat/tests/tcp_transport.rs::concurrent_accept_slow_client_does_not_block_fast_client
+    proof_commands:
+      - cargo test -p netbat --test tcp_transport
+
+  - id: STORE-PROJECTION-INCREMENTAL-XCHECK
+    title: Incremental projection apply matches full replay (audit R9)
+    status: PROVEN
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/tests/projection_incremental_xcheck.rs::incremental_apply_matches_full_replay_cross_check
+    proof_commands:
+      - just cargo test -p batpak incremental_apply_matches_full_replay_cross_check
+
+  - id: STORE-PROJECTION-CACHE-HEADER
+    title: Projection cache header policy terminal (audit R18)
+    status: FAIL-CLOSED
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/src/store/projection/mod.rs::cache_meta_rebuild_only_policy_uses_trailing_magic_not_leading_header
+    proof_commands:
+      - just cargo test -p batpak cache_meta_rebuild_only_policy
+
+  - id: STORE-PROJECTION-CACHE-DISCRIMINANT
+    title: Projection cache discriminant policy terminal (audit R17)
+    status: FAIL-CLOSED
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/src/store/projection/flow/cache_identity.rs::projection_cache_key_type_discriminant_is_type_id_fail_closed_portability
+    proof_commands:
+      - just cargo test -p batpak projection_cache_key_type_discriminant
+
+  - id: STORE-SEGMENT-SCAN-OOM
+    title: Segment scan OOM posture terminal
+    status: FAIL-CLOSED
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/src/store/segment/scan/tests.rs::scan_oom_posture_is_input_bounded_fail_closed
+    proof_commands:
+      - just cargo test -p batpak scan_oom_posture
+
+  - id: STORE-SIM-PARENT-DIR-SYNC
+    title: Sim parent-dir sync model bound terminal
+    status: FAIL-CLOSED
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/src/store/sim/recovery_matrix.rs::sim_parent_dir_sync_fail_closed_model_honest_deferral
+    proof_commands:
+      - just cargo test -p batpak sim_parent_dir_sync
+
+  - id: STORE-PLATFORM-FS-ROUTING
+    title: Remaining StoreFs routing boundary terminal
+    status: FAIL-CLOSED
+    terminal_required: true
+    surface: batpak
+    witness_tests:
+      - crates/core/src/store/platform/fs.rs::store_fs_fail_closed_boundary_lists_unrouted_tail_ops
+      - crates/core/src/store/platform/fs.rs::real_fs_delegates_routed_ops_like_the_platform_free_fns
+    proof_commands:
+      - just cargo test -p batpak store_fs_fail_closed
+
+  # ── Cut ceremony ─────────────────────────────────────────────────────────────
+
+  - id: CUT-VERSION-091
+    title: Version 0.8.3 → 0.9.0 in all member manifests
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    blocked_by:
+      - explicit owner say-so for cut
+
+  - id: CUT-CHANGELOG
+    title: CHANGELOG [Unreleased] → [0.9.0]
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+
+  - id: CUT-PUBLIC-API-SEAL
+    title: Regenerate and strict-check traceability/public_api/batpak.txt
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+
+  - id: CUT-PUBLISH-TAG
+    title: Chain publish + tag after cloud proof green
+    status: INCOMPLETE
+    terminal_required: true
+    surface: batpak
+    blocked_by:
+      - requires CUT-* rows + CLOUD-* rows PROVEN
+
+  # ── bvisor platform matrix (kitchen-sink 0.9.0; publish=false ≠ out of scope) ─
+
+  - id: BVISOR-PLATFORM-MATRIX
+    title: Platform backend terminal statuses (PROVEN/FAIL-CLOSED/WAIVED per cell)
+    status: PROVEN
+    terminal_required: true
+    surface: bvisor
+    witness_gates:
+      - bvisor-platform-matrix
+    witness_tests:
+      - tools/integrity/src/platform_qualification_matrix_tests.rs::committed_matrix_mirrors_source
+      - crates/bvisor/tests/platform_matrix_refusal.rs::windows_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/tests/platform_matrix_refusal.rs::macos_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/tests/platform_matrix_refusal.rs::wasm_scaffolding_refuses_representative_enforced_kinds
+      - crates/bvisor/src/backend/linux/backend_impl_tests.rs::linux_unimplemented_kinds_refuse_at_plan
+      - crates/bvisor/tests/support_matrix_honesty.rs::every_platform_table_is_honest_about_load_bearing_cells

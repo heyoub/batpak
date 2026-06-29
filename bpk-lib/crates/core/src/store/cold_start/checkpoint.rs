@@ -32,6 +32,28 @@ pub(crate) use snapshot::try_load_checkpoint_snapshot;
 pub(crate) use write::write_checkpoint;
 pub(crate) use write::write_checkpoint_with_reserved_kind_fallbacks;
 
+/// Fuzz-only crate-visible shim over the `pub(super)` checkpoint-body decoder.
+///
+/// `format::decode_checkpoint_data` is `pub(super)` and returns a private type,
+/// so it cannot be re-exported through the crate-root `__fuzz` module directly.
+/// This shim lives inside the `checkpoint` module (where the decoder is visible),
+/// drives a real decode on untrusted bytes, and collapses the private result to a
+/// plain `bool` (`Some`/`None`) so the fuzz crate only observes "did it panic".
+/// The `path` argument is a throwaway label only used in warning logs.
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) fn __fuzz_decode_checkpoint_data(version: u16, body: &[u8]) -> bool {
+    format::decode_checkpoint_data(std::path::Path::new("<fuzz>"), version, body).is_some()
+}
+
+/// Fuzz-only crate-visible shim over the `pub(super)` v6 snapshot decoder.
+///
+/// See [`__fuzz_decode_checkpoint_data`] for why this shim exists. Collapses the
+/// private `Option<CheckpointDataV6>` to a `bool`.
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) fn __fuzz_decode_checkpoint_snapshot_v6(body: &[u8]) -> bool {
+    format::decode_checkpoint_snapshot_v6(std::path::Path::new("<fuzz>"), body).is_some()
+}
+
 use crate::event::{EventKind, HashChain};
 use crate::store::cold_start::{ColdStartIndexRow, ColdStartSource};
 use crate::store::index::interner::InternId;
@@ -140,7 +162,9 @@ pub(crate) fn restore_from_checkpoint(
     interner_strings: &[String],
     stored_allocator: u64,
 ) -> Result<(), StoreError> {
-    index.interner.replace_from_full_snapshot(interner_strings);
+    index
+        .interner
+        .replace_from_full_snapshot(interner_strings)?;
     let mut rebuilt_entries = Vec::with_capacity(entries.len());
 
     for ce in entries {

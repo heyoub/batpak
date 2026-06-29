@@ -3,7 +3,7 @@ use super::super::staging::{
 };
 use super::{
     segment, DagPosition, DiskPos, Event, EventHeader, EventKind, FenceLedger, FramePayloadRef,
-    HashChain, WriterState,
+    HashChain, WriterCore,
 };
 use crate::store::append::{checked_append_bytes, BatchAppendItem};
 use crate::store::stats::HlcPoint;
@@ -34,7 +34,7 @@ fn batch_failed(
     StoreError::batch_failed(item_index, source)
 }
 
-impl WriterState<'_> {
+impl WriterCore {
     /// STEPs 1-2: Validate batch size, total bytes, and reject CAS in batches.
     fn validate_batch(&self, items: &[BatchAppendItem]) -> Result<(), StoreError> {
         if items.len() > self.config.batch.max_size as usize {
@@ -93,7 +93,7 @@ impl WriterState<'_> {
                 if let Some(durable) = self.index.idemp.get(key.as_u128()) {
                     let mut receipt = AppendReceipt {
                         event_id: crate::id::EventId::from(durable.event_id),
-                        sequence: durable.global_sequence,
+                        global_sequence: durable.global_sequence,
                         disk_pos: durable.disk_pos(),
                         content_hash: durable.content_hash,
                         key_id: [0; 32],
@@ -113,7 +113,7 @@ impl WriterState<'_> {
                 } else if let Some(entry) = self.index.get_by_id(key.as_u128()) {
                     let mut receipt = AppendReceipt {
                         event_id: crate::id::EventId::from(entry.event_id),
-                        sequence: entry.global_sequence,
+                        global_sequence: entry.global_sequence,
                         disk_pos: entry.disk_pos,
                         content_hash: entry.hash_chain.event_hash,
                         key_id: [0; 32],
@@ -172,7 +172,7 @@ impl WriterState<'_> {
         }
 
         let mut computed: Vec<StagedCommittedEvent> = Vec::with_capacity(prepared.len());
-        let mut entity_states: std::collections::HashMap<Arc<str>, BatchEntityState> =
+        let mut entity_states: std::collections::HashMap<(Arc<str>, u32), BatchEntityState> =
             std::collections::HashMap::new();
 
         let now_us = self.runtime.now_us();
@@ -181,10 +181,12 @@ impl WriterState<'_> {
 
         for (idx, item) in prepared.items().iter().enumerate() {
             let entity = Arc::clone(item.entity_arc());
-            let state = match entity_states.entry(Arc::clone(&entity)) {
+            let position_hint = item.options().position_hint.unwrap_or_default();
+            let state_key = (Arc::clone(&entity), position_hint.lane);
+            let state = match entity_states.entry(state_key) {
                 std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::hash_map::Entry::Vacant(entry) => {
-                    let latest = self.index.get_latest(&entity);
+                    let latest = self.index.get_latest_committed(&entity, position_hint.lane);
                     entry.insert(BatchEntityState {
                         entity_arc: Arc::clone(&entity),
                         prev_hash: latest
@@ -239,10 +241,13 @@ impl WriterState<'_> {
             state.last_wall_ms = wall_ms;
 
             let global_seq = first_seq + idx as u64;
-            self.watermark_handle.lock().advance_accepted(HlcPoint {
-                wall_ms,
-                global_sequence: global_seq,
-            });
+            self.watermark_handle.lock().advance_accepted_on_lane(
+                position_hint.lane,
+                HlcPoint {
+                    wall_ms,
+                    global_sequence: global_seq,
+                },
+            );
             let meta = StagedCommitMeta::new(
                 event_id,
                 item.options()
@@ -253,14 +258,13 @@ impl WriterState<'_> {
                 item.kind(),
                 global_seq,
             );
-            let position_hint = item.options().position_hint.unwrap_or_default();
-            let timing = StagedCommitTiming::new(
-                now_us,
-                wall_ms,
-                clock,
-                position_hint.lane,
-                position_hint.depth,
-            );
+            let dag_depth = if position_hint.branch_root {
+                DagPosition::fork(position_hint.depth, position_hint.lane).depth()
+            } else {
+                position_hint.depth
+            };
+            let timing =
+                StagedCommitTiming::new(now_us, wall_ms, clock, position_hint.lane, dag_depth);
             computed.push(StagedCommittedEvent::new(
                 item.coord().clone(),
                 meta,
@@ -462,14 +466,14 @@ impl WriterState<'_> {
             .map_err(|e| StoreError::batch_sync_failed(prepared.len(), e))?;
         self.watermark_handle.lock().advance_durable_to_accepted();
 
-        let artifacts = self.materialize_batch_commit_artifacts(prepared, &computed, &receipts);
+        let artifacts = self.materialize_batch_commit_artifacts(prepared, &computed, &receipts)?;
         for (sidx_entry, index_entry) in artifacts.sidx_entries.iter().zip(artifacts.entries.iter())
         {
             self.sidx_collector.record(
                 sidx_entry.clone(),
                 index_entry.coord.entity(),
                 index_entry.coord.scope(),
-            );
+            )?;
         }
 
         #[cfg(feature = "dangerous-test-hooks")]
@@ -481,20 +485,7 @@ impl WriterState<'_> {
             &self.config.fault_injector,
         )?;
 
-        // Record durable idempotency entries for keyed batch items. Batches are
-        // homogeneous (all keyed or all unkeyed, enforced in handle_append_batch)
-        // and a keyed item's event_id IS its idempotency key, so an entry maps
-        // 1:1 to its key. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
-        for (item, index_entry) in prepared.items().iter().zip(artifacts.entries.iter()) {
-            if item.options().idempotency_key.is_some() {
-                self.index
-                    .idemp
-                    .record(crate::store::index::idemp::IdempEntry::from_index_entry(
-                        index_entry,
-                        index_entry.global_sequence,
-                    ));
-            }
-        }
+        self.record_batch_idempotency(prepared, &artifacts.entries);
         self.index.insert_batch(artifacts.entries);
         let publish_span = u32::try_from(prepared.len())
             .map_err(|_| StoreError::ser_msg("prepared batch item count exceeds u32::MAX"))?;
@@ -518,6 +509,27 @@ impl WriterState<'_> {
         Ok(receipts)
     }
 
+    /// Record durable idempotency entries for keyed batch items. Batches are
+    /// homogeneous (all keyed or all unkeyed, enforced in handle_append_batch)
+    /// and a keyed item's event_id IS its idempotency key, so an entry maps
+    /// 1:1 to its key. justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+    fn record_batch_idempotency(
+        &self,
+        prepared: &PreparedBatch,
+        entries: &[crate::store::index::IndexEntry],
+    ) {
+        for (item, index_entry) in prepared.items().iter().zip(entries.iter()) {
+            if item.options().idempotency_key.is_some() {
+                self.index
+                    .idemp
+                    .record(crate::store::index::idemp::IdempEntry::from_index_entry(
+                        index_entry,
+                        index_entry.global_sequence,
+                    ));
+            }
+        }
+    }
+
     fn write_batch_event_frames(
         &mut self,
         prepared: &PreparedBatch,
@@ -535,9 +547,9 @@ impl WriterState<'_> {
 
             let mut receipt = AppendReceipt {
                 event_id: crate::id::EventId::from(staged.event_id()),
-                sequence: staged.global_sequence(),
+                global_sequence: staged.global_sequence(),
                 disk_pos: DiskPos {
-                    segment_id: *self.segment_id,
+                    segment_id: self.segment_id,
                     offset: 0,
                     length: 0,
                 },
@@ -566,13 +578,16 @@ impl WriterState<'_> {
                 .active_segment
                 .write_frame(&frame)
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Writing, e))?;
-            self.watermark_handle.lock().advance_written(HlcPoint {
-                wall_ms: staged.timing.wall_ms,
-                global_sequence: staged.global_sequence(),
-            });
+            self.watermark_handle.lock().advance_written_on_lane(
+                staged.timing.dag_lane,
+                HlcPoint {
+                    wall_ms: staged.timing.wall_ms,
+                    global_sequence: staged.global_sequence(),
+                },
+            );
 
             receipt.disk_pos = DiskPos {
-                segment_id: *self.segment_id,
+                segment_id: self.segment_id,
                 offset,
                 length: u32::try_from(frame.len()).map_err(|_| {
                     batch_failed(

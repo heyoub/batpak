@@ -23,7 +23,7 @@ pub(crate) fn templates() -> Result<()> {
             .unwrap_or(&manifest)
             .display()
             .to_string();
-        println!("template-smoke: {rel}");
+        outln!("template-smoke: {rel}");
 
         let smoke_root = TempDir::new().context("create template smoke tempdir")?;
         let smoke_dir = smoke_root
@@ -51,7 +51,7 @@ pub(crate) fn templates() -> Result<()> {
         run(command).with_context(|| format!("template smoke failed for {rel}"))?;
     }
 
-    println!("template-smoke: ok");
+    outln!("template-smoke: ok");
     Ok(())
 }
 

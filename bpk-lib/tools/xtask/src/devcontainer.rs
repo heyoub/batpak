@@ -89,7 +89,7 @@ fn ensure_devcontainer_image(repo_root: &Path) -> Result<()> {
     let current_hash = dockerfile_hash(&dockerfile)?;
     let existing_hash = inspect_image_hash(&runtime, &image)?;
     if existing_hash.as_deref() == Some(current_hash.as_str()) {
-        println!("Reusing local devcontainer image `{image}` (Dockerfile unchanged).");
+        outln!("Reusing local devcontainer image `{image}` (Dockerfile unchanged).");
         return Ok(());
     }
 

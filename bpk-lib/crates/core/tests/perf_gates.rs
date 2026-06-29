@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; lifecycle perf-gate tests in tests/perf_gates.rs panic! on regressions and narrow wall-clock timing counters into smaller integer types.
-#![allow(clippy::panic, clippy::cast_possible_truncation)]
 //! PROVES: LAW-004 (Composition Over Construction — quadratic dogfooding) for the
 //! store-lifecycle latency gates: open-only and close-only cold start across
 //! single-entity and mixed-entity 100K corpora, plus mmap-restore and
@@ -15,12 +13,10 @@
 //! correctness families live in sibling `perf_gates_*` binaries.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::{Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::time::Instant;
-use support::prelude::*;
 use tempfile::TempDir;
 
 struct LifecycleContext {
@@ -70,7 +66,7 @@ fn populate_single_entity_corpus(config: StoreConfig, count: u64) {
     let coord = Coordinate::new("perf:single", "perf:scope").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -87,7 +83,7 @@ fn populate_mixed_entity_corpus(config: StoreConfig, entity_count: u64, per_enti
         )
         .expect("coord");
         for seq in 0..per_entity {
-            store
+            let _ = store
                 .append(
                     &coord,
                     kind,
@@ -115,12 +111,12 @@ fn assert_lifecycle_under_threshold(
         event_count,
     };
     let proposal = Proposal::new(elapsed_ms);
-    if let Err(denial) = gates.evaluate(&ctx, proposal) {
-        panic!(
-            "LIFECYCLE PERF GATE FAILED: {denial}\nContext: {:?}",
-            denial.context
-        );
-    }
+    let outcome = gates.evaluate(&ctx, proposal);
+    assert!(
+        outcome.is_ok(),
+        "LIFECYCLE PERF GATE FAILED: {:?}",
+        outcome.err()
+    );
 }
 
 #[test]

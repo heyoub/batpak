@@ -1,7 +1,12 @@
 pub mod netbat
 pub use netbat::OperationName
 pub use netbat::OperationNameError
+pub enum netbat::MaybeCursor
+pub netbat::MaybeCursor::Absent
+pub netbat::MaybeCursor::Present(netbat::CursorBytes)
 #[non_exhaustive] pub enum netbat::NetbatError
+pub netbat::NetbatError::CursorTooLarge
+pub netbat::NetbatError::CursorTooLarge::max: usize
 pub netbat::NetbatError::EmptyStream
 pub netbat::NetbatError::InputTooLarge
 pub netbat::NetbatError::InputTooLarge::max: usize
@@ -11,11 +16,19 @@ pub netbat::NetbatError::LineTooLong
 pub netbat::NetbatError::LineTooLong::max: usize
 pub netbat::NetbatError::MalformedRequest
 pub netbat::NetbatError::MalformedRequest::reason: &'static str
+pub netbat::NetbatError::MalformedStreamFrame
+pub netbat::NetbatError::MalformedStreamFrame::reason: &'static str
 pub netbat::NetbatError::OperationNameTooLong
 pub netbat::NetbatError::OperationNameTooLong::max: usize
 pub netbat::NetbatError::OutputTooLarge
 pub netbat::NetbatError::OutputTooLarge::max: usize
 pub netbat::NetbatError::Runtime(syncbat::error::RuntimeError)
+pub netbat::NetbatError::StreamMessageTooLarge
+pub netbat::NetbatError::StreamMessageTooLarge::max: usize
+pub netbat::NetbatError::StreamPayloadTooLarge
+pub netbat::NetbatError::StreamPayloadTooLarge::max: usize
+pub netbat::NetbatError::SubscriptionIdTooLong
+pub netbat::NetbatError::SubscriptionIdTooLong::max: usize
 pub netbat::NetbatError::UnsupportedProtocolVersion
 pub netbat::NetbatError::UnsupportedProtocolVersion::version: alloc::string::String
 impl netbat::NetbatError
@@ -46,12 +59,33 @@ pub fn netbat::RouteValidationError::from(error: syncbat::register::RegisterVali
 impl core::error::Error for netbat::RouteValidationError
 impl core::fmt::Display for netbat::RouteValidationError
 pub fn netbat::RouteValidationError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum netbat::StreamFrame
+pub netbat::StreamFrame::SubAck(netbat::SubAckFrame)
+pub netbat::StreamFrame::SubCancel(netbat::SubCancelFrame)
+pub netbat::StreamFrame::SubEnd(netbat::SubEndFrame)
+pub netbat::StreamFrame::SubErr(netbat::SubErrFrame)
+pub netbat::StreamFrame::SubEvent(netbat::SubEventFrame)
+pub netbat::StreamFrame::SubWatermark(netbat::SubWatermarkFrame)
+pub netbat::StreamFrame::Subscribe(netbat::SubscribeFrame)
+pub struct netbat::ClientWindow(_)
+impl netbat::ClientWindow
+pub fn netbat::ClientWindow::get(self) -> u32
+pub fn netbat::ClientWindow::new(value: u32) -> core::result::Result<Self, netbat::NetbatError>
 pub struct netbat::CoreHealth
 pub netbat::CoreHealth::layer_rule: &'static str
 pub netbat::CoreHealth::missing_operations: alloc::vec::Vec<alloc::string::String>
 pub netbat::CoreHealth::mounted_operations: alloc::vec::Vec<alloc::string::String>
 impl netbat::CoreHealth
 pub fn netbat::CoreHealth::is_healthy(&self) -> bool
+pub struct netbat::CursorBytes(_)
+impl netbat::CursorBytes
+pub fn netbat::CursorBytes::as_bytes(&self) -> &[u8]
+pub fn netbat::CursorBytes::into_bytes(self) -> alloc::vec::Vec<u8>
+pub fn netbat::CursorBytes::new(bytes: impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
+pub struct netbat::DeliveryIndex(_)
+impl netbat::DeliveryIndex
+pub fn netbat::DeliveryIndex::get(self) -> u64
+pub fn netbat::DeliveryIndex::new(value: u64) -> core::result::Result<Self, netbat::NetbatError>
 pub struct netbat::Endpoint
 impl netbat::Endpoint
 pub fn netbat::Endpoint::new(operation_name: impl core::convert::Into<alloc::string::String>, path: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, netbat::RouteValidationError>
@@ -69,18 +103,30 @@ impl netbat::IoTimeouts
 pub const fn netbat::IoTimeouts::with_read(self, value: core::option::Option<core::time::Duration>) -> Self
 pub const fn netbat::IoTimeouts::with_write(self, value: core::option::Option<core::time::Duration>) -> Self
 #[non_exhaustive] pub struct netbat::Limits
+pub netbat::Limits::max_cursor_bytes: usize
 pub netbat::Limits::max_input_bytes: usize
 pub netbat::Limits::max_line_bytes: usize
 pub netbat::Limits::max_operation_name_bytes: usize
 pub netbat::Limits::max_output_bytes: usize
+pub netbat::Limits::max_stream_error_message_bytes: usize
+pub netbat::Limits::max_stream_payload_bytes: usize
+pub netbat::Limits::max_subscription_id_bytes: usize
 impl netbat::Limits
 pub fn netbat::Limits::new() -> Self
+pub const fn netbat::Limits::with_max_cursor_bytes(self, value: usize) -> Self
 pub const fn netbat::Limits::with_max_input_bytes(self, value: usize) -> Self
 pub const fn netbat::Limits::with_max_line_bytes(self, value: usize) -> Self
 pub const fn netbat::Limits::with_max_operation_name_bytes(self, value: usize) -> Self
 pub const fn netbat::Limits::with_max_output_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_stream_error_message_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_stream_payload_bytes(self, value: usize) -> Self
+pub const fn netbat::Limits::with_max_subscription_id_bytes(self, value: usize) -> Self
 impl core::default::Default for netbat::Limits
 pub fn netbat::Limits::default() -> Self
+pub struct netbat::PayloadSchemaRef(_)
+impl netbat::PayloadSchemaRef
+pub fn netbat::PayloadSchemaRef::as_str(&self) -> &str
+pub fn netbat::PayloadSchemaRef::new(reference: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, netbat::NetbatError>
 pub struct netbat::RequestFrame
 impl netbat::RequestFrame
 pub fn netbat::RequestFrame::input(&self) -> &[u8]
@@ -119,6 +165,46 @@ impl netbat::ShutdownHandle
 pub fn netbat::ShutdownHandle::is_shutdown(&self) -> bool
 pub fn netbat::ShutdownHandle::new() -> Self
 pub fn netbat::ShutdownHandle::shutdown(&self)
+pub struct netbat::StreamReasonCode(_)
+impl netbat::StreamReasonCode
+pub fn netbat::StreamReasonCode::as_str(&self) -> &str
+pub fn netbat::StreamReasonCode::new(code: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, netbat::NetbatError>
+pub struct netbat::SubAckFrame
+pub netbat::SubAckFrame::cursor_after: netbat::CursorBytes
+pub netbat::SubAckFrame::delivery_index: netbat::DeliveryIndex
+pub netbat::SubAckFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubCancelFrame
+pub netbat::SubCancelFrame::reason_code: netbat::StreamReasonCode
+pub netbat::SubCancelFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubEndFrame
+pub netbat::SubEndFrame::cursor_after: netbat::MaybeCursor
+pub netbat::SubEndFrame::reason_code: netbat::StreamReasonCode
+pub netbat::SubEndFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubErrFrame
+pub netbat::SubErrFrame::code: netbat::StreamReasonCode
+pub netbat::SubErrFrame::last_acked_cursor: netbat::MaybeCursor
+pub netbat::SubErrFrame::last_delivered_cursor: netbat::MaybeCursor
+pub netbat::SubErrFrame::message: alloc::vec::Vec<u8>
+pub netbat::SubErrFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubEventFrame
+pub netbat::SubEventFrame::cursor_after: netbat::MaybeCursor
+pub netbat::SubEventFrame::cursor_before: netbat::MaybeCursor
+pub netbat::SubEventFrame::delivery_index: netbat::DeliveryIndex
+pub netbat::SubEventFrame::payload: alloc::vec::Vec<u8>
+pub netbat::SubEventFrame::payload_schema_ref: netbat::PayloadSchemaRef
+pub netbat::SubEventFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubWatermarkFrame
+pub netbat::SubWatermarkFrame::cursor_after: netbat::CursorBytes
+pub netbat::SubWatermarkFrame::delivery_index: netbat::DeliveryIndex
+pub netbat::SubWatermarkFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubscribeFrame
+pub netbat::SubscribeFrame::client_window: netbat::ClientWindow
+pub netbat::SubscribeFrame::resume_cursor: netbat::MaybeCursor
+pub netbat::SubscribeFrame::subscription_id: netbat::SubscriptionToken
+pub struct netbat::SubscriptionToken(_)
+impl netbat::SubscriptionToken
+pub fn netbat::SubscriptionToken::as_str(&self) -> &str
+pub fn netbat::SubscriptionToken::new(id: impl core::convert::Into<alloc::string::String>, limits: &netbat::Limits) -> core::result::Result<Self, netbat::NetbatError>
 #[non_exhaustive] pub struct netbat::TcpServeStats
 pub netbat::TcpServeStats::accepted_connections: usize
 pub netbat::TcpServeStats::connection_io_failures: usize
@@ -143,27 +229,58 @@ pub const fn netbat::TcpServerConfig::with_max_requests_per_connection(self, val
 pub const fn netbat::TcpServerConfig::with_timeouts(self, timeouts: netbat::IoTimeouts) -> Self
 impl core::default::Default for netbat::TcpServerConfig
 pub fn netbat::TcpServerConfig::default() -> Self
+#[non_exhaustive] pub struct netbat::TcpSubscriptionServeStats
+pub netbat::TcpSubscriptionServeStats::accepted_connections: usize
+pub netbat::TcpSubscriptionServeStats::connection_io_failures: usize
+pub netbat::TcpSubscriptionServeStats::failed_subscriptions: usize
+pub netbat::TcpSubscriptionServeStats::malformed_pre_subscribe: usize
+pub netbat::TcpSubscriptionServeStats::runtime_failures: usize
+pub netbat::TcpSubscriptionServeStats::served_subscriptions: usize
+pub netbat::TcpSubscriptionServeStats::shutdown_requested: bool
+#[non_exhaustive] pub struct netbat::TcpSubscriptionServerConfig
+pub netbat::TcpSubscriptionServerConfig::idle_sleep: core::time::Duration
+pub netbat::TcpSubscriptionServerConfig::limits: netbat::Limits
+pub netbat::TcpSubscriptionServerConfig::max_connections: usize
+pub netbat::TcpSubscriptionServerConfig::timeouts: netbat::IoTimeouts
+impl core::default::Default for netbat::TcpSubscriptionServerConfig
+pub fn netbat::TcpSubscriptionServerConfig::default() -> Self
 pub const netbat::CALL_VERB: &str
 pub const netbat::DEFAULT_MAX_CONNECTIONS: usize
+pub const netbat::DEFAULT_MAX_CURSOR_BYTES: usize
 pub const netbat::DEFAULT_MAX_INPUT_BYTES: usize
 pub const netbat::DEFAULT_MAX_LINE_BYTES: usize
 pub const netbat::DEFAULT_MAX_OPERATION_NAME_BYTES: usize
 pub const netbat::DEFAULT_MAX_OUTPUT_BYTES: usize
 pub const netbat::DEFAULT_MAX_REQUESTS_PER_CONNECTION: usize
+pub const netbat::DEFAULT_MAX_STREAM_ERROR_MESSAGE_BYTES: usize
+pub const netbat::DEFAULT_MAX_STREAM_PAYLOAD_BYTES: usize
+pub const netbat::DEFAULT_MAX_SUBSCRIPTION_ID_BYTES: usize
 pub const netbat::LAYER_RULE: &str
 pub const netbat::LINE_PROTOCOL_VERSION: &str
 pub const netbat::MAX_ROUTE_PATH_BYTES: usize
 pub const netbat::PROTOCOL_PREFIX: &str
+pub const netbat::STREAM_PROTOCOL_VERSION: &str
+pub const netbat::SUBSCRIBE_VERB: &str
+pub const netbat::SUB_ACK_VERB: &str
+pub const netbat::SUB_CANCEL_VERB: &str
+pub const netbat::SUB_END_VERB: &str
+pub const netbat::SUB_ERR_VERB: &str
+pub const netbat::SUB_EVENT_VERB: &str
+pub const netbat::SUB_WATERMARK_VERB: &str
 pub fn netbat::decode_hex(input: &[u8], max_input_bytes: usize) -> core::result::Result<alloc::vec::Vec<u8>, netbat::NetbatError>
 pub fn netbat::decode_hex_str(input: &str) -> core::result::Result<alloc::vec::Vec<u8>, netbat::NetbatError>
 pub fn netbat::decode_line(line: &[u8], limits: &netbat::Limits) -> core::result::Result<netbat::RequestFrame, netbat::NetbatError>
+pub fn netbat::decode_stream_line(line: &[u8], limits: &netbat::Limits) -> core::result::Result<netbat::StreamFrame, netbat::NetbatError>
 pub fn netbat::dispatch_frame(core: &mut syncbat::core::Core, frame: netbat::RequestFrame, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError>
 pub fn netbat::encode_hex(bytes: &[u8]) -> alloc::vec::Vec<u8>
 pub fn netbat::encode_hex_into(bytes: &[u8], output: &mut alloc::vec::Vec<u8>)
 pub fn netbat::encode_hex_str(bytes: &[u8]) -> alloc::string::String
 pub fn netbat::encode_request(operation: &str, input: &[u8]) -> alloc::vec::Vec<u8>
 pub fn netbat::encode_response(result: core::result::Result<&[u8], &netbat::NetbatError>) -> alloc::vec::Vec<u8>
+pub fn netbat::encode_stream_frame(frame: &netbat::StreamFrame) -> alloc::vec::Vec<u8>
 pub fn netbat::inspect_core_operations<I, S>(core: &syncbat::core::Core, operation_names: I) -> netbat::CoreHealth where I: core::iter::IntoIterator<Item = S>, S: core::convert::AsRef<str>
 pub fn netbat::introspect_modules(modules: &[netbat::ServerModule]) -> netbat::Introspection
 pub fn netbat::serve_stream<S>(stream: &mut S, core: &mut syncbat::core::Core, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError> where S: std::io::Read + std::io::Write
-pub fn netbat::serve_tcp_listener(listener: std::net::TcpListener, core: &mut syncbat::core::Core, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError>
+pub fn netbat::serve_subscription_stream(reader: impl std::io::Read + core::marker::Send + 'static, writer: impl std::io::Write + core::marker::Send + 'static, runtime: &impl syncbat::subscription_runtime::session::SubscriptionSessionFactory + ?core::marker::Sized, limits: &netbat::Limits) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError>
+pub fn netbat::serve_tcp_listener<F>(listener: std::net::TcpListener, core_factory: F, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError> where F: syncbat::core::CoreFactory + core::marker::Send + 'static
+pub fn netbat::serve_tcp_subscription_listener(listener: std::net::TcpListener, runtime: &impl syncbat::subscription_runtime::session::SubscriptionSessionFactory + ?core::marker::Sized, config: &netbat::TcpSubscriptionServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError>

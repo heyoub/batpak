@@ -158,6 +158,21 @@ impl Cursor {
             .collect()
     }
 
+    /// The index visibility epoch — snapshot before a poll, pass to
+    /// [`Self::park_for_data`] so a publish racing the poll is never missed.
+    pub(crate) fn visibility_epoch(&self) -> u64 {
+        self.index.sequence.visibility_epoch()
+    }
+
+    /// Park until the index publishes a new visible entry past `since_epoch`, or
+    /// `timeout` elapses. Replaces a poll-sleep spin; the timeout is the deadline
+    /// safety net (a missed wakeup degrades to the timeout, never a hang).
+    pub(crate) fn park_for_data(&self, since_epoch: u64, timeout: Duration) {
+        self.index
+            .sequence
+            .park_for_visibility_change(since_epoch, timeout);
+    }
+
     /// Configure this cursor's in-memory write-to-deliver gap observation.
     #[must_use]
     pub fn with_gap_config(mut self, config: CursorGapConfig) -> Self {
@@ -218,10 +233,16 @@ impl Cursor {
         if delivered_sequence <= expected_sequence {
             return;
         }
-        let cancelled_ranges = self
-            .index
-            .cancelled_visibility_ranges()
-            .into_iter()
+        let cancelled_visibility = self.index.cancelled_visibility_ranges();
+        let lane_ranges = self
+            .region
+            .lane
+            .and_then(|lane| cancelled_visibility.lanes.get(&lane));
+        let cancelled_ranges = cancelled_visibility
+            .global
+            .iter()
+            .chain(lane_ranges.into_iter().flatten())
+            .copied()
             .filter_map(|(start, end)| {
                 let overlap_start = start.max(expected_sequence);
                 let overlap_end = end.min(delivered_sequence);
@@ -253,6 +274,10 @@ impl Canal for Cursor {
         }
         let start = Instant::now();
         loop {
+            // Snapshot the visibility epoch BEFORE polling so a publish racing this
+            // poll cannot be lost: if it advances the epoch between here and the park
+            // below, the park returns immediately and we re-poll.
+            let epoch = self.visibility_epoch();
             let batch = self.poll_batch(max);
             match batch.len() {
                 0 => {
@@ -260,7 +285,10 @@ impl Canal for Cursor {
                         return Ok(CanalBatch::Empty);
                     }
                     let remaining = deadline.saturating_sub(start.elapsed());
-                    std::thread::sleep(remaining.min(Duration::from_millis(1)));
+                    // Park on the index's visibility edge instead of a 1 ms poll-spin:
+                    // wakes promptly when the writer publishes a new visible entry, and
+                    // falls back to `remaining` as a deadline safety net.
+                    self.park_for_data(epoch, remaining);
                 }
                 1 => {
                     let mut batch = batch;

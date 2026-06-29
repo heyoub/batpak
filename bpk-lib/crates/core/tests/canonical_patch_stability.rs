@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; canonical patch-stability golden tests assert via panic and intentionally support explicit fixture regeneration.
-#![allow(clippy::panic, clippy::print_stderr)]
 //! Patch-stability tests for public evidence body bytes.
 //!
 //! PROVES: INV-CANONICAL-PATCH-STABILITY
@@ -11,7 +9,6 @@ use batpak::artifact::{
     verify_canonical_artifact_envelope, AttestationRef, CanonicalArtifactEnvelope,
     SignatureEnvelope, SignatureRef,
 };
-mod support;
 use batpak::registry::{
     registry_drift_findings_sorted, registry_drift_report_body_hash, registry_row_body_hash,
     registry_verification_report_body_hash, NamedDigest, RegistryDriftReportBody, RegistryRowBody,
@@ -46,17 +43,16 @@ use batpak::transition::{
     StateTransitionReportBody, TransitionCauseRef, TransitionId, TransitionMachineId,
     TransitionSubjectId, STATE_TRANSITION_EVENT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::error::Error;
-use support::prelude::*;
 
 #[path = "common/proptest.rs"]
 mod proptest_support;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -69,19 +65,21 @@ fn check_or_update_golden(name: &str, actual_bytes: &[u8]) {
     let actual_hex = hex_encode(actual_bytes);
     let updating = std::env::var("GOLDEN_UPDATE").as_deref() == Ok("I_KNOW_WHAT_IM_DOING");
     if updating {
-        eprintln!("GOLDEN_UPDATE: regenerating golden file {}", path.display());
         std::fs::write(&path, &actual_hex)
-            .unwrap_or_else(|error| panic!("failed to write {}: {error}", path.display()));
+            .map_err(|error| format!("failed to write {}: {error}", path.display()))
+            .expect("GOLDEN_UPDATE must be able to write the regenerated golden file");
         return;
     }
 
-    let expected_hex = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-        panic!(
-            "golden file {} not found: {error}. Run \
-             GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p batpak --test canonical_patch_stability",
-            path.display()
-        )
-    });
+    let expected_hex = std::fs::read_to_string(&path)
+        .map_err(|error| {
+            format!(
+                "golden file {} not found: {error}. Run \
+                 GOLDEN_UPDATE=I_KNOW_WHAT_IM_DOING cargo test -p batpak --test canonical_patch_stability",
+                path.display()
+            )
+        })
+        .expect("golden fixture file must exist; regenerate with GOLDEN_UPDATE");
     assert_eq!(
         actual_hex.trim(),
         expected_hex.trim(),

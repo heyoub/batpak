@@ -1,12 +1,11 @@
 //! Property tests proving that all view topologies agree on query results.
 
 use batpak::coordinate::KindFilter;
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::{IndexTopology, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[path = "common/proptest.rs"]
@@ -88,7 +87,7 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
     for spec in specs {
         let coord = Coordinate::new(entity_name(spec.entity_idx), scope_name(spec.scope_idx))
             .expect("generated coordinates must be valid");
-        store.append(
+        let _ = store.append(
             &coord,
             event_kind(spec),
             &serde_json::json!({
@@ -102,13 +101,16 @@ fn populate(store: &Store, specs: &[AppendSpec]) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> Vec<EventSummary> {
+fn summarize_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+    entries: Vec<IndexEntry>,
+) -> Vec<EventSummary> {
     entries
         .into_iter()
         .filter(|entry| entry.event_kind() != EventKind::SYSTEM_CLOSE_COMPLETED)
         .map(|entry| {
             let mut payload = store
-                .get(batpak::id::EventId::from(entry.event_id()))
+                .get(entry.event_id())
                 .expect("query result must be readable from disk")
                 .event
                 .payload;
@@ -139,7 +141,10 @@ fn summarize_entries<State>(store: &Store<State>, entries: Vec<IndexEntry>) -> V
         .collect()
 }
 
-fn capture_snapshot<State>(store: &Store<State>, specs: &[AppendSpec]) -> QuerySnapshot {
+fn capture_snapshot<State: batpak::store::StoreState>(
+    store: &Store<State>,
+    specs: &[AppendSpec],
+) -> QuerySnapshot {
     let mut entities = BTreeSet::new();
     let mut scope_names = BTreeSet::new();
     let mut exact_kind_keys = BTreeSet::new();
@@ -192,7 +197,9 @@ fn capture_snapshot<State>(store: &Store<State>, specs: &[AppendSpec]) -> QueryS
                 *category,
                 summarize_entries(
                     store,
-                    store.query(&Region::all().with_fact_category(*category)),
+                    store.query(&Region::all().with_fact_category(
+                        EventCategory::new(*category).expect("valid category"),
+                    )),
                 ),
             )
         })

@@ -49,6 +49,24 @@ fn no_approval() -> ApprovalContext {
     ApprovalContext::default()
 }
 
+fn assert_denied_for(diff: &str, kind: WeakeningKind, message: &str) {
+    assert_denied_for_context(diff, kind, &no_approval(), message);
+}
+
+fn assert_denied_for_context(
+    diff: &str,
+    kind: WeakeningKind,
+    ctx: &ApprovalContext,
+    message: &str,
+) {
+    let err = evaluate(diff, &l4_manifest(), ctx).expect_err(message);
+    assert!(
+        err.to_string().contains(kind.as_str()),
+        "expected denial for {}, got: {err}",
+        kind.as_str()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Threshold lowered (CRITICAL_SEAM_MIN_CATCH_PCT 85 -> 70)
 // ---------------------------------------------------------------------------
@@ -138,8 +156,11 @@ fn raising_default_line_budget_without_approval_errs() {
     let findings = classify_weakening(RAISE_LINE_BUDGET_DIFF, &l4_manifest());
     assert_eq!(findings.len(), 1, "got {findings:?}");
     assert_eq!(findings[0].kind, WeakeningKind::BudgetRaised);
-    evaluate(RAISE_LINE_BUDGET_DIFF, &l4_manifest(), &no_approval())
-        .expect_err("raising the line budget without approval must Err");
+    assert_denied_for(
+        RAISE_LINE_BUDGET_DIFF,
+        WeakeningKind::BudgetRaised,
+        "raising the line budget without approval must Err",
+    );
 }
 
 #[test]
@@ -220,6 +241,69 @@ diff --git a/traceability/typed_waivers.yaml b/traceability/typed_waivers.yaml
     );
 }
 
+#[test]
+fn adding_mutation_include_path_is_not_a_weakening() {
+    let diff = "\
+diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/commands/mutants/lanes.rs
+--- a/tools/xtask/src/commands/mutants/lanes.rs
++++ b/tools/xtask/src/commands/mutants/lanes.rs
+@@ -43,2 +43,6 @@
++pub(super) const PROJECTION_FUSION_MUTANT_FILES: &[&str] = &[
++    \"crates/core/src/store/projection/flow/fusion.rs\",
++];
+ const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
+     r\"crates/core/src/store/projection/flow/mod\\.rs:.*delete ! in execute_full_replay\",
+ ";
+    assert!(
+        classify_weakening(diff, &l4_manifest()).is_empty(),
+        "adding a mutation include-list path strengthens coverage and must not be flagged"
+    );
+}
+
+#[test]
+fn adding_unregistered_mutation_exclusion_regex_errs() {
+    // An exclusion regex NOT in the witnessed registry is still a weakening:
+    // meta-gate only defers to registered (categorized + witnessed) exclusions,
+    // so a lazy bare exclusion is flagged and requires approval.
+    let diff = "\
+diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/commands/mutants/lanes.rs
+--- a/tools/xtask/src/commands/mutants/lanes.rs
++++ b/tools/xtask/src/commands/mutants/lanes.rs
+@@ -240,2 +240,3 @@
+ const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
++    r\"crates/core/src/store/import\\.rs:.*replace + with - in unregistered_fn\",
+ ];
+";
+    assert_denied_for(
+        diff,
+        WeakeningKind::WaiverEntryAdded,
+        "adding an UNREGISTERED mutation exclusion regex must Err without approval",
+    );
+}
+
+#[test]
+fn adding_registered_mutation_exclusion_is_not_a_weakening() {
+    // A registered exclusion (categorized + witnessed, proven by the structural
+    // mutation-exclusion-registry gate) is a governed denominator change, not an
+    // unapproved weakening — meta-gate delegates to the registry and does not
+    // demand a human GAUNTLET-WEAKEN-OK for it.
+    let diff = "\
+diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/commands/mutants/lanes.rs
+--- a/tools/xtask/src/commands/mutants/lanes.rs
++++ b/tools/xtask/src/commands/mutants/lanes.rs
+@@ -240,2 +240,3 @@
+ const PROJECTION_MUTANT_EXCLUDE_RES: &[&str] = &[
++    r\"crates/core/src/store/projection/flow/mod\\.rs:.*delete ! in execute_full_replay\",
+ ];
+";
+    assert!(
+        classify_weakening(diff, &l4_manifest()).is_empty(),
+        "a registered, witnessed mutation exclusion must not be a weakening"
+    );
+    evaluate(diff, &l4_manifest(), &no_approval())
+        .expect("a registered exclusion must pass without approval");
+}
+
 // ---------------------------------------------------------------------------
 // Mutation enforcement weakened
 // ---------------------------------------------------------------------------
@@ -238,7 +322,11 @@ diff --git a/tools/xtask/src/commands/mutants/policy.rs b/tools/xtask/src/comman
     assert!(findings
         .iter()
         .any(|w| w.kind == WeakeningKind::MutationEnforcementWeakened));
-    evaluate(diff, &l4_manifest(), &no_approval()).expect_err("phase regression must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::MutationEnforcementWeakened,
+        "phase regression must Err",
+    );
 }
 
 #[test]
@@ -257,7 +345,11 @@ diff --git a/tools/xtask/src/commands/mutants/lanes.rs b/tools/xtask/src/command
     assert!(findings
         .iter()
         .any(|w| w.kind == WeakeningKind::MutationEnforcementWeakened));
-    evaluate(diff, &l4_manifest(), &no_approval()).expect_err("Threshold -> RecordOnly must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::MutationEnforcementWeakened,
+        "Threshold -> RecordOnly must Err",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +398,11 @@ diff --git a/tools/xtask/src/commands/ci.rs b/tools/xtask/src/commands/ci.rs
     assert!(findings
         .iter()
         .any(|w| w.kind == WeakeningKind::GateReburied));
-    evaluate(diff, &l4_manifest(), &no_approval()).expect_err("re-burying a gate must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::GateReburied,
+        "re-burying a gate must Err",
+    );
 }
 
 #[test]
@@ -322,8 +418,11 @@ diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
     assert!(findings
         .iter()
         .any(|w| w.kind == WeakeningKind::GateReburied));
-    evaluate(diff, &l4_manifest(), &no_approval())
-        .expect_err("label-gating a default-on step must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::GateReburied,
+        "label-gating a default-on step must Err",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -345,8 +444,11 @@ diff --git a/tools/integrity/src/gate_registry.rs b/tools/integrity/src/gate_reg
         .iter()
         .any(|w| w.kind == WeakeningKind::BlockingAuthorityRemoved));
     assert!(findings.iter().any(|w| w.blast_radius == BlastRadius::L4));
-    evaluate(diff, &l4_manifest(), &no_approval())
-        .expect_err("removing blocking authority must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::BlockingAuthorityRemoved,
+        "removing blocking authority must Err",
+    );
 }
 
 #[test]
@@ -365,7 +467,11 @@ diff --git a/tools/integrity/src/gate_registry.rs b/tools/integrity/src/gate_reg
     assert!(findings
         .iter()
         .any(|w| w.kind == WeakeningKind::BlockingAuthorityRemoved));
-    evaluate(diff, &l4_manifest(), &no_approval()).expect_err("deleting a red fixture must Err");
+    assert_denied_for(
+        diff,
+        WeakeningKind::BlockingAuthorityRemoved,
+        "deleting a red fixture must Err",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -465,8 +571,12 @@ fn standard_weakening_needs_both_label_and_trailer() {
         labels: vec![WEAKEN_APPROVED_LABEL.to_string()],
         ..ApprovalContext::default()
     };
-    evaluate(LOWER_CRITICAL_SEAM_DIFF, &l4_manifest(), &label_only)
-        .expect_err("label without trailer must Err");
+    assert_denied_for_context(
+        LOWER_CRITICAL_SEAM_DIFF,
+        WeakeningKind::ThresholdLowered,
+        &label_only,
+        "label without trailer must Err",
+    );
     // Trailer only -> still Err.
     let trailer_only = ApprovalContext {
         weaken_ok_trailers: vec![WeakenTrailer {
@@ -475,8 +585,12 @@ fn standard_weakening_needs_both_label_and_trailer() {
         }],
         ..ApprovalContext::default()
     };
-    evaluate(LOWER_CRITICAL_SEAM_DIFF, &l4_manifest(), &trailer_only)
-        .expect_err("trailer without label must Err");
+    assert_denied_for_context(
+        LOWER_CRITICAL_SEAM_DIFF,
+        WeakeningKind::ThresholdLowered,
+        &trailer_only,
+        "trailer without label must Err",
+    );
 }
 
 #[test]
@@ -485,4 +599,178 @@ fn empty_l4_manifest_treats_threshold_drop_as_standard() {
     // same-author label+trailer suffices.
     evaluate(LOWER_L4_THRESHOLD_DIFF, &[], &approved_same_author())
         .expect("with no L4 manifest, same-author approval suffices for a standard weakening");
+}
+
+// ---------------------------------------------------------------------------
+// GAUNT-CAPSNAP: capability-floor downgrades
+// ---------------------------------------------------------------------------
+
+const SNAP: &str = "traceability/capability_snapshot.yaml";
+
+fn cap_diff(removed: &str, added: &str) -> String {
+    let mut diff =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,1 @@\n");
+    if !removed.is_empty() {
+        diff.push_str(&format!("-{removed}\n"));
+    }
+    if !added.is_empty() {
+        diff.push_str(&format!("+{added}\n"));
+    }
+    diff
+}
+
+#[test]
+fn enforcement_weakened_errs() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }",
+        "  - { backend: linux, kind: Kill, enforcement: Mediated, evidence: [ProcessTree, TerminalOutcome] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("Enforced -> Mediated")),
+        "Enforced->Mediated must be a capability downgrade; got {findings:?}"
+    );
+    assert_denied_for(
+        &diff,
+        WeakeningKind::CapabilityDowngraded,
+        "an unapproved capability downgrade must Err",
+    );
+}
+
+#[test]
+fn downgrade_to_unsupported_is_l4_two_person() {
+    // A drop to Unsupported (capability fully lost) is L4: a same-author trailer
+    // is insufficient (two-person rule).
+    let diff = cap_diff(
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }",
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Unsupported, evidence: [] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.blast_radius == BlastRadius::L4),
+        "a downgrade to Unsupported must be L4; got {findings:?}"
+    );
+    let err = evaluate(&diff, &l4_manifest(), &approved_same_author())
+        .expect_err("an L4 capability downgrade with a same-author trailer must Err");
+    assert!(err.to_string().contains("two-person"), "got: {err}");
+}
+
+#[test]
+fn removed_capability_row_is_l4() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: ExposePath, enforcement: Enforced, evidence: [MechanismAttestation] }",
+        "",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.blast_radius == BlastRadius::L4
+                && w.detail.contains("row removed")),
+        "a removed (backend,kind) row must be an L4 downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn capability_split_manifest_prevents_false_removed_row_downgrade() {
+    let mut diff =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,3 @@\n");
+    diff.push_str("-  - { backend: linux, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }\n");
+    diff.push_str("+  - { backend: linux, from: ChildSpawn, to: [ChildSpawnAllowDescendants, ChildSpawnDenyNewTasks], reason: split-child-spawn }\n");
+    assert!(
+        classify_weakening(&diff, &l4_manifest()).is_empty(),
+        "an enforcement-preserving declared split must not look like a removed-row downgrade"
+    );
+
+    let mut missing_replacement =
+        format!("diff --git a/{SNAP} b/{SNAP}\n--- a/{SNAP}\n+++ b/{SNAP}\n@@ -9,1 +9,2 @@\n");
+    missing_replacement.push_str(
+        "-  - { backend: linux, kind: ChildSpawn, enforcement: Enforced, evidence: [ProcessTree] }\n",
+    );
+    missing_replacement.push_str(
+        "+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }\n",
+    );
+    missing_replacement.push_str(
+        "+  - { backend: linux, from: ChildSpawn, to: [ChildSpawnAllowDescendants, ChildSpawnDenyNewTasks], reason: split-child-spawn }\n",
+    );
+    let findings = classify_weakening(&missing_replacement, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("row removed")),
+        "a split manifest without all replacement rows must still flag the removed row; got {findings:?}"
+    );
+}
+
+#[test]
+fn removed_evidence_claim_errs() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }",
+        "  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("dropped MechanismAttestation")),
+        "a dropped evidence claim must be a downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn witness_unproved_errs() {
+    let diff = cap_diff(
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: true }",
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: false }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        findings
+            .iter()
+            .any(|w| w.kind == WeakeningKind::CapabilityDowngraded
+                && w.detail.contains("witness un-proved")),
+        "un-proving a witnessed invariant must be a downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn strengthening_a_capability_is_not_a_weakening() {
+    // Mediated -> Enforced (an upgrade) and a brand-new added cell are NOT flagged.
+    let upgrade = cap_diff(
+        "  - { backend: macos, kind: Kill, enforcement: Mediated, evidence: [TerminalOutcome] }",
+        "  - { backend: macos, kind: Kill, enforcement: Enforced, evidence: [TerminalOutcome] }",
+    );
+    assert!(
+        classify_weakening(&upgrade, &l4_manifest()).is_empty(),
+        "Mediated->Enforced is a strengthening, not a weakening"
+    );
+    let added_only = cap_diff(
+        "",
+        "  - { backend: linux, kind: NetworkAllowList, enforcement: Enforced, evidence: [NetworkActivity] }",
+    );
+    assert!(
+        classify_weakening(&added_only, &l4_manifest()).is_empty(),
+        "a newly-advertised capability cell is a strengthening, not a weakening"
+    );
+}
+
+#[test]
+fn capability_downgrade_with_full_two_person_approval_passes() {
+    let diff = cap_diff(
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }",
+        "  - { backend: linux, kind: NetworkDenyAll, enforcement: Unsupported, evidence: [] }",
+    );
+    evaluate(&diff, &l4_manifest(), &fully_approved_l4())
+        .expect("a fully two-person-approved capability downgrade must pass");
 }

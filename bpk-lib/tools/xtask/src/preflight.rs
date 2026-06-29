@@ -158,8 +158,14 @@ mod tests {
         let missing_table = "channel = \"1.92.0\"\n";
         let wrong_type = "[toolchain]\nchannel = 192\n";
 
-        assert!(parse_toolchain_channel(missing_table).is_err());
-        assert!(parse_toolchain_channel(wrong_type).is_err());
+        assert!(
+            parse_toolchain_channel(missing_table).is_err(),
+            "PROPERTY: rust-toolchain.toml without [toolchain] is malformed"
+        );
+        assert!(
+            parse_toolchain_channel(wrong_type).is_err(),
+            "PROPERTY: rust-toolchain channel must be a string"
+        );
     }
 
     #[test]

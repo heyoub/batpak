@@ -36,6 +36,9 @@ impl Store<Open> {
             }
             return Err(StoreError::WriterCrashed);
         }
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.writer_handle()?.pump();
         recv_writer_reply(&rx)?;
         Ok(VisibilityFence::new(self, token))
     }
@@ -263,21 +266,25 @@ impl Store<Open> {
 
     /// WRITE: persist a gate denial as a normal per-entity chain event.
     ///
+    /// Takes a [`DenialRequest`] so the denial-append inputs travel as one
+    /// self-describing argument.
+    ///
     /// # Errors
     /// Returns any serialization or writer error surfaced by the underlying
     /// append path.
-    // justifies: Store::append_denial matches the substrate contract locked in this turn and mirrors the user-requested denial append surface; splitting it would add an extra request object without simplifying src/store/mod.rs.
-    #[allow(clippy::too_many_arguments)]
     pub fn append_denial<Ctx>(
         &self,
-        coord: &Coordinate,
-        proposed_kind: EventKind,
-        gate_set: &GateSet<Ctx>,
-        failing: &Denial,
-        proposed_content_hash: Option<[u8; 32]>,
-        pipeline_id: Option<String>,
-        options: AppendOptions,
+        request: DenialRequest<'_, Ctx>,
     ) -> Result<DenialReceipt, StoreError> {
+        let DenialRequest {
+            coord,
+            proposed_kind,
+            gate_set,
+            failing,
+            proposed_content_hash,
+            pipeline_id,
+            options,
+        } = request;
         let payload =
             gate_set.trace_denial(failing, proposed_kind, proposed_content_hash, pipeline_id);
         // SYSTEM_DENIAL is a reserved kind, so the public funnel would reject
@@ -298,7 +305,7 @@ impl Store<Open> {
         }
         Ok(DenialReceipt {
             event_id: receipt.event_id,
-            sequence: receipt.sequence,
+            global_sequence: receipt.global_sequence,
             disk_pos: receipt.disk_pos,
             content_hash: receipt.content_hash,
             key_id: receipt.key_id,
@@ -418,15 +425,10 @@ impl Store<Open> {
     /// Crate-private accessor that encodes the `Store<Open>` typestate
     /// invariant: an `Open` store always holds a writer handle.
     ///
-    /// Panics if the invariant is violated — which only happens when a
-    /// `Store<Open>` has been partially moved out of during drop, a context
-    /// in which every public method is already unreachable.
-    // justifies: INV-TYPESTATE-OPEN-HAS-WRITER and src/store/lifecycle.rs make this a typestate construction guarantee, not contingent runtime input.
-    #[allow(clippy::expect_used)]
+    /// The invariant is enforced by the type: `Open(WriterHandle)` owns the
+    /// handle, so the borrow is total — no `Option`, no `expect`, no panic.
     pub(crate) fn writer_ref(&self) -> &WriterHandle {
-        self.writer
-            .as_ref()
-            .expect("invariant: Store<Open> is constructed with a writer handle")
+        &self.state.0
     }
 
     /// WRITE: append with CAS, idempotency, custom correlation/causation.
@@ -790,10 +792,12 @@ mod tests {
         );
 
         drop(lifecycle);
-        done_rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("append completes after lifecycle gate opens")
-            .expect("append succeeds");
+        drop(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("append completes after lifecycle gate opens")
+                .expect("append succeeds"),
+        );
         worker.join().expect("append worker joins");
     }
 
@@ -834,9 +838,11 @@ mod tests {
         }
 
         // DATA still appends successfully through the same funnel.
-        store
-            .append(&coord, EventKind::DATA, &payload)
-            .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard");
+        drop(
+            store
+                .append(&coord, EventKind::DATA, &payload)
+                .expect("PROPERTY: DATA append must still succeed after the reserved-kind guard"),
+        );
 
         store.close().expect("close store");
     }

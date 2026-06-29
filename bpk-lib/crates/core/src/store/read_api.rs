@@ -4,7 +4,7 @@ use crate::id::EventId;
 use crate::store::index::IndexEntry;
 use std::collections::BTreeMap;
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// READ: get a single event by ID.
     ///
     /// # Errors
@@ -12,7 +12,10 @@ impl<State> Store<State> {
     /// Returns `StoreError::Io` or `StoreError::Serialization` if reading from disk fails.
     pub fn get(&self, event_id: EventId) -> Result<StoredEvent<serde_json::Value>, StoreError> {
         let raw = event_id.as_u128();
-        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
+        let entry = self
+            .index
+            .get_by_id(raw)
+            .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry(&entry.disk_pos)
     }
 
@@ -27,18 +30,11 @@ impl<State> Store<State> {
     /// from disk fails.
     pub fn read_raw(&self, event_id: EventId) -> Result<StoredEvent<Vec<u8>>, StoreError> {
         let raw = event_id.as_u128();
-        let entry = self.index.get_by_id(raw).ok_or(StoreError::NotFound(raw))?;
+        let entry = self
+            .index
+            .get_by_id(raw)
+            .ok_or(StoreError::NotFound(event_id))?;
         self.reader.read_entry_raw(&entry.disk_pos)
-    }
-
-    /// Verify an append receipt against the store's signing-key registry and
-    /// current index state, returning only a boolean.
-    ///
-    /// Prefer [`Self::verify_append_receipt_detailed`] in new code when the
-    /// caller needs proof language or a stable rejection reason.
-    #[must_use]
-    pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> bool {
-        self.verify_append_receipt_detailed(receipt).is_valid()
     }
 
     /// Verify ack-shaped append receipt fields against the store's signing-key
@@ -46,12 +42,12 @@ impl<State> Store<State> {
     ///
     /// Wire transports omit [`AppendReceipt::disk_pos`]; this helper hydrates
     /// it from the committed index entry before delegating to
-    /// [`Self::verify_append_receipt_detailed`].
+    /// [`Self::verify_append_receipt`].
     #[must_use]
     pub fn verify_append_receipt_wire_detailed(
         &self,
         event_id: EventId,
-        sequence: u64,
+        global_sequence: u64,
         content_hash: [u8; 32],
         key_id: [u8; 32],
         signature: Option<[u8; 64]>,
@@ -62,14 +58,14 @@ impl<State> Store<State> {
         };
         let receipt = AppendReceipt {
             event_id,
-            sequence,
+            global_sequence,
             disk_pos: entry.disk_pos,
             content_hash,
             key_id,
             signature,
             extensions,
         };
-        self.verify_append_receipt_detailed(&receipt)
+        self.verify_append_receipt(&receipt)
     }
 
     /// Verify a full persisted append receipt and return the exact acceptance
@@ -80,7 +76,7 @@ impl<State> Store<State> {
     /// use [`Self::verify_append_receipt_wire_detailed`] so the store can
     /// hydrate the disk position from the committed index entry.
     #[must_use]
-    pub fn verify_append_receipt_detailed(&self, receipt: &AppendReceipt) -> ReceiptVerification {
+    pub fn verify_append_receipt(&self, receipt: &AppendReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
@@ -95,17 +91,10 @@ impl<State> Store<State> {
         )
     }
 
-    /// Verify a persisted denial receipt against the store's signing-key
-    /// registry and current index state.
-    #[must_use]
-    pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> bool {
-        self.verify_denial_receipt_detailed(receipt).is_valid()
-    }
-
     /// Verify a persisted denial receipt and return the exact acceptance or
     /// rejection reason.
     #[must_use]
-    pub fn verify_denial_receipt_detailed(&self, receipt: &DenialReceipt) -> ReceiptVerification {
+    pub fn verify_denial_receipt(&self, receipt: &DenialReceipt) -> ReceiptVerification {
         let Some(entry) = self.index.get_by_id(receipt.event_id.as_u128()) else {
             return ReceiptVerification::Invalid(ReceiptVerificationError::MissingCommittedEvent);
         };
@@ -129,6 +118,20 @@ impl<State> Store<State> {
     #[must_use]
     pub fn query(&self, region: &Region) -> Vec<IndexEntry> {
         self.index.query(region)
+    }
+
+    /// READ: return every currently visible index entry matching a Region on
+    /// one exact DAG lane.
+    ///
+    /// The explicit `lane` argument is authoritative. Passing a `Region` that
+    /// already carries a lane is only valid when it matches this argument.
+    #[must_use]
+    pub fn query_lane(&self, region: &Region, lane: u32) -> Vec<IndexEntry> {
+        debug_assert!(
+            region.lane.is_none() || region.lane == Some(lane),
+            "query_lane lane argument must match any pre-set Region lane"
+        );
+        self.index.query(&region.clone().with_lane(lane))
     }
 
     /// READ: query a bounded page of visible events by Region in ascending
@@ -180,6 +183,59 @@ impl<State> Store<State> {
         projection::flow::project(self, entity, freshness)
     }
 
+    /// PROJECT: reconstruct two typed states from one consistent direct replay.
+    ///
+    /// Both projections must use the same replay input lane, and each is folded
+    /// over only its declared [`EventSourced::relevant_event_kinds`]. This
+    /// fused path intentionally bypasses projection caches so cache watermarks
+    /// remain projection-specific.
+    ///
+    /// # Errors
+    /// Returns any disk-read or replay decode error surfaced while loading the
+    /// shared event stream.
+    pub fn project_fused2<Left, Right>(
+        &self,
+        entity: &str,
+    ) -> Result<(Option<Left>, Option<Right>), StoreError>
+    where
+        Left: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        Right: EventSourced<Input = Left::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        Left::Input: projection::flow::ReplayInput,
+    {
+        projection::flow::project_fused2(self, entity)
+    }
+
+    /// PROJECT: reconstruct three typed states from one consistent direct replay.
+    ///
+    /// The projections must use the same replay input lane. A projection whose
+    /// [`EventSourced::relevant_event_kinds`] slice is empty receives the full
+    /// shared stream; other projections receive only their declared kinds.
+    ///
+    /// # Errors
+    /// Returns any disk-read or replay decode error surfaced while loading the
+    /// shared event stream.
+    pub fn project_fused3<First, Second, Third>(
+        &self,
+        entity: &str,
+    ) -> Result<super::ProjectionFusion3<First, Second, Third>, StoreError>
+    where
+        First: EventSourced + serde::Serialize + serde::de::DeserializeOwned + 'static,
+        Second: EventSourced<Input = First::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        Third: EventSourced<Input = First::Input>
+            + serde::Serialize
+            + serde::de::DeserializeOwned
+            + 'static,
+        First::Input: projection::flow::ReplayInput,
+    {
+        projection::flow::project_fused3(self, entity)
+    }
+
     /// Return the current per-entity generation if the entity exists.
     ///
     /// Generations advance monotonically on every insert for that entity.
@@ -223,6 +279,24 @@ impl<State> Store<State> {
         self.index.stream(entity)
     }
 
+    /// READ: query all events for an exact entity id on one DAG lane.
+    #[must_use]
+    pub fn by_entity_lane(&self, entity: &str, lane: u32) -> Vec<IndexEntry> {
+        self.index.stream_lane(entity, lane)
+    }
+
+    /// READ: query all events for an exact entity id on one DAG lane.
+    #[must_use]
+    pub fn stream_lane(&self, entity: &str, lane: u32) -> Vec<IndexEntry> {
+        self.by_entity_lane(entity, lane)
+    }
+
+    /// READ: return the latest visible event for an entity on one DAG lane.
+    #[must_use]
+    pub fn latest_lane(&self, entity: &str, lane: u32) -> Option<IndexEntry> {
+        self.index.get_latest(entity, lane)
+    }
+
     /// READ: query all events in the given scope.
     #[must_use]
     pub fn by_scope(&self, scope: &str) -> Vec<IndexEntry> {
@@ -262,7 +336,7 @@ fn append_receipt_index_mismatch(
     if receipt.event_id.as_u128() != entry.event_id {
         return Some(ReceiptVerificationError::EventIdMismatch);
     }
-    if receipt.sequence != entry.global_sequence {
+    if receipt.global_sequence != entry.global_sequence {
         return Some(ReceiptVerificationError::SequenceMismatch);
     }
     if receipt.disk_pos != entry.disk_pos {
@@ -287,7 +361,7 @@ fn denial_receipt_index_mismatch(
     if receipt.event_id.as_u128() != entry.event_id {
         return Some(ReceiptVerificationError::EventIdMismatch);
     }
-    if receipt.sequence != entry.global_sequence {
+    if receipt.global_sequence != entry.global_sequence {
         return Some(ReceiptVerificationError::SequenceMismatch);
     }
     if receipt.disk_pos != entry.disk_pos {
@@ -303,78 +377,5 @@ fn denial_receipt_index_mismatch(
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::coordinate::Coordinate;
-    use crate::event::EventKind;
-    use crate::store::index::DiskPos;
-    use crate::store::{ReceiptVerification, ReceiptVerificationError, Store, StoreConfig};
-    use tempfile::TempDir;
-
-    #[test]
-    fn append_receipt_verification_rejects_disk_position_tampering() {
-        let dir = TempDir::new().expect("temp dir");
-        let store = Store::open(
-            StoreConfig::new(dir.path())
-                .with_enable_checkpoint(false)
-                .with_enable_mmap_index(false),
-        )
-        .expect("open store");
-        let coord = Coordinate::new("entity:receipt-disk-pos", "scope:test").expect("coord");
-        let mut receipt = store
-            .append(
-                &coord,
-                EventKind::custom(0xA, 20),
-                &serde_json::json!({"n": 1}),
-            )
-            .expect("append");
-
-        assert_eq!(
-            store.verify_append_receipt_detailed(&receipt),
-            ReceiptVerification::UnsignedAccepted
-        );
-        assert!(store.verify_append_receipt(&receipt));
-        receipt.disk_pos = DiskPos::new(
-            receipt.disk_pos.segment_id(),
-            receipt.disk_pos.offset() + 1,
-            receipt.disk_pos.length(),
-        );
-
-        assert!(
-            !store.verify_append_receipt(&receipt),
-            "disk position must match the committed index entry"
-        );
-        assert_eq!(
-            store.verify_append_receipt_detailed(&receipt),
-            ReceiptVerification::Invalid(ReceiptVerificationError::DiskPositionMismatch)
-        );
-    }
-
-    #[test]
-    fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
-        let dir = TempDir::new().expect("temp dir");
-        let store = Store::open(
-            StoreConfig::new(dir.path())
-                .with_enable_checkpoint(false)
-                .with_enable_mmap_index(false),
-        )
-        .expect("open store");
-        let coord = Coordinate::new("entity:wire-verify", "scope:test").expect("coord");
-        let receipt = store
-            .append(
-                &coord,
-                EventKind::custom(0xA, 22),
-                &serde_json::json!({"n": 1}),
-            )
-            .expect("append");
-
-        let verification = store.verify_append_receipt_wire_detailed(
-            receipt.event_id,
-            receipt.sequence,
-            receipt.content_hash,
-            receipt.key_id,
-            receipt.signature,
-            receipt.extensions.clone(),
-        );
-        assert_eq!(verification, ReceiptVerification::UnsignedAccepted);
-    }
-}
+#[path = "read_api_tests.rs"]
+mod tests;

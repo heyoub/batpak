@@ -62,7 +62,7 @@ pub(crate) trait RegionFanoutItem {
 #[derive(Clone, Debug)]
 pub struct Notification {
     /// Unique ID of the event that was appended.
-    pub event_id: u128,
+    pub event_id: crate::id::EventId,
     /// Correlation ID linking this event to a causal chain.
     pub correlation_id: u128,
     /// ID of the event that caused this one; `None` for root-cause events.
@@ -78,7 +78,12 @@ pub struct Notification {
 }
 
 pub(crate) fn notification_matches_region(region: &Region, value: &Notification) -> bool {
-    region.matches_event(value.coord.entity(), value.coord.scope(), value.kind)
+    region.matches_event_on_lane(
+        value.coord.entity(),
+        value.coord.scope(),
+        value.kind,
+        Some(value.position.lane()),
+    )
 }
 
 impl RegionFanoutItem for CommittedEventEnvelope {
@@ -222,7 +227,7 @@ mod fanout_subscriber_tests {
 
     fn notification(scope: &str) -> Notification {
         Notification {
-            event_id: 1,
+            event_id: crate::id::EventId::from_u128(1),
             correlation_id: 1,
             causation_id: None,
             coord: Coordinate::new("entity", scope).expect("coordinate"),

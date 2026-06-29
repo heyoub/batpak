@@ -1,26 +1,26 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path watch tests in tests/unified_watch_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
-#[path = "support/red_counters.rs"]
-mod red_counters;
-#[path = "support/red_kind_b.rs"]
-mod red_kind_b;
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
+use batpak_testkit::bounded_blocking;
+use batpak_testkit::red_counters;
+use batpak_testkit::red_kind_b;
+use batpak_testkit::red_kinds;
 use bounded_blocking::blocking;
 
 use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 
-mod support;
+use batpak::store::ReplayInput;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
+
+#[test]
+fn replay_input_is_public_for_projection_watchers() {
+    fn assert_replay_input<T: ReplayInput>() {}
+    assert_replay_input::<JsonValueInput>();
+}
 
 #[test]
 fn watch_projection_emits_on_new_events() {
@@ -29,7 +29,7 @@ fn watch_projection_emits_on_new_events() {
     let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
 
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
 
     let mut watcher = store.watch_projection::<AllCounter>("watch:entity", Freshness::Consistent);
@@ -40,7 +40,7 @@ fn watch_projection_emits_on_new_events() {
         .spawn(move || {
             let coord = Coordinate::new("watch:entity", "watch:scope").expect("coord");
             for i in 5u32..8 {
-                store2
+                let _ = store2
                     .append(&coord, kind_a(), &payload(i))
                     .expect("append");
             }
@@ -68,7 +68,7 @@ fn watch_projection_catches_up_after_lossy_notifications() {
     let coord = Coordinate::new("watch:lossy", "watch:scope").expect("coord");
 
     for i in 0u32..3 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("seed append");
     }
@@ -76,7 +76,7 @@ fn watch_projection_catches_up_after_lossy_notifications() {
     let mut watcher = store.watch_projection::<AllCounter>("watch:lossy", Freshness::Consistent);
 
     for i in 3u32..10 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("append burst");
     }
@@ -97,7 +97,7 @@ fn subscription_returns_none_on_store_close() {
     let dir = TempDir::new().expect("temp dir");
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("drop:entity", "drop:scope").expect("coord");
-    store.append(&coord, kind_a(), &payload(0)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(0)).expect("append");
 
     let sub = store.subscribe_lossy(&Region::entity("drop:entity"));
 
@@ -129,14 +129,14 @@ fn watch_projection_returns_subscription_pruned_when_slow_watcher_is_pruned() {
     let store = Arc::new(Store::open(config).expect("open"));
     let coord = Coordinate::new("watch:pruned", "watch:scope").expect("coord");
 
-    store
+    let _ = store
         .append(&coord, kind_a(), &payload(0))
         .expect("seed append");
 
     let mut watcher = store.watch_projection::<AllCounter>("watch:pruned", Freshness::Consistent);
 
     for i in 1u32..6 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("burst append");
     }
@@ -157,14 +157,9 @@ fn watch_projection_returns_subscription_pruned_when_slow_watcher_is_pruned() {
          Investigate: src/store/projection/watch.rs recv + src/store/projection/flow.rs."
     );
 
-    let err: batpak::store::WatcherError = match second {
-        Ok(_) => {
-            panic!(
-                "PROPERTY: pruned watcher should terminate with WatcherError::SubscriptionPruned"
-            )
-        }
-        Err(err) => err,
-    };
+    let err: batpak::store::WatcherError = second.map(|_| ()).expect_err(
+        "PROPERTY: pruned watcher should terminate with WatcherError::SubscriptionPruned",
+    );
     assert!(
         matches!(err, batpak::store::WatcherError::SubscriptionPruned),
         "PROPERTY: a pruned watcher must surface WatcherError::SubscriptionPruned, got {err:?}"
@@ -178,7 +173,7 @@ fn cursor_watch_projection_replays_without_subscription_prune_error_type() {
     let coord = Coordinate::new("watch:cursor", "watch:scope").expect("coord");
 
     for i in 0u32..3 {
-        store
+        let _ = store
             .append(&coord, kind_a(), &payload(i))
             .expect("seed append");
     }
@@ -204,7 +199,7 @@ fn project_if_changed_reports_honest_generation_for_empty_filtered_state() {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("watch:filtered-empty", "watch:scope").expect("coord");
 
-    store
+    let _ = store
         .append(&coord, kind_b(), &payload(99))
         .expect("append irrelevant event");
 

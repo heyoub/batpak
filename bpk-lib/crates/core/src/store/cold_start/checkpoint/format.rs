@@ -126,6 +126,27 @@ pub(super) fn read_checkpoint_file(data_dir: &Path) -> FileLoad<LoadedCheckpoint
     }
 
     let version = u16::from_le_bytes([raw[6], raw[7]]);
+    // A future (newer-than-supported) checkpoint is a CANONICAL TYPED REFUSAL,
+    // never a silent rebuild-from-scan: a future writer may have written a
+    // snapshot this reader cannot interpret. The version field lives OUTSIDE the
+    // CRC region (the CRC at bytes 8..12 covers only the body at bytes 12..), so
+    // this check fires before the CRC check — a forged version alone trips it.
+    // Corrupt or genuinely-older artifacts keep their graceful-rebuild path via
+    // `FileLoad::Invalid` below (older versions still decode in
+    // `decode_checkpoint_data`). justifies: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+    if version > CHECKPOINT_VERSION {
+        tracing::warn!(
+            target: "batpak::checkpoint",
+            path = %path.display(),
+            version,
+            supported = CHECKPOINT_VERSION,
+            "checkpoint declares a future format version — refusing canonically"
+        );
+        return FileLoad::FutureVersion {
+            found: version,
+            supported: CHECKPOINT_VERSION,
+        };
+    }
     let stored_crc = u32::from_le_bytes([raw[8], raw[9], raw[10], raw[11]]);
     let body = raw[HEADER_LEN..].to_vec();
     let computed_crc = crc32fast::hash(&body);

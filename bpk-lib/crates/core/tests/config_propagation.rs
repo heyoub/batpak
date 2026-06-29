@@ -11,11 +11,10 @@
 //!
 //! Each test targets the specific bug class to prevent regression.
 
-mod support;
 use batpak::store::{IndexTopology, RestartPolicy, Store, StoreConfig, SyncMode};
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 // ============================================================================
@@ -39,25 +38,25 @@ fn wall_ms_monotonic_under_clock_regression() {
     let kind = EventKind::custom(0xF, 1);
 
     // Append event at t=1000s
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"step": 1}))
         .expect("append 1");
 
     // Append event at t=2000s (forward)
     clock_us.store(2_000_000_000, Ordering::SeqCst);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"step": 2}))
         .expect("append 2");
 
     // CLOCK REGRESSION: jump back to t=500s
     clock_us.store(500_000_000, Ordering::SeqCst);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"step": 3}))
         .expect("append 3");
 
     // Append another at t=600s (still behind the high-water mark of 2000s)
     clock_us.store(600_000_000, Ordering::SeqCst);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"step": 4}))
         .expect("append 4");
 
@@ -110,13 +109,13 @@ fn wall_ms_monotonic_per_entity_isolation() {
 
     // Entity A at t=2000s
     clock_us.store(2_000_000_000, Ordering::SeqCst);
-    store
+    let _ = store
         .append(&coord_a, kind, &serde_json::json!({"entity": "a"}))
         .expect("append a");
 
     // Clock regression to t=500s — entity B starts here
     clock_us.store(500_000_000, Ordering::SeqCst);
-    store
+    let _ = store
         .append(&coord_b, kind, &serde_json::json!({"entity": "b"}))
         .expect("append b");
 
@@ -158,7 +157,7 @@ fn sync_mode_sync_data_does_not_panic() {
 
     // Write several events — each triggers periodic sync with SyncData mode
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append with SyncData");
     }
@@ -193,7 +192,7 @@ fn sync_mode_sync_data_survives_segment_rotation() {
     let payload = serde_json::json!({"data": "payload to fill segments quickly for rotation"});
 
     for _ in 0..50 {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     store.sync().expect("sync");
 
@@ -239,7 +238,7 @@ fn sync_mode_sync_data_survives_cold_start() {
         let kind = EventKind::custom(0xF, 1);
 
         for i in 0..20 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }
@@ -284,7 +283,7 @@ fn writer_stack_size_custom_value_works() {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append with custom stack");
     }
@@ -311,7 +310,7 @@ fn writer_stack_size_none_uses_default() {
     let coord = Coordinate::new("entity:default-stack", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"ok": true}))
         .expect("append with default stack");
 
@@ -332,11 +331,11 @@ fn store_config_all_fields_overridable() {
     // Avoids wall-clock dependency so the test never flakes on clock skew.
     let clock_start = std::time::Instant::now();
     let clock_fn: Arc<dyn Fn() -> i64 + Send + Sync> = Arc::new(move || {
-        // justifies: INV-CLOCK-NOW-US-LIVE, INV-MACRO-BOUNDED-CAST; u128 microseconds-since-start narrowed to i64 in tests/config_propagation.rs cannot overflow during any plausible test run (requires >292,000 years of elapsed time).
-        #[allow(clippy::cast_possible_truncation)]
-        {
-            clock_start.elapsed().as_micros() as i64
-        }
+        // u128 microseconds-since-start narrowed to i64: this cannot overflow
+        // during any plausible test run (it would require >292,000 years of
+        // elapsed time), so the try_from is infallible in practice.
+        i64::try_from(clock_start.elapsed().as_micros())
+            .expect("microseconds since test start fit in i64 within any test run")
     });
 
     let config = StoreConfig::new(dir.path())
@@ -379,7 +378,7 @@ fn store_config_all_fields_overridable() {
 
     // Write enough to trigger periodic sync (sync.every_n_events = 5)
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append with all-custom config");
     }
@@ -453,7 +452,7 @@ fn store_config_debug_lists_all_integrity_relevant_fields() {
         "max_size: 333",
         "max_bytes: 44444",
         "IndexConfig",
-        "topology: IndexTopology { soa: true, entity_groups: false, tiles64: true, tiles64_simd: false }",
+        "topology: IndexTopology { soa: true, entity_groups: false, tiles64: true }",
         "enable_checkpoint: true",
         "enable_mmap_index: false",
         "clock: Some(\"<clock>\")",

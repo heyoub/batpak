@@ -1,7 +1,6 @@
-mod support;
 use batpak::store::{Clock, SystemClock};
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 
 #[test]
 fn store_config_builder_methods_are_chainable() {

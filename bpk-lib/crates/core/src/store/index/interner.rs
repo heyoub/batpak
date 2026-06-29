@@ -24,6 +24,7 @@
 //! [`StringInterner::intern`] is safe to call concurrently; contention only
 //! occurs on the write lock when a new string is first seen.
 
+use crate::store::StoreError;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -61,10 +62,13 @@ impl InternId {
     /// The inner `u32` is a 1-based index; this cast is always lossless because
     /// `u32::MAX` (≈4 B) is well within `usize` range on all supported targets.
     #[inline]
-    // justifies: src/store/index/interner.rs supports only targets where the u32 interner domain fits usize; this is a supported-target invariant.
-    #[allow(clippy::expect_used)]
     pub(crate) fn to_usize(self) -> usize {
-        usize::try_from(self.0).expect("u32 intern IDs fit in usize on supported targets")
+        // `u32 -> usize` is lossless on every supported target: a <32-bit target is
+        // rejected at compile time (see the `target_pointer_width` guard in lib.rs),
+        // so the `Err` arm is unreachable. `unwrap_or` keeps this total and lint-clean
+        // (no expect/unwrap/panic/cast); on the impossible narrow target it degrades to
+        // a guaranteed out-of-bounds index rather than a panic.
+        usize::try_from(self.0).unwrap_or(usize::MAX)
     }
 
     /// Returns the sentinel ID (slot 0, empty string). Used as a placeholder
@@ -127,8 +131,7 @@ impl StringInterner {
     }
 
     // justifies: src/store/index/interner.rs builds snapshots from its own u32-backed state, so restore preserves the same bounded id domain.
-    #[allow(clippy::expect_used)]
-    fn install_snapshot_iter<I>(&self, strings: I)
+    fn install_snapshot_iter<I>(&self, strings: I) -> Result<(), StoreError>
     where
         I: IntoIterator<Item = Arc<str>>,
     {
@@ -138,7 +141,9 @@ impl StringInterner {
         forward_map.insert(sentinel, InternId(SENTINEL_ID));
 
         for (idx, string) in strings.into_iter().enumerate() {
-            let raw = u32::try_from(idx + 1).expect("interner snapshot exceeds u32 slots");
+            let raw = u32::try_from(idx + 1).map_err(|_| StoreError::InternerExhausted {
+                count: u64::try_from(idx + 1).unwrap_or(u64::MAX),
+            })?;
             forward_map.insert(Arc::clone(&string), InternId(raw));
             reverse.push(string);
         }
@@ -148,12 +153,15 @@ impl StringInterner {
         // (or vice versa). next_id is stored Release while both guards are
         // still held; readers that take forward.read() after our drop also
         // synchronise with next_id.
-        let next = u32::try_from(reverse.len()).expect("interner size exceeds u32 slots");
+        let next = u32::try_from(reverse.len()).map_err(|_| StoreError::InternerExhausted {
+            count: u64::try_from(reverse.len()).unwrap_or(u64::MAX),
+        })?;
         let mut forward_guard = self.forward.write();
         let mut reverse_guard = self.reverse.write();
         *forward_guard = forward_map;
         *reverse_guard = reverse;
         self.next_id.store(next, Ordering::Release);
+        Ok(())
     }
 
     /// Return the [`InternId`] for `s`, creating a new one if `s` has not been
@@ -168,12 +176,12 @@ impl StringInterner {
     /// acquired, and the string is inserted.  A second lookup under the write lock
     /// guards against a concurrent `intern` that may have raced and inserted the
     /// same string between the read-unlock and write-lock.
-    pub(crate) fn intern(&self, s: &str) -> InternId {
+    pub(crate) fn intern(&self, s: &str) -> Result<InternId, StoreError> {
         // ── Fast path: already interned ──────────────────────────────────────
         {
             let fwd = self.forward.read();
             if let Some(&id) = fwd.get(s) {
-                return id;
+                return Ok(id);
             }
         }
 
@@ -183,7 +191,7 @@ impl StringInterner {
         // Re-check under write lock — another thread may have inserted between
         // the two lock acquisitions (classic double-checked pattern).
         if let Some(&id) = fwd.get(s) {
-            return id;
+            return Ok(id);
         }
 
         // Reserve the next ID without publishing it yet. We hold `forward.write()`
@@ -215,14 +223,18 @@ impl StringInterner {
             rev.push(arc);
         }
 
-        // justifies: src/store/index/interner.rs documents a u32-sized ID domain (4B entries); exhaustion is an exceptional invariant, not a routinely-recoverable runtime condition.
-        #[allow(clippy::expect_used)]
-        let next = raw
-            .checked_add(1)
-            .expect("interner ID space exhausted (u32 wraparound)");
+        // justifies: src/store/index/interner.rs documents a u32-sized ID domain (4B entries); exhaustion is now a typed, fail-closed error rather than a panic.
+        let next = raw.checked_add(1).ok_or(StoreError::InternerExhausted {
+            count: u64::from(raw),
+        })?;
         self.next_id.store(next, Ordering::Release);
 
-        id
+        Ok(id)
+    }
+
+    /// Return the existing [`InternId`] for `s` without installing a new entry.
+    pub(crate) fn get(&self, s: &str) -> Option<InternId> {
+        self.forward.read().get(s).copied()
     }
 
     /// Resolve an [`InternId`] back to the original string.
@@ -277,7 +289,7 @@ impl StringInterner {
         for s in strings {
             // `intern` handles sentinel-avoidance and double-insertion protection
             // automatically; duplicates in the snapshot are silently deduplicated.
-            let _ignored_id = interner.intern(&s);
+            let _ignored_id = interner.intern(&s).expect("snapshot intern");
         }
 
         interner
@@ -285,9 +297,17 @@ impl StringInterner {
 
     /// Replace the current contents with a snapshot that includes the sentinel
     /// at slot 0, matching the cold-start artifact formats.
-    pub(crate) fn replace_from_full_snapshot(&self, strings: &[String]) {
+    pub(crate) fn replace_from_full_snapshot(&self, strings: &[String]) -> Result<(), StoreError> {
         let iter = strings.iter().skip(1).map(|s| Arc::<str>::from(s.as_str()));
-        self.install_snapshot_iter(iter);
+        self.install_snapshot_iter(iter)
+    }
+
+    /// Returns the number of unused [`InternId`] slots remaining in the `u32`
+    /// id domain — the headroom before [`intern`](StringInterner::intern) would
+    /// fail with [`StoreError::InternerExhausted`].
+    #[cfg(test)]
+    pub(crate) fn remaining_capacity(&self) -> u32 {
+        u32::MAX - self.next_id.load(Ordering::Acquire)
     }
 }
 
@@ -310,37 +330,39 @@ mod tests {
     fn sentinel_is_sentinel() {
         assert!(InternId::sentinel().is_sentinel());
         let interner = StringInterner::new();
-        let real_id = interner.intern("hello");
+        let real_id = interner.intern("hello").expect("intern hello");
         assert!(!real_id.is_sentinel());
     }
 
     #[test]
     fn intern_returns_stable_id() {
         let interner = StringInterner::new();
-        let id1 = interner.intern("entity:1");
-        let id2 = interner.intern("entity:1");
+        let id1 = interner.intern("entity:1").expect("intern entity:1");
+        let id2 = interner.intern("entity:1").expect("intern entity:1");
         assert_eq!(id1, id2);
     }
 
     #[test]
     fn distinct_strings_get_distinct_ids() {
         let interner = StringInterner::new();
-        let a = interner.intern("entity:1");
-        let b = interner.intern("entity:2");
+        let a = interner.intern("entity:1").expect("intern entity:1");
+        let b = interner.intern("entity:2").expect("intern entity:2");
         assert_ne!(a, b);
     }
 
     #[test]
     fn ids_are_one_based() {
         let interner = StringInterner::new();
-        let id = interner.intern("first");
+        let id = interner.intern("first").expect("intern first");
         assert_eq!(id.as_u32(), 1);
     }
 
     #[test]
     fn resolve_roundtrips() {
         let interner = StringInterner::new();
-        let id = interner.intern("scope:orders");
+        let id = interner
+            .intern("scope:orders")
+            .expect("intern scope:orders");
         let resolved = interner.resolve(id).expect("must resolve a valid id");
         assert_eq!(resolved.as_ref(), "scope:orders");
     }
@@ -355,31 +377,63 @@ mod tests {
     fn len_excludes_sentinel() {
         let interner = StringInterner::new();
         assert_eq!(interner.len(), 0);
-        let _a = interner.intern("a");
+        let _a = interner.intern("a").expect("intern a");
         assert_eq!(interner.len(), 1);
-        let _duplicate_a = interner.intern("a");
+        let _duplicate_a = interner.intern("a").expect("intern a again");
         assert_eq!(interner.len(), 1);
-        let _b = interner.intern("b");
+        let _b = interner.intern("b").expect("intern b");
         assert_eq!(interner.len(), 2);
     }
 
     #[test]
     fn snapshot_roundtrip_preserves_ids() {
         let original = StringInterner::new();
-        let id_a = original.intern("entity:apple");
-        let id_b = original.intern("entity:banana");
+        let id_a = original
+            .intern("entity:apple")
+            .expect("intern entity:apple");
+        let id_b = original
+            .intern("entity:banana")
+            .expect("intern entity:banana");
 
         let snapshot = original.to_snapshot();
         let restored = StringInterner::from_snapshot(snapshot);
 
-        assert_eq!(restored.intern("entity:apple"), id_a);
-        assert_eq!(restored.intern("entity:banana"), id_b);
+        assert_eq!(
+            restored
+                .intern("entity:apple")
+                .expect("re-intern entity:apple"),
+            id_a
+        );
+        assert_eq!(
+            restored
+                .intern("entity:banana")
+                .expect("re-intern entity:banana"),
+            id_b
+        );
+    }
+
+    #[test]
+    fn remaining_capacity_shrinks_as_ids_are_issued() {
+        let interner = StringInterner::new();
+        // Fresh interner: next_id == 1, so headroom is u32::MAX - 1.
+        let start = interner.remaining_capacity();
+        assert_eq!(start, u32::MAX - 1);
+
+        let _a = interner.intern("a").expect("intern a");
+        assert_eq!(interner.remaining_capacity(), start - 1);
+
+        // Re-interning an existing string consumes no new id.
+        let _dup = interner.intern("a").expect("intern a again");
+        assert_eq!(interner.remaining_capacity(), start - 1);
+
+        let _b = interner.intern("b").expect("intern b");
+        assert_eq!(interner.remaining_capacity(), start - 2);
     }
 
     #[test]
     fn snapshot_excludes_sentinel() {
         let interner = StringInterner::new();
-        let _x = interner.intern("x");
+        let _x = interner.intern("x").expect("intern x");
         let snap = interner.to_snapshot();
         // Sentinel ("") must not appear in the snapshot.
         assert!(!snap.iter().any(|s| s.is_empty()));
@@ -404,7 +458,7 @@ mod tests {
                         (0..n_strings)
                             .map(|i| {
                                 let s = format!("string:{i}");
-                                interner.intern(&s)
+                                interner.intern(&s).expect("intern in worker thread")
                             })
                             .collect::<Vec<_>>()
                     })
@@ -420,7 +474,7 @@ mod tests {
         // All threads must agree on the same ID for the same string.
         for i in 0..n_strings {
             let s = format!("string:{i}");
-            let expected_id = interner.intern(&s);
+            let expected_id = interner.intern(&s).expect("intern expected id");
             for thread_results in &all_results {
                 assert_eq!(thread_results[i], expected_id, "mismatch for {s}");
             }

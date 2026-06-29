@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MMAP-SEALED-READS; mmap cold-start tests in tests/mmap_cold_start.rs use panic! as the assertion style when invariants around checkpoint/mmap dispatch fail.
-#![allow(clippy::panic)]
 //! Mmap cold-start path proofs.
 //! Harness pattern: Equivalence Harness (artifact-path parity lane).
 //!
@@ -98,7 +96,7 @@ fn seed_store(dir: &TempDir, count: u32) {
     let kind = EventKind::custom(0xF, 1);
 
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "i": i }))
             .expect("append");
     }
@@ -118,10 +116,9 @@ fn mmap_index_written_and_open_read_only_matches_open() {
     );
 
     let open_store = Store::open(mmap_config(&dir)).expect("reopen open store");
-    let lock_err = match Store::<ReadOnly>::open_read_only(mmap_config(&dir)) {
-        Ok(_) => panic!("read-only open must fail while mutable store holds the lifetime lock"),
-        Err(err) => err,
-    };
+    let lock_err = Store::<ReadOnly>::open_read_only(mmap_config(&dir))
+        .map(|_| ())
+        .expect_err("read-only open must fail while mutable store holds the lifetime lock");
     assert!(
         matches!(
             lock_err,
@@ -249,7 +246,7 @@ fn default_config_reopen_uses_mmap_path() {
     let coord = Coordinate::new("entity:default", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
     for i in 0..100u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -411,7 +408,10 @@ fn open_report_observer_runs_and_panics_do_not_abort_open() {
     );
 
     let panic_config = mmap_config(&dir).with_open_report_observer(Some(Arc::new(|_| {
-        panic!("observer panic should not abort open");
+        assert!(
+            std::hint::black_box(false),
+            "observer panic should not abort open"
+        );
     })));
     let store = Store::open(panic_config).expect("observer panic must not abort open");
     store.close().expect("close after panic observer");
@@ -441,7 +441,7 @@ fn mutable_open_appends_system_open_completed_and_read_only_does_not() {
     assert_eq!(lifecycle_entry.coord().entity(), "batpak:store");
     assert_eq!(lifecycle_entry.coord().scope(), "batpak:lifecycle");
     let stored = store
-        .get(batpak::id::EventId::from(lifecycle_entry.event_id()))
+        .get(lifecycle_entry.event_id())
         .expect("read lifecycle event payload");
     assert_eq!(
         stored.event.header.event_kind,

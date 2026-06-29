@@ -1,5 +1,3 @@
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF, INV-TEST-PANIC-AS-ASSERTION; algebraic property tests in tests/store_properties.rs spawn threads via std::thread::spawn to exercise concurrency invariants and use explicit panic branches as assertion failures.
-#![allow(clippy::disallowed_methods, clippy::panic)]
 //! Store algebraic property tests: replay determinism, idempotency, commutativity,
 //! round-trip fidelity, law enforcement, flow connectivity, error propagation.
 //!
@@ -8,13 +6,11 @@
 //! INVARIANTS: INV-REPLAY-LANE-SELECTION (replay determinism), INV-GROUP-COMMIT-IDEMPOTENCY (idempotency), INV-WIRE-ROUNDTRIP-TOTALITY (round-trip),
 //!             INV-MACRO-BOUNDED-CAST (EventKind category enforcement), INV-STORE-ERROR-TAXONOMY (error shape stability)
 
-mod support;
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/medium_store.rs"]
-mod medium_store_support;
+use batpak_testkit::medium_store as medium_store_support;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 use medium_store_support::{medium_segment_store as test_store, test_coord};
@@ -90,7 +86,7 @@ fn replay_determinism_cold_start_rebuilds_identical_index() {
     for (i, entry) in events.iter().enumerate() {
         assert_eq!(
             entry.event_id(),
-            u128::from(event_ids[i]),
+            event_ids[i],
             "PROPERTY: Replayed event_id must match original at index {i}.\n\
              Investigate: src/store/segment/scan.rs scan_segment event ordering.\n\
              Common causes: events reordered during cold start, BTreeMap key collision."
@@ -326,12 +322,10 @@ fn flow_connectivity_full_production_path() {
     let store = test_store(&dir);
 
     // Step 4: Read back via get — verify event exists and has correct metadata
-    let stored = store
-        .get(batpak::id::EventId::from(event_id))
-        .expect("get after cold start");
+    let stored = store.get(event_id).expect("get after cold start");
     assert_eq!(
         stored.event.header.event_id,
-        batpak::id::EventId::from(event_id),
+        event_id,
         "PROPERTY: Full pipeline flow must preserve event_id through write→sync→close→reopen→read.\n\
          Investigate: pipeline commit → store.append → segment write → cold start → index rebuild → get.\n\
          Common causes: Island Syndrome (FM-007) — pipeline not wired to store, or store not persisting."
@@ -416,14 +410,13 @@ fn errors_propagate_not_launder_to_defaults() {
     let store = test_store(&dir);
 
     // get() on nonexistent event must return NotFound, not a default
-    let result = store.get(batpak::id::EventId::from(999999u128));
-    let err = match result {
-        Ok(_) => panic!(
+    let err = store
+        .get(batpak::id::EventId::from(999999u128))
+        .map(|_| ())
+        .expect_err(
             "PROPERTY: get() for nonexistent event must return Err(NotFound), not a default. \
-             Investigate: src/store/mod.rs get(), src/store/segment/scan.rs read_entry."
-        ),
-        Err(err) => err,
-    };
+             Investigate: src/store/mod.rs get(), src/store/segment/scan.rs read_entry.",
+        );
     assert!(
         matches!(err, StoreError::NotFound(_)),
         "PROPERTY: violation must surface as StoreError::NotFound, got {err:?}"
@@ -432,20 +425,19 @@ fn errors_propagate_not_launder_to_defaults() {
     // CAS failure must return SequenceMismatch, not silently succeed
     let coord = test_coord();
     let kind = EventKind::custom(1, 1);
-    store.append(&coord, kind, &"seed").expect("seed");
+    let _ = store.append(&coord, kind, &"seed").expect("seed");
 
     let opts = AppendOptions {
         expected_sequence: Some(999), // wrong sequence
         ..AppendOptions::default()
     };
-    let result = store.append_with_options(&coord, kind, &"should_fail", opts);
-    let err = match result {
-        Ok(_) => panic!(
+    let err = store
+        .append_with_options(&coord, kind, &"should_fail", opts)
+        .map(|_| ())
+        .expect_err(
             "PROPERTY: CAS with wrong expected_sequence must return Err(SequenceMismatch). \
-             Investigate: src/store/write/writer.rs CAS check (Step 1a)."
-        ),
-        Err(err) => err,
-    };
+             Investigate: src/store/write/writer.rs CAS check (Step 1a).",
+        );
     assert!(
         matches!(err, StoreError::SequenceMismatch { .. }),
         "PROPERTY: violation must surface as StoreError::SequenceMismatch, got {err:?}"
@@ -503,15 +495,15 @@ fn commutativity_independent_entity_appends() {
     // Order 1: A then B
     {
         let store = Store::open(StoreConfig::new(dir1.path())).expect("open");
-        store.append(&coord_a, kind, &"a1").expect("a1");
-        store.append(&coord_b, kind, &"b1").expect("b1");
+        let _ = store.append(&coord_a, kind, &"a1").expect("a1");
+        let _ = store.append(&coord_b, kind, &"b1").expect("b1");
         store.close().expect("close");
     }
     // Order 2: B then A
     {
         let store = Store::open(StoreConfig::new(dir2.path())).expect("open");
-        store.append(&coord_b, kind, &"b1").expect("b1");
-        store.append(&coord_a, kind, &"a1").expect("a1");
+        let _ = store.append(&coord_b, kind, &"b1").expect("b1");
+        let _ = store.append(&coord_a, kind, &"a1").expect("a1");
         store.close().expect("close");
     }
 
@@ -584,6 +576,8 @@ struct StrictCounter {
 
 impl EventSourced for StrictCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("store-properties-strict-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -604,6 +598,10 @@ impl EventSourced for StrictCounter {
         static KINDS: [EventKind; 1] = [EventKind::custom(1, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[test]
@@ -616,11 +614,11 @@ fn totality_projection_handles_unknown_event_kinds() {
     let known_kind = EventKind::custom(1, 1);
     let unknown_kind = EventKind::custom(2, 99); // not in relevant_event_kinds
 
-    store.append(&coord, known_kind, &"known").expect("known");
-    store
+    let _ = store.append(&coord, known_kind, &"known").expect("known");
+    let _ = store
         .append(&coord, unknown_kind, &"unknown")
         .expect("unknown");
-    store.append(&coord, known_kind, &"known2").expect("known2");
+    let _ = store.append(&coord, known_kind, &"known2").expect("known2");
 
     // This must not panic even though unknown_kind isn't in relevant_event_kinds
     let result: Option<StrictCounter> = store
@@ -663,7 +661,10 @@ fn error_variant_coverage_all_store_errors_display() {
                 detail: "bad".into(),
             },
         ),
-        ("NotFound", StoreError::NotFound(123)),
+        (
+            "NotFound",
+            StoreError::NotFound(batpak::id::EventId::from(123u128)),
+        ),
         (
             "SequenceMismatch",
             StoreError::SequenceMismatch {
@@ -723,7 +724,7 @@ fn store_drop_drains_pending_events() {
     {
         let store = Store::open(StoreConfig::new(dir.path())).expect("open");
         for i in 0..10 {
-            store
+            let _ = store
                 .append(&coord, kind, &serde_json::json!({"i": i}))
                 .expect("append");
         }

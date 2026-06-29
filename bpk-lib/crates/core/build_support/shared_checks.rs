@@ -19,137 +19,18 @@ use syn::Token;
 // receipt helpers would be unused dead code under the `-D warnings` gate.
 // Everything below is genuinely shared by both build.rs and that binary.
 
-/// An anchor extracted from a structured `// justifies:` comment body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum JustifiesAnchor {
-    Invariant(String),
-    Adr(u32),
-    Path(PathBuf),
-}
+// NOTE: The `// justifies:` anchor-resolution helpers (JustifiesAnchor,
+// extract_anchors, load_known_invariants, resolve_anchor) used to live here and
+// were shared with build.rs's old allow-justification check. Under the
+// zero-allow doctrine (INV-ALLOW-IS-DESIGN) build.rs no longer justifies allows,
+// so those helpers are now used ONLY by the batpak-integrity binary (anchor
+// resolution for invariant_bridge + typed_waivers) and moved to
+// `tools/integrity/src/anchors.rs`. The lower-level ADR/path primitives below
+// (`adr_file_with_prefix_exists`, `resolve_repo_or_core_path`) stay here because
+// build.rs's dead-code-silencer allowlist loader still uses them and they are
+// `pub(crate)` so the relocated anchor helpers can call back into them.
 
-/// Extract the prose body after `// justifies:` from a single source line.
-pub(crate) fn justification_body(line: &str) -> Option<String> {
-    let trimmed = line.trim();
-    if let Some(idx) = trimmed.find("// justifies:") {
-        return Some(trimmed[idx + "// justifies:".len()..].trim().to_string());
-    }
-    if trimmed.starts_with("//") {
-        let stripped = trimmed.trim_start_matches('/').trim();
-        if let Some(body) = stripped.strip_prefix("justifies:") {
-            return Some(body.trim().to_string());
-        }
-    }
-    None
-}
-
-/// Extract resolvable anchors from a justification body. Anchors are
-/// `INV-<NAME>`, `ADR-NNNN`, and repo-relative paths (`src/...`, `tests/...`,
-/// `examples/...`, etc. — ending in `.rs`, `.md`, `.yaml`, or `.toml`, with an
-/// optional `:line` suffix).
-pub(crate) fn extract_anchors(body: &str) -> Vec<JustifiesAnchor> {
-    let mut out = Vec::new();
-    for tok in body.split(|c: char| c.is_whitespace() || c == ',' || c == ';') {
-        let tok = tok.trim_matches(|c: char| {
-            c == '(' || c == ')' || c == '\'' || c == '"' || c == '.' || c == '`'
-        });
-        if tok.is_empty() {
-            continue;
-        }
-        if let Some(rest) = tok.strip_prefix("INV-") {
-            if !rest.is_empty()
-                && rest
-                    .chars()
-                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-' || c == '_')
-            {
-                out.push(JustifiesAnchor::Invariant(format!("INV-{rest}")));
-                continue;
-            }
-        }
-        if let Some(digits) = tok.strip_prefix("ADR-") {
-            let digits = digits.trim_end_matches(|c: char| !c.is_ascii_digit());
-            if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
-                if let Ok(n) = digits.parse::<u32>() {
-                    out.push(JustifiesAnchor::Adr(n));
-                    continue;
-                }
-            }
-        }
-        let starts_with_dir = [
-            "src/",
-            "tests/",
-            "examples/",
-            "crates/core/src/",
-            "crates/core/tests/",
-            "crates/core/examples/",
-            "crates/core/benches/",
-            "crates/core/fixtures/",
-            "crates/macros/",
-            "crates/macros-support/",
-            "benches/",
-            "tools/",
-            "fixtures/",
-            "archive/decisions/",
-            "cookbook/",
-            "traceability/",
-        ]
-        .iter()
-        .any(|p| tok.starts_with(p));
-        let is_build_rs = tok == "build.rs" || tok.starts_with("build.rs:");
-        if starts_with_dir || is_build_rs {
-            let file = tok
-                .rsplit_once(':')
-                .and_then(|(before, after)| {
-                    if after.chars().all(|c| c.is_ascii_digit()) {
-                        Some(before)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(tok);
-            let ok_ext = [".rs", ".md", ".yaml", ".toml"]
-                .iter()
-                .any(|ext| file.ends_with(ext));
-            if ok_ext {
-                out.push(JustifiesAnchor::Path(PathBuf::from(file)));
-            }
-        }
-    }
-    out
-}
-
-pub(crate) fn load_known_invariants(repo_root: &Path) -> Result<BTreeSet<String>, String> {
-    let path = repo_root.join("traceability/invariants.yaml");
-    let text = fs::read_to_string(&path).map_err(|_| {
-        format!(
-            "cannot read {} to verify justifies: anchors",
-            path.display()
-        )
-    })?;
-    #[derive(Deserialize)]
-    struct InvRecord {
-        id: String,
-    }
-    let records: Vec<InvRecord> =
-        yaml_serde::from_str(&text).map_err(|e| format!("parse {}: {}", path.display(), e))?;
-    Ok(records.into_iter().map(|r| r.id).collect())
-}
-
-pub(crate) fn resolve_anchor(
-    anchor: &JustifiesAnchor,
-    repo_root: &Path,
-    known_invariants: &BTreeSet<String>,
-) -> bool {
-    match anchor {
-        JustifiesAnchor::Invariant(id) => known_invariants.contains(id),
-        JustifiesAnchor::Adr(n) => {
-            let prefix = format!("ADR-{n:04}");
-            adr_file_with_prefix_exists(repo_root, &prefix)
-        }
-        JustifiesAnchor::Path(rel) => resolve_repo_or_core_path(repo_root, rel).exists(),
-    }
-}
-
-fn adr_file_with_prefix_exists(repo_root: &Path, prefix: &str) -> bool {
+pub(crate) fn adr_file_with_prefix_exists(repo_root: &Path, prefix: &str) -> bool {
     adr_search_dirs(repo_root).into_iter().any(|dir| {
         fs::read_dir(&dir)
             .ok()
@@ -209,25 +90,6 @@ fn is_primary_crate_relative_path(rel: &Path) -> bool {
         || rel.starts_with("fixtures/")
 }
 
-/// Parse a single source line and return true if it carries a structured
-/// justification comment with (a) >= 5 words of prose and (b) >= 1
-/// anchor that resolves against the current repo. See INV-ALLOW-IS-DESIGN.
-pub(crate) fn line_carries_justification(
-    line: &str,
-    repo_root: &Path,
-    known_invariants: &BTreeSet<String>,
-) -> bool {
-    let Some(body) = justification_body(line) else {
-        return false;
-    };
-    if body.split_whitespace().count() < 5 {
-        return false;
-    }
-    extract_anchors(&body)
-        .iter()
-        .any(|anchor| resolve_anchor(anchor, repo_root, known_invariants))
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DeadCodeSilencerSite {
     pub line: usize,
@@ -242,9 +104,13 @@ pub(crate) struct DeadCodeSilencerAllowlistEntry {
     pub adr: String,
 }
 
-/// Collect every attribute site that silences `dead_code`, either directly,
-/// transitively via the `unused` lint group, or through a `cfg_attr(...)`
-/// wrapper. This is AST-based, so multi-line attributes are caught as well.
+/// Collect every `#[allow(...)]`, `#![allow(...)]`, and `#[expect(...)]`
+/// attribute site (any lint name, including `clippy::` and bare rustc lints),
+/// including those wrapped in a `cfg_attr(...)`. This is the zero-allow tripwire
+/// for INV-ALLOW-IS-DESIGN: the repo permits NO allow/expect attributes, so any
+/// site found is a hard violation. This is AST-based, so multi-line attributes
+/// are caught and raw-string literals containing allow-text are correctly
+/// ignored (they are string data, not attributes).
 pub(crate) fn collect_dead_code_silencer_sites(
     source: &str,
 ) -> Result<Vec<DeadCodeSilencerSite>, String> {
@@ -375,7 +241,7 @@ impl<'a> DeadCodeSilencerCollector<'a> {
 
 impl Visit<'_> for DeadCodeSilencerCollector<'_> {
     fn visit_attribute(&mut self, attribute: &syn::Attribute) {
-        if meta_silences_dead_code(&attribute.meta) {
+        if meta_is_banned_allow(&attribute.meta) {
             let start = attribute.span().start();
             self.sites.push(DeadCodeSilencerSite {
                 line: start.line,
@@ -387,15 +253,17 @@ impl Visit<'_> for DeadCodeSilencerCollector<'_> {
     }
 }
 
-fn meta_silences_dead_code(meta: &syn::Meta) -> bool {
+/// Zero-allow tripwire (INV-ALLOW-IS-DESIGN): true for ANY `allow(...)` or
+/// `expect(...)` attribute, regardless of lint name (clippy:: or bare rustc),
+/// and for any such allow/expect carried inside a `cfg_attr(...)` wrapper. A
+/// bare `deny`/`warn`/`forbid` is NOT an allow and stays unflagged.
+fn meta_is_banned_allow(meta: &syn::Meta) -> bool {
     match meta {
         syn::Meta::List(list) if list.path.is_ident("allow") || list.path.is_ident("expect") => {
-            parse_nested_meta_list(list)
-                .map(|nested| nested.iter().any(lint_item_silences_dead_code))
-                .unwrap_or(false)
+            true
         }
         syn::Meta::List(list) if list.path.is_ident("cfg_attr") => parse_nested_meta_list(list)
-            .map(|nested| nested.iter().skip(1).any(meta_silences_dead_code))
+            .map(|nested| nested.iter().skip(1).any(meta_is_banned_allow))
             .unwrap_or(false),
         syn::Meta::Path(_) | syn::Meta::NameValue(_) | syn::Meta::List(_) => false,
     }
@@ -405,18 +273,6 @@ fn parse_nested_meta_list(list: &syn::MetaList) -> Option<Punctuated<syn::Meta, 
     Punctuated::<syn::Meta, Token![,]>::parse_terminated
         .parse2(list.tokens.clone())
         .ok()
-}
-
-fn lint_item_silences_dead_code(meta: &syn::Meta) -> bool {
-    match meta {
-        syn::Meta::Path(path) => path_silences_dead_code(path),
-        syn::Meta::List(_) => meta_silences_dead_code(meta),
-        syn::Meta::NameValue(value) => path_silences_dead_code(&value.path),
-    }
-}
-
-fn path_silences_dead_code(path: &syn::Path) -> bool {
-    path.is_ident("dead_code") || (path.is_ident("unused") && path.segments.len() == 1)
 }
 
 /// Walk a parsed Rust file and return true if any real path-position expression
@@ -652,6 +508,7 @@ mod tests {
 #[expect(dead_code)]
 #[allow(dead_code, unused_imports)]
 #[allow(unused)]
+#[allow(clippy::needless_return)]
 #[cfg_attr(not(test), allow(dead_code))]
 #[cfg_attr(
     all(not(test), feature = "bench"),
@@ -666,7 +523,7 @@ fn example() {}
             .collect::<Vec<_>>();
         assert_eq!(
             sites.len(),
-            6,
+            7,
             "every banned attribute shape must be caught"
         );
         assert!(
@@ -679,7 +536,13 @@ fn example() {}
             rendered
                 .iter()
                 .any(|attr| attr.contains("#[allow(unused)]")),
-            "unused lint group must be treated as a dead_code silencer"
+            "unused lint group must be caught by the zero-allow ban"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|attr| attr.contains("#[allow(clippy::needless_return)]")),
+            "a plain non-dead_code clippy allow must be caught by the broadened ban"
         );
         assert!(
             rendered
@@ -690,7 +553,10 @@ fn example() {}
     }
 
     #[test]
-    fn sibling_unused_lints_pass_unharmed() {
+    fn all_allow_forms_are_now_banned() {
+        // Under the zero-allow doctrine (INV-ALLOW-IS-DESIGN) every allow/expect
+        // attribute is a hard violation regardless of lint name. These used to be
+        // permitted "sibling" lints; they are now ALL caught.
         let source = r#"
 #[allow(unused_imports)]
 #[allow(unused_variables)]
@@ -699,13 +565,31 @@ fn example() {}
 #[cfg_attr(not(test), allow(unused_imports))]
 #[allow(clippy::unwrap_used)]
 #[expect(clippy::panic)]
+fn example() {}
+"#;
+        let sites = collect_dead_code_silencer_sites(source).expect("parse banned forms");
+        assert_eq!(
+            sites.len(),
+            7,
+            "every allow/expect attribute (any lint name) must be flagged under the zero-allow ban"
+        );
+    }
+
+    #[test]
+    fn non_allow_lint_attributes_stay_unflagged() {
+        // deny/warn/forbid are NOT allow attributes — they tighten, not silence,
+        // so the zero-allow ban must leave them (and a cfg_attr-wrapped deny) alone.
+        let source = r#"
+#![deny(clippy::unwrap_used)]
+#[warn(clippy::panic)]
+#[forbid(unsafe_code)]
 #[cfg_attr(not(test), deny(clippy::expect_used))]
 fn example() {}
 "#;
-        let sites = collect_dead_code_silencer_sites(source).expect("parse allowed forms");
+        let sites = collect_dead_code_silencer_sites(source).expect("parse deny/warn/forbid forms");
         assert!(
             sites.is_empty(),
-            "sibling unused_* lints and non-dead_code attributes must stay allowed"
+            "deny/warn/forbid attributes are not allows and must stay unflagged"
         );
     }
 

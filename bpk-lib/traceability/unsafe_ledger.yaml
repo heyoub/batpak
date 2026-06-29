@@ -1,0 +1,400 @@
+# Unsafe basement ledger (kernel plan §10.8 / S-LEDGER plan:506).
+#
+# The SINGLE source of truth reconciling every `unsafe` block in a sanctioned
+# bvisor basement against a documented justification. Two sanctioned basement
+# roots, same `/sys.rs`-or-`/sys/` shape:
+#   - the backend basement:  `crates/bvisor/src/backend/<os>/sys.rs` or `sys/`
+#   - the launcher basement: `crates/bvisor/launcher/<os>/sys.rs` or `sys/`
+#     (the single-threaded Linux confinement launcher's real-OS unsafe —
+#     memfd/fstat/exec). The launcher basement is empty for now (no entries
+#     below) ⇒ vacuously green but LIVE: the first launcher unsafe block must
+#     anchor + register here.
+# The `integrity unsafe-ledger` gate (folded
+# into `structural-check`) fails CLOSED if:
+#   - a basement `unsafe` block carries NO `LEDGER:<id>` anchor (unanchored), OR
+#   - two live `unsafe` blocks share one anchor id (duplicate), OR
+#   - a basement `unsafe` block has NO matching ledger entry (unregistered), OR
+#   - a ledger entry matches NO live anchored `unsafe` block (stale entry).
+#
+# Each `unsafe` block is bound to its entry by a STABLE COMMENT ANCHOR — a
+# `LEDGER:<id>` token (`<id>` is kebab `[a-z0-9-]+`) embedded in the `//` comment
+# block IMMEDIATELY above the `unsafe` keyword (the standard `// SAFETY:` site).
+# Anchoring by id, not `file:line`, lets blocks move freely as the source edits.
+#
+# Each entry MUST cite:
+#   file:               repo-relative path to the basement file
+#   anchor:             the `LEDGER:<id>` id in the block's SAFETY comment
+#   syscall:            the syscall / FFI call the block performs (e.g. "clone3")
+#   safety_invariant:   the invariant the caller upholds to make it sound
+#   requirement:        the RequirementKind the unsafe backs (e.g. "ChildSpawn")
+#
+# STEP (b) part 1 — REAL Linux filesystem confinement (landlock). The backend's
+# ONLY remaining filesystem `unsafe` is the live ABI probe below (it backs
+# profile()'s Filesystem=Enforced cell). The landlock ENFORCEMENT (ruleset build +
+# restrict_self) moved to the LAUNCHER child window (launcher/linux/sys.rs); the
+# backend's old self-spawn pre_exec confinement (`spawn_confined`, anchor
+# `linux-landlock-pre-exec-apply`) was REMOVED in the backend→launcher rewire
+# (step 7b) — execute() now drives the launcher harness — so its block + ledger
+# entry are gone (one confinement path, not two). Budget/seccomp/namespace
+# basements remain unimplemented (their profile() cells stay Unsupported), so no
+# further unsafe is registered until those chunks land.
+entries:
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-landlock-abi-probe
+    syscall: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
+    safety_invariant: >-
+      Invoked in its documented VERSION-QUERY form (attr=NULL, size=0,
+      flags=LANDLOCK_CREATE_RULESET_VERSION). In this form the kernel reads no
+      user memory, creates no fd, and mutates nothing — it only returns the
+      supported ABI integer (>=0) or -1/errno. Sound for any caller state; the
+      NULL/0 pair is exactly what the version query requires.
+    requirement: Filesystem
+
+  # ── STEP 7a: the HOST-SIDE launcher harness basement (backend→launcher rewire).
+  # The SAFE harness `src/backend/linux/launch.rs` seals a LinuxLaunchPlanV1 into a
+  # read-only memfd, spawns the confinement launcher bin with controlled inherited
+  # fds, and collects its transcript/outcome. EXACTLY these four backend-basement
+  # unsafe surfaces back it; `launch.rs` itself is SAFE. Step 7b wires the harness
+  # into execute(); this step only builds it + re-proves G1/G3 through it.
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-memfd-seal
+    syscall: memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING) + OwnedFd::from_raw_fd
+    safety_invariant: >-
+      Host-side (single-threaded, before any spawn). memfd_create is invoked with a
+      valid NUL-terminated name pointer (a `c"..."` literal) and the documented
+      MFD_CLOEXEC | MFD_ALLOW_SEALING flags; it creates a fresh anonymous fd (returned,
+      or -1/errno) and reads no caller memory beyond the name string, dereferencing
+      nothing else. On success the fd is immediately adopted ONCE as an OwnedFd (single
+      owner, closed on drop, no aliasing, no double-close). This produces the tamper-proof
+      plan transport the launcher reads; the bytes are written + sealed by the
+      linux-backend-memfd-add-seals block before the fd is handed out.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-memfd-add-seals
+    syscall: fcntl(memfd, F_ADD_SEALS, F_SEAL_SEAL|F_SEAL_SHRINK|F_SEAL_GROW|F_SEAL_WRITE)
+    safety_invariant: >-
+      Host-side single fcntl on the OWNED memfd from linux-backend-memfd-seal. It only
+      sets seal bits on this one fd and dereferences no pointer; -1/errno on failure is
+      surfaced. F_ADD_SEALS cannot succeed while any writable handle other than this
+      owned one exists — the transient write-handle clone used to write the plan bytes
+      was already dropped, so the seal is total. After it the plan bytes are immutable
+      (write/grow/shrink-proof, no further seals), so the launcher's envelope digest
+      check runs over content that can no longer be tampered with. The fd is passed as a
+      plain owned handle (via as_raw_fd) with no aliasing.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-launcher-relocate
+    syscall: fcntl(fd, F_DUPFD_CLOEXEC, FD_RELOCATE_BASE) + OwnedFd::from_raw_fd
+    safety_invariant: >-
+      Host-side (single-threaded, pre-spawn). F_DUPFD_CLOEXEC duplicates the borrowed
+      source fd to a fresh, exclusively-owned fd >= FD_RELOCATE_BASE (or -1/errno); on
+      success it is adopted ONCE as an OwnedFd (no aliasing, no double-close) and the low
+      original is dropped (closed) so only the high copy survives. Relocating every
+      dup-FROM source ABOVE every fixed dup-TO target guarantees the later pre_exec dup2
+      sequence can never clobber a not-yet-consumed source mid-sequence. No pointer is
+      dereferenced.
+    requirement: InheritedFds
+  - file: crates/bvisor/src/backend/linux/sys.rs
+    anchor: linux-backend-launcher-pre-exec
+    syscall: Command::pre_exec — post-fork child dup2(src,target) + fcntl(target,F_GETFD/F_SETFD) of a PRE-BUILT fd map (via apply_fd_placements)
+    safety_invariant: >-
+      The ONE unsafe block of the spawn flow. It registers the pre_exec closure, which runs
+      in the forked child between fork and exec in a (formerly) multithreaded address space
+      and so must be async-signal-safe, and (lexically inside this unsafe block) the closure
+      calls the unsafe fn apply_fd_placements. EVERY allocation — the relocated source fds,
+      the placement Vec, the env — happens BEFORE the fork in the parent; the closure
+      captures the owned placement Vec by move and the child branch only INDEXES it
+      (copy-on-write read — no allocator). apply_fd_placements issues ONLY async-signal-safe
+      syscalls: dup2 (place each relocated source onto its fixed target fd number) and
+      fcntl(F_GETFD/F_SETFD) (toggle the target's CLOEXEC bit — SET on the error-pipe write
+      end so a successful workload fexecve auto-closes it, CLEARED elsewhere so the launcher
+      inherits the fd). It performs NO heap allocation, takes NO lock, and on a dup2 failure
+      returns the OS errno so Command::spawn fails closed (the launcher never runs with a
+      half-wired fd table). Every source was relocated HIGH first
+      (linux-backend-launcher-relocate), so no fixed target can clobber a not-yet-consumed
+      source. Each dup2 duplicates into the CHILD's own fd table — no cross-process aliasing;
+      the parent-owned source fds stay valid until after spawn returns (dropped by the caller
+      post-spawn). Command::spawn is permitted here (the no-.spawn() single-thread gate scopes
+      to the launcher crate, not this backend basement); the launcher itself still uses clone3.
+    requirement: ChildSpawn
+
+  # ── Single-threaded Linux confinement LAUNCHER basement (kernel plan §10.8).
+  # The coordinator (main.rs, SAFE) validates + decides; the child (clone3,
+  # async-signal-safe window) scrubs ambient authority, applies the parent-built
+  # landlock ruleset via restrict_self (when scheduled), then execs. Every unsafe
+  # block lives in launcher/linux/sys.rs and is anchored here.
+  #
+  # NOTE on the landlock-restrict step: RulesetCreated::restrict_self() is itself a
+  # SAFE call (prctl + landlock_restrict_self on an inherited fd). It runs INSIDE the
+  # child-window unsafe dispatch (anchor `linux-launcher-child-window`) and rides the
+  # parent-built ruleset fd — so it has no SEPARATE unsafe block and no separate
+  # ledger entry; its safety is folded into the child-window entry below. The new
+  # landlock unsafe blocks the Confinement chunk DID add are the raw ABI probe
+  # (`linux-launcher-landlock-abi`), the inherited-root-fd borrow that builds each
+  # PathBeneath rule (`linux-launcher-landlock-root-fd`), and the ruleset-fd CLOEXEC
+  # set (`linux-launcher-set-cloexec`).
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-landlock-abi
+    syscall: landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
+    safety_invariant: >-
+      Coordinator-side (single-threaded, pre-clone3) live-ABI probe. landlock_create_ruleset
+      is invoked in its documented VERSION-QUERY form (attr=NULL, size=0, flags=
+      LANDLOCK_CREATE_RULESET_VERSION): the kernel reads NO user memory, creates NO fd,
+      and mutates nothing — it only returns the supported ABI integer (>=0) or -1/errno.
+      No pointer is dereferenced. The launcher floors confinement at this probe (a result
+      below LANDLOCK_ABI_FLOOR_RAW ⇒ the landlock action is refused), so it never advertises
+      a confinement the live kernel cannot enforce. Sound for any caller state.
+    requirement: Filesystem
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-landlock-root-fd
+    syscall: BorrowedFd::borrow_raw(root_fd) — borrow an inherited root dir fd to build a PathBeneath rule
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3), inside build_landlock_ruleset. Each root.fd
+      is an inherited directory descriptor the host opened and the coordinator ALREADY
+      fstat-validated as the declared read/write ROOT (a directory of the declared
+      writability). We borrow_raw it for EXACTLY the duration of the add_rule call —
+      BorrowedFd neither closes nor takes ownership and does not outlive the loop
+      iteration, so the launcher's fd accounting is unchanged and there is no double-close.
+      Landlock builds the PathBeneath rule from this inherited fd, NEVER by reopening a path
+      (the CVE-2019-5736 / Leaky-Vessels reopen race the protocol forbids). No raw memory
+      is dereferenced. Sound for any valid open root fd.
+    requirement: Filesystem
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-set-cloexec
+    syscall: fcntl(fd, F_GETFD) + fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3) fcntl pair on an inherited descriptor the
+      launcher owns — a landlock ruleset fd it JUST created. F_GETFD only READS the fd
+      flags; F_SETFD only WRITES the CLOEXEC bit. The fd is passed as a plain RawFd with
+      no Rust value wrapping it, so there is no aliasing and no double-close. CLOEXEC is
+      set so a successful workload fexecve auto-closes the ruleset fd (no leak into the
+      workload), while the fd stays open across the child's restrict_self (CLOEXEC acts at
+      exec, not before). No pointer is dereferenced. A -1 failure is ignored (best-effort).
+    requirement: Filesystem
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-read-fd
+    syscall: File::from_raw_fd + read_to_end (drain the plan fd), into_raw_fd (release without close)
+    safety_invariant: >-
+      Runs in the COORDINATOR (single-threaded, before clone3 — allocation is
+      fine). The fd is an inherited descriptor the host opened and handed the
+      launcher via a documented env-named slot; it is adopted into a File ONLY to
+      drain it, then released with into_raw_fd WITHOUT closing, so the caller
+      retains exactly the fd it passed (no double-close, no leak; fd accounting
+      stays exact). No raw pointer is dereferenced; only safe File reads run
+      between adopt and release.
+    requirement: InheritedFds
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-fstat
+    syscall: fstat(fd, &mut stat) + fcntl(fd, F_GETFL)
+    safety_invariant: >-
+      Coordinator-side pure observation. The stat struct is zero-initialised and
+      passed by &mut to fstat, which only WRITES it and reads nothing from user
+      memory beyond that out-pointer; fcntl(F_GETFL) reads only the kernel's
+      file-status flags. The fd is borrowed, not consumed — no fd is created or
+      closed. On error each returns -1 and the OS errno is surfaced. Sound for any
+      valid open fd the host handed the launcher.
+    requirement: InheritedFds
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-adopt-fd
+    syscall: File::from_raw_fd (take ownership of the control / error-pipe fd)
+    safety_invariant: >-
+      Coordinator-side. The fd is an inherited descriptor the host opened for the
+      launcher (control channel / error-pipe read end), named via a documented env
+      slot. The returned File takes exclusive ownership of exactly this one fd and
+      closes it on drop; the caller passes each such fd here AT MOST ONCE, so there
+      is no aliasing and no double-close. No raw pointer is dereferenced.
+    requirement: ControlChannel
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-clone3-child
+    syscall: clone3 (raw syscall) + the async-signal-safe child branch (optional userns-rendezvous SYS_read/sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
+    safety_invariant: >-
+      clone3 is invoked with a correctly sized clone_args (exit_signal=SIGCHLD, and
+      flags drawn from {0, CLONE_INTO_CGROUP, CLONE_NEWUSER, CLONE_NEWNET}) BUILT IN THE
+      SINGLE-THREADED PARENT. When the coordinator resolved a DescriptorRole::CgroupDir
+      slot it sets flags|=CLONE_INTO_CGROUP and clone_args.cgroup = that inherited,
+      fstat-validated DIRECTORY fd, so the kernel places the child into the prepared cgroup
+      leaf AT BIRTH (no post-fork migration race); both flags and cgroup are c_ulonglong
+      and the fd is widened with try_from (a non-representable fd leaves the flag unset
+      rather than passing a truncated value). The cgroup fd is consumed by the kernel
+      during the clone3 syscall in the PARENT — the child never needs it — so an invalid fd
+      only makes clone3 fail with errno (returned as an Err; no child exists, nothing ran);
+      no pointer is dereferenced for it. When the plan OPTED INTO the user-namespace
+      rendezvous (S8) the coordinator additionally sets flags|=CLONE_NEWUSER, so the child
+      is born in a NEW user namespace initially UNMAPPED (overflow uid) and then BLOCKS on
+      the sync-pipe read fd (see linux-launcher-userns-sync-pipe) until the PARENT writes
+      its uid/gid maps and releases it; the flag itself needs no extra memory or unsafe,
+      and with no userns request the OR is never reached so the flags are EXACTLY the
+      pre-S8 set (the no-userns PROVEN oracles run through an unchanged environment).
+      When the plan ALSO OPTED INTO the empty network namespace (S9 / D3) the coordinator
+      additionally sets flags|=CLONE_NEWNET — and ONLY alongside CLONE_NEWUSER (unprivileged
+      CLONE_NEWNET needs the child root-in-userns; the coordinator faults a netns-without-
+      userns plan before reaching here), so the child is born into a NEW, EMPTY net
+      namespace (only lo, with no address + no routes => unreachable, no external interface =
+      NetworkDenyAll) at the SAME syscall;
+      this too is just a flag bit needing no extra memory/unsafe/syscall, and with no netns
+      request the OR is never reached so the no-netns flags are unchanged.
+      The PARENT branch (rc>0) only
+      returns the child pid (and drops its copy of the optional ruleset fd — the child
+      holds its own inherited copy, so the parent drop does not affect confinement).
+      The CHILD branch (rc==0) is the async-signal-safe window: it touches ONLY the
+      pre-built ChildExecPlan (argv/envp NUL-terminated pointer arrays into parent-owned
+      CStrings, the scrub close-list, the optional sync-pipe read fd, and the exec/cwd/
+      error fds — ALL allocated by ChildExecPlan::build BEFORE this call) plus the OPTIONAL
+      parent-built landlock ruleset (whose every allocation + add_rule syscall ran in the
+      parent), by INDEXING already-mapped copy-on-write memory, and issues ONLY
+      async-signal-safe syscalls: the optional userns-rendezvous blocking read (raw
+      SYS_read of 1 byte into a fixed stack byte — a read != 1 means the parent closed the
+      pipe WITHOUT releasing, i.e. a fail-closed map-write failure, so the child reports +
+      _exits unmapped-NEVER-running), sigprocmask (empty mask), close (each scrub fd),
+      optional fchdir, restrict_self
+      (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset fd —
+      allocation-free, applied AFTER the scrub and BEFORE fexecve), fexecve (exec rides
+      the fd, no path reopen), write (errno on failure), _exit. It performs NO heap
+      allocation, takes NO lock, and calls NO allocating Rust std; no destructor runs and
+      no unwinding crosses the fork (the child paths either fexecve-replace the image or
+      _exit without returning into Rust). On success fexecve replaces the image and the
+      O_CLOEXEC error fd (and the CLOEXEC ruleset/sync fds) auto-close, which the parent
+      reads as EOF; on ANY child failure (including a restrict_self error or an incomplete
+      userns rendezvous) the child writes the errno to the error fd and _exit(127)s, so the
+      target NEVER runs unconfined/unmapped and the parent observes the fault (fail closed).
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-child-window
+    syscall: run_child dispatch (the rc==0 clone3 child branch — async-signal-safe optional-userns-read/sigprocmask/close/fchdir/restrict_self/fexecve/write/_exit)
+    safety_invariant: >-
+      The call site of the unsafe `run_child` fn, reached ONLY in the `rc == 0`
+      clone3 CHILD branch — the async-signal-safe window. run_child performs ONLY
+      async-signal-safe syscalls on the PRE-BUILT ChildExecPlan (argv/envp pointer
+      arrays into parent-owned CStrings, the scrub close-list, the optional sync-pipe read
+      fd, the exec/cwd/error fds — ALL allocated by ChildExecPlan::build BEFORE clone3) and
+      the OPTIONAL parent-built landlock ruleset (every allocation + add_rule syscall ran
+      in the parent), indexing already-mapped copy-on-write memory. It performs NO heap
+      allocation, takes NO lock, and DIVERGES: it either fexecve-replaces the image or
+      _exit(127)s after writing the errno, so no destructor runs and no unwinding
+      crosses the fork. When a userns was requested the FIRST step is the rendezvous: a
+      raw SYS_read of 1 byte into a fixed stack byte from the sync-pipe read fd, blocking
+      until the parent (which has written uid_map/setgroups=deny/gid_map) releases the
+      child; a read != 1 (parent closed without releasing) child_fails so the target never
+      runs unmapped. The CONFINEMENT step is RulesetCreated::restrict_self() — a SAFE
+      call (prctl(PR_SET_NO_NEW_PRIVS) + landlock_restrict_self on the inherited ruleset
+      fd, allocation-free) run AFTER the scrub and BEFORE fexecve; on its error the child
+      child_fails (errno → pipe → _exit) so the target NEVER runs unconfined. The scrub
+      closes via raw SYS_close (NOT libc::close) to bypass std's owned-fd close guard in
+      the forked child.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-clone-args-zero
+    syscall: mem::zeroed::<clone_args>() (build the clone3 argument)
+    safety_invariant: >-
+      clone_args is a C-layout struct of plain integer fields (no references, no
+      NonNull, no padding-sensitive invariant), so the all-zero bit pattern is a
+      valid inhabitant. The struct is built in the single-threaded parent and the
+      used fields (exit_signal) are overwritten before it is passed to clone3. No
+      pointer is dereferenced here.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-close-fd
+    syscall: close (raw SYS_close on the coordinator's error-pipe write-end copy)
+    safety_invariant: >-
+      Coordinator-side single raw close on an inherited descriptor the launcher
+      owns (its copy of the error-pipe WRITE end), so that only the child retains a
+      write end and the read end can reach EOF. The fd is passed as a plain RawFd
+      with no Rust value wrapping it, so there is no aliasing and no double-free of
+      an owned handle; the raw syscall is used instead of a File drop precisely so a
+      best-effort close cannot abort the process if the fd is already gone. No
+      pointer is dereferenced. A failure is ignored.
+    requirement: ControlChannel
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-waitid
+    syscall: waitid(P_PID, pid, &mut siginfo, WEXITED)
+    safety_invariant: >-
+      Coordinator-side (parent) reaping. siginfo_t is zero-initialised and passed
+      by &mut to waitid, which only WRITES it; WEXITED waits for the child's
+      terminal state. pid is the child this launcher just created via clone3, so the
+      parent is entitled to reap it. No user memory is read through a raw pointer
+      beyond the out-siginfo. Best-effort — a failure is ignored because the error
+      pipe, not the exit code, already decided the launch outcome.
+    requirement: ChildSpawn
+
+  # ── S8: the OPT-IN unprivileged user-namespace RENDEZVOUS basement. Two new
+  # coordinator-side (parent, pre-clone3) blocks back it; the CLONE_NEWUSER flag and
+  # the child's blocking sync-pipe read are folded into the clone3-child / child-window
+  # entries above. The PARENT's /proc/<pid>/{uid_map,setgroups,gid_map} writes are
+  # plain std::fs::write (SAFE — no unsafe, no ledger entry). This is INFRASTRUCTURE
+  # for unprivileged NetworkDenyAll (S9): the child becomes uid 0 in the new userns,
+  # the prerequisite for unprivileged netns creation. It mints no PROVEN claim itself.
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-userns-sync-pipe
+    syscall: pipe2(&mut [c_int;2], O_CLOEXEC) — create the parent→child userns rendezvous sync pipe
+    safety_invariant: >-
+      Coordinator-side (parent, single-threaded, pre-clone3). pipe2 writes EXACTLY two
+      fresh fd numbers into a fixed stack [c_int; 2] out-array and reads no other user
+      memory; O_CLOEXEC makes both ends close-on-exec. On failure it returns -1/errno
+      (surfaced as io::Error — no fd is created, the userns launch refuses fail-closed).
+      The two returned fds are brand-new and exclusively owned by the launcher; each is
+      closed AT MOST ONCE — the READ end is packed into the ChildExecPlan and closed by
+      the child's scrub or its CLOEXEC at exec, the WRITE end by the coordinator's
+      explicit close/File-drop after the child is released or fail-closed. They are passed
+      as plain RawFds with no Rust value wrapping them, so there is no aliasing and no
+      double-close. No pointer beyond the out-array is dereferenced.
+    requirement: NetworkDenyAll
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-effective-ids
+    syscall: geteuid() + getegid() — observe the launcher's effective uid/gid for the userns maps
+    safety_invariant: >-
+      Coordinator-side (parent, pre-clone3) pure observation. geteuid/getegid take NO
+      arguments, read NO user memory, dereference NO pointer, create/close NO fd, and
+      CANNOT fail (POSIX guarantees they always succeed). They only return the calling
+      process's effective uid/gid, used to build the userns uid/gid maps (0 <euid> 1 /
+      0 <egid> 1). Sound for any caller state.
+    requirement: NetworkDenyAll
+
+  # ── S10: the CHILD-WINDOW seccomp INSTALL basement (proof-spine S10). Two new
+  # child-window (async-signal-safe) blocks: the STANDALONE NO_NEW_PRIVS prctl (extracted
+  # from landlock's restrict_self so the filter can install without/before landlock and in
+  # the right order) and the seccomp(SECCOMP_SET_MODE_FILTER) install of the PARENT-built
+  # BPF (the bvisor seccomp model's compile() assembled the program in the parent; the child
+  # only reads it). They install a default-allow DENYLIST (ChildSpawn::DenyNewTasks denies
+  # clone/clone3/fork/vfork; NetworkDenyAll DiD denies socket) as ONE composed layer — the
+  # broad confinement is landlock/cgroup/netns/fd-scrub. The filter allows
+  # execve/execveat/write/exit_group so the immediately-following fexecve + error reporting
+  # survive. Ordering is load-bearing: NNP, then the filter LAST (after the scrub + landlock,
+  # immediately before fexecve). Both are allocation/lock-free; both fail closed so the
+  # target never runs without NNP / without the filter.
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-no-new-privs
+    syscall: prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) — standalone NO_NEW_PRIVS for the seccomp install
+    safety_invariant: >-
+      Child-window (post-clone3, async-signal-safe). prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+      takes the documented ignored-zero trailing args; it reads NO user memory and
+      dereferences NO pointer — it only sets the calling thread's no_new_privs bit, the
+      precondition an UNPRIVILEGED seccomp filter install requires (the kernel refuses
+      SECCOMP_SET_MODE_FILTER from an unprivileged caller without it) and a hardening
+      guarantee (no exec can gain privilege thereafter). It allocates nothing and takes no
+      lock, so it is sound in the post-fork child window. EXTRACTED from landlock's own
+      restrict_self (which also sets NNP) so seccomp can install without/before landlock; it
+      is idempotent with that. Run ONLY when a seccomp filter is scheduled (a no-seccomp plan
+      leaves the window unchanged). A non-zero return (failure) is surfaced to the caller,
+      which child_fails BEFORE the filter install so the target never runs without NNP.
+    requirement: ChildSpawn
+  - file: crates/bvisor/launcher/linux/sys.rs
+    anchor: linux-launcher-seccomp-install
+    syscall: seccomp(SECCOMP_SET_MODE_FILTER, 0, &sock_fprog) — install the parent-built BPF denylist
+    safety_invariant: >-
+      Child-window (post-clone3, async-signal-safe), reached LAST — after the fd scrub +
+      landlock restrict_self, IMMEDIATELY before fexecve. The sock_fprog is a FIXED stack
+      { len, filter } pair built HERE (no heap) over the PARENT-built BpfProgram slice
+      (assembled ENTIRELY in the parent by the bvisor seccomp model's compile(); the child
+      only READS that already-mapped slice). `len` is the bounded instruction count
+      (try_from-guarded; an empty program is refused before the syscall). The kernel
+      copy_from_user's the BPF program DURING the syscall and leaves the memory untouched, so
+      the borrowed pointer needs no ownership and is sound for the call's duration. NNP is
+      already set (set_no_new_privs ran first), so the unprivileged install is permitted. The
+      installed filter is a default-ALLOW DENYLIST (ChildSpawn::DenyNewTasks denies
+      clone/clone3/fork/vfork by syscall number; the NetworkDenyAll DiD denies socket) that
+      ALWAYS allows execve/execveat/write/exit_group, so the following fexecve + any error
+      report survive — ONE composed layer, never a standalone sandbox (landlock/cgroup/netns/
+      fd-scrub are the broad confinement). It allocates nothing and takes no lock. A non-zero
+      return (failure) is surfaced so the caller child_fails — the target NEVER runs
+      un-filtered (a DenyNewTasks workload must not run able to fork).
+    requirement: ChildSpawn

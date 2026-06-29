@@ -39,7 +39,7 @@ pub struct ThingHappened {
 /// `Default + Serialize + Deserialize` bounds that the projection runtime
 /// requires.
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Incremented, handler = on_inc)]
 #[batpak(event = Tick, handler = on_tick)]
 pub struct Counter {

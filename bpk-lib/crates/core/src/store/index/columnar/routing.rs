@@ -11,7 +11,6 @@ pub(super) enum ScanRoute {
     SoA,
     SoAoS,
     AoSoA64,
-    AoSoA64Simd,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,20 +32,18 @@ pub(super) struct ScanCapabilities {
 
 impl ScanIndex {
     pub(super) fn capabilities(&self) -> ScanCapabilities {
-        let (has_soa, has_entity_groups, has_tiles64, has_tiles64_simd) = (
+        let (has_soa, has_entity_groups, has_tiles64) = (
             self.soa.is_some(),
             self.entity_groups.is_some(),
             self.tiles64.is_some(),
-            self.tiles64_simd.is_some(),
         );
 
-        let topology_name = match (has_soa, has_entity_groups, has_tiles64, has_tiles64_simd) {
-            (false, false, false, false) => "aos",
-            (true, false, false, false) => "scan",
-            (false, true, false, false) => "entity-local",
-            (false, false, true, false) => "tiled",
-            (false, false, false, true) => "tiled-simd",
-            (true, true, true, false) => "all",
+        let topology_name = match (has_soa, has_entity_groups, has_tiles64) {
+            (false, false, false) => "aos",
+            (true, false, false) => "scan",
+            (false, true, false) => "entity-local",
+            (false, false, true) => "tiled",
+            (true, true, true) => "all",
             _ => "hybrid",
         };
 
@@ -55,8 +52,6 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
-            } else if has_tiles64_simd {
-                ScanRoute::AoSoA64Simd
             } else if has_entity_groups {
                 ScanRoute::SoAoS
             } else {
@@ -68,8 +63,6 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
-            } else if has_tiles64_simd {
-                ScanRoute::AoSoA64Simd
             } else {
                 ScanRoute::BaseAoS
             },
@@ -77,8 +70,6 @@ impl ScanIndex {
                 ScanRoute::SoA
             } else if has_tiles64 {
                 ScanRoute::AoSoA64
-            } else if has_tiles64_simd {
-                ScanRoute::AoSoA64Simd
             } else if has_entity_groups {
                 ScanRoute::SoAoS
             } else {
@@ -93,7 +84,6 @@ impl ScanIndex {
             tile_count: self
                 .tiles64
                 .as_ref()
-                .or(self.tiles64_simd.as_ref())
                 .map_or(0, super::ColumnarIndex::tile_count),
         }
     }
@@ -177,18 +167,6 @@ impl ScanIndex {
                 .map_or_else(fallback, |tiles| tiles.query_hits_by_category(category)),
             (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => self
                 .tiles64
-                .as_ref()
-                .map_or_else(fallback, |tiles| tiles.query_hits_by_scope(scope)),
-            (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => self
-                .tiles64_simd
-                .as_ref()
-                .map_or_else(fallback, |tiles| tiles.query_hits_by_kind(kind)),
-            (ScanRoute::AoSoA64Simd, EntryQuery::Category(category)) => self
-                .tiles64_simd
-                .as_ref()
-                .map_or_else(fallback, |tiles| tiles.query_hits_by_category(category)),
-            (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => self
-                .tiles64_simd
                 .as_ref()
                 .map_or_else(fallback, |tiles| tiles.query_hits_by_scope(scope)),
         }
@@ -295,27 +273,6 @@ impl ScanIndex {
             }
             (ScanRoute::AoSoA64, EntryQuery::Scope(scope)) => {
                 self.tiles64.as_ref().map_or_else(fallback, |tiles| {
-                    let mut v = tiles.query_hits_by_scope(scope);
-                    apply_after_bounds(&mut v, after_seq, started, limit);
-                    v
-                })
-            }
-            (ScanRoute::AoSoA64Simd, EntryQuery::Kind(kind)) => {
-                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
-                    let mut v = tiles.query_hits_by_kind(kind);
-                    apply_after_bounds(&mut v, after_seq, started, limit);
-                    v
-                })
-            }
-            (ScanRoute::AoSoA64Simd, EntryQuery::Category(cat)) => {
-                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
-                    let mut v = tiles.query_hits_by_category(cat);
-                    apply_after_bounds(&mut v, after_seq, started, limit);
-                    v
-                })
-            }
-            (ScanRoute::AoSoA64Simd, EntryQuery::Scope(scope)) => {
-                self.tiles64_simd.as_ref().map_or_else(fallback, |tiles| {
                     let mut v = tiles.query_hits_by_scope(scope);
                     apply_after_bounds(&mut v, after_seq, started, limit);
                     v

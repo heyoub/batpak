@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; lane A substrate doctrine tests use panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: compaction structural evidence is deterministic (`CompactionReportBody`); append idempotency via event id +
 //! keyed batch replay; public reads expose explicit predicate bounds (`Region`/entity/cursor surfaces).
 //! CATCHES: nondeterministic compaction report fields; partial batch idempotency faking success; implicit unbounded scans.
@@ -8,7 +6,6 @@
 //! **Compaction vs snapshot interplay:** `tests/store_snapshot_compaction.rs`.
 
 use batpak::event::EventKind;
-mod support;
 use batpak::store::index::IndexEntry;
 use batpak::store::segment::CompactionOutcome;
 use batpak::store::{
@@ -17,9 +14,9 @@ use batpak::store::{
     CompactionEvidenceReport, CompactionReportBody, CompactionReportFinding,
     CompactionStrategyShape, StoreError, COMPACTION_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::path::PathBuf;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn lane_store() -> (TempDir, Store<Open>) {
@@ -62,7 +59,7 @@ fn compaction_report_skipped_is_deterministic() {
     let (_dir, store) = lane_store();
     let coord = Coordinate::new("e", "s").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({ "x": 1 }))
         .expect("append");
     store.sync().expect("sync");
@@ -92,7 +89,7 @@ fn compact_merge_evidence_has_sorted_sources_stable_body_hash_and_output_digest(
     let kind = EventKind::custom(0xF, 0x41);
 
     for i in 0..12 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -240,7 +237,7 @@ fn idempotency_keyed_batch_double_submit_returns_cached_receipts_without_reopen(
     );
     for (a, b) in r1.iter().zip(r2.iter()) {
         assert_eq!(a.event_id, b.event_id);
-        assert_eq!(a.sequence, b.sequence);
+        assert_eq!(a.global_sequence, b.global_sequence);
     }
     store.close().expect("close");
 }
@@ -251,7 +248,7 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
     let coord = Coordinate::new("e-partial", "s").expect("coord");
     let kind = EventKind::custom(0xF, 0x43);
     let existing_key = 0xE0_E1_E2_E3_E4_E5_E6_E7_u128;
-    store
+    let _ = store
         .append_with_options(
             &coord,
             kind,
@@ -279,10 +276,10 @@ fn idempotency_batch_partial_cache_rejected_instead_of_silent_success() {
         )
         .expect("new item"),
     ];
-    let err = match store.append_batch(items) {
-        Ok(_) => panic!("PROPERTY: partial idempotency replay must not return Ok"),
-        Err(e) => e,
-    };
+    let err = store
+        .append_batch(items)
+        .map(|_| ())
+        .expect_err("PROPERTY: partial idempotency replay must not return Ok");
     assert!(
         matches!(err, StoreError::IdempotencyPartialBatch { .. }),
         "wrong error: {err:?}"
@@ -320,7 +317,7 @@ fn idempotency_key_is_event_id_scoped_global_lookup() {
         .expect("replay");
 
     assert_eq!(r1.event_id, r2.event_id);
-    assert_eq!(r1.sequence, r2.sequence);
+    assert_eq!(r1.global_sequence, r2.global_sequence);
     store.close().expect("close");
 }
 
@@ -365,10 +362,10 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
         Canal::pull_batch(&mut cursor, 1, Duration::from_millis(0)).expect("cursor canal");
     match cursor_batch {
         CanalBatch::One(entry) => {
-            assert_eq!(CanalItem::event_id(&entry), u128::from(first.event_id));
+            assert_eq!(CanalItem::event_id(&entry), first.event_id);
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
-            panic!("PROPERTY: cursor canal should yield one entry, got {other:?}")
+            unreachable!("PROPERTY: cursor canal should yield one entry, got {other:?}")
         }
     }
 
@@ -381,13 +378,12 @@ fn public_canal_trait_pulls_cursor_and_subscription_items() {
             .expect("subscription canal");
     match subscription_batch {
         CanalBatch::One(notification) => {
-            assert_eq!(
-                CanalItem::event_id(&notification),
-                u128::from(second.event_id)
-            );
+            assert_eq!(CanalItem::event_id(&notification), second.event_id);
         }
         other @ (CanalBatch::Empty | CanalBatch::Many(_)) => {
-            panic!("PROPERTY: subscription canal should yield one notification, got {other:?}")
+            unreachable!(
+                "PROPERTY: subscription canal should yield one notification, got {other:?}"
+            )
         }
     }
 

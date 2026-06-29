@@ -11,9 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::shared_checks::{
-    extract_anchors, load_known_invariants, resolve_anchor, JustifiesAnchor,
-};
+use super::anchors::{extract_anchors, load_known_invariants, resolve_anchor, JustifiesAnchor};
 
 #[derive(Debug, Deserialize)]
 struct InvariantRecord {
@@ -46,6 +44,7 @@ pub(crate) const TESTED_CRATES: &[&str] = &[
     "crates/core/tests/",
     "crates/syncbat/tests/",
     "crates/netbat/tests/",
+    "crates/bvisor/tests/",
 ];
 
 pub(crate) fn check(repo_root: &Path, tracked_files: &[PathBuf]) -> Result<()> {
@@ -565,9 +564,10 @@ mod tests {
         .expect("write bad waiver");
         // `CitationWaivers` deliberately carries no `Debug`, so match the
         // result rather than `expect_err` (which would require `Debug`).
-        let err = match load_waivers(&bad, &repo_root) {
-            Ok(_) => panic!("unresolvable anchor must fail"),
-            Err(err) => err,
+        let result = load_waivers(&bad, &repo_root);
+        assert!(result.is_err(), "unresolvable anchor must fail");
+        let Err(err) = result else {
+            unreachable!("asserted is_err directly above")
         };
         assert!(
             err.to_string().contains("does not resolve to a real ADR"),

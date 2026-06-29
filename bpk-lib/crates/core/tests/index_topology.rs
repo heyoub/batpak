@@ -29,11 +29,6 @@ fn topology_constructors_enable_expected_overlays() {
             IndexTopology::aos().with_tiles64(true),
         ),
         (
-            "tiled_simd",
-            IndexTopology::tiled_simd(),
-            IndexTopology::aos().with_tiles64_simd(true),
-        ),
-        (
             "all",
             IndexTopology::all(),
             IndexTopology::aos()
@@ -68,7 +63,6 @@ fn diagnostics_reports_topology_labels() {
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
-        ("tiled-simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ];
 
@@ -97,7 +91,6 @@ fn diagnostics_reports_tile_count_only_for_tiled_topologies() {
         ("scan", IndexTopology::scan(), false),
         ("entity-local", IndexTopology::entity_local(), false),
         ("tiled", IndexTopology::tiled(), true),
-        ("tiled-simd", IndexTopology::tiled_simd(), true),
         ("all", IndexTopology::all(), true),
     ];
 
@@ -113,7 +106,7 @@ fn diagnostics_reports_tile_count_only_for_tiled_topologies() {
 
         let coord = Coordinate::new("entity:tile-proof", "scope:tile-proof").expect("coord");
         for i in 0..130 {
-            store
+            let _ = store
                 .append(
                     &coord,
                     EventKind::custom(0x1, 1),

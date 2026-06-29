@@ -111,6 +111,7 @@ impl GateId {
 
 /// Persisted verdict for one gate in a denial trace.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Verdict {
     /// Gate ran and permitted the proposal.
     Permit,

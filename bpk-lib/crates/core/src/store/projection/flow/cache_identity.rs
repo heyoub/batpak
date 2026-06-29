@@ -19,11 +19,11 @@ where
     T: EventSourced + 'static,
 {
     let schema_v = T::schema_version();
-    // NOTE: `TypeId` + `DefaultHasher` are NOT stable across toolchain versions,
-    // so a compiler upgrade changes this discriminant and orphans existing cache
-    // files. That is benign — orphaned entries simply miss and are recomputed on
-    // next access — so a stable author-declared discriminant is deferred (0.8.3
-    // audit R17). Do not rely on this key being portable across rustc versions.
+    // Terminal FAIL-CLOSED portability (audit R17): `TypeId` + `DefaultHasher`
+    // are NOT stable across toolchain versions, so a compiler upgrade orphans
+    // existing cache files. Orphaned entries miss and rebuild on next access.
+    // Witnessed by `cache_identity.rs::projection_cache_key_type_discriminant_is_type_id_fail_closed_portability`.
+    // Do not rely on this key being portable across rustc versions.
     let type_disc = {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         TypeId::of::<T>().hash(&mut h);
@@ -117,5 +117,24 @@ mod relevant_kinds_hash_tests {
         let one = projection_cache_key::<OneKind>("entity");
         let two = projection_cache_key::<TwoKinds>("entity");
         assert_ne!(one[one.len() - 8..], two[two.len() - 8..]);
+    }
+
+    #[test]
+    fn projection_cache_key_type_discriminant_is_type_id_fail_closed_portability() {
+        let key = projection_cache_key::<OneKind>("entity");
+        let key_repeat = projection_cache_key::<OneKind>("entity");
+        assert_eq!(
+            key, key_repeat,
+            "PROPERTY: TypeId discriminant is stable within one toolchain build"
+        );
+        assert_ne!(
+            projection_cache_key::<OneKind>("entity"),
+            projection_cache_key::<TwoKinds>("entity"),
+            "PROPERTY: different EventSourced types must not share a cache key"
+        );
+        assert!(
+            key.starts_with(b"entity\0"),
+            "PROPERTY: cache key layout is entity\\0type_id... (entity bytes, then a NUL separator)"
+        );
     }
 }

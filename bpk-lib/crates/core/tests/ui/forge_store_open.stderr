@@ -1,0 +1,42 @@
+warning: unreachable expression
+  --> tests/ui/forge_store_open.rs:17:17
+   |
+16 |         index: unimplemented!(),
+   |                ---------------- any code following this expression is unreachable
+17 |         reader: unimplemented!(),
+   |                 ^^^^^^^^^^^^^^^^ unreachable expression
+   |
+   = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+   = note: this warning originates in the macro `unimplemented` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: cannot construct `batpak::prelude::Store` with struct literal syntax due to private fields
+  --> tests/ui/forge_store_open.rs:15:31
+   |
+15 |     let _store: Store<Open> = Store::<Open> {
+   |                               ^^^^^^^^^^^^^
+16 |         index: unimplemented!(),
+   |         ----------------------- private field
+17 |         reader: unimplemented!(),
+   |         ------------------------ private field
+18 |         cache: unimplemented!(),
+   |         ----------------------- private field
+19 |         watermark_handle: unimplemented!(),
+   |         ---------------------------------- private field
+20 |         projection_registry: unimplemented!(),
+   |         ------------------------------------- private field
+21 |         lifecycle_gate: unimplemented!(),
+   |         -------------------------------- private field
+22 |         config: unimplemented!(),
+   |         ------------------------ private field
+23 |         runtime: unimplemented!(),
+   |         ------------------------- private field
+24 |         should_shutdown_on_drop: false,
+   |         ------------------------------ private field
+25 |         open_report: None,
+   |         ----------------- private field
+26 |         cumulative_reserved_kind_fallbacks: unimplemented!(),
+   |         ---------------------------------------------------- private field
+27 |         state: unimplemented!(),
+   |         ----------------------- private field
+   |
+   = note: ...and other private field `_store_lock` that was not provided

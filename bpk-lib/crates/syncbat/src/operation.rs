@@ -3,6 +3,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::effect::OperationEffectRow;
 use crate::handler::HandlerFn;
 use crate::operation_name::{OperationName, OperationNameError};
 
@@ -75,6 +76,12 @@ pub struct OperationDescriptor {
     output_schema_ref: DescriptorText,
     /// Stable receipt kind emitted for this operation.
     receipt_kind: DescriptorText,
+    /// Declared fine-grained effect row enforced at dispatch.
+    // Boxed so a descriptor stays small (the inline row is six Vecs + a bool):
+    // an unboxed row pushed `OperationDescriptor` past the clippy
+    // large-enum/large-Err thresholds wherever it is embedded. `None` == empty,
+    // which keeps `new`/`new_with_title` `const`.
+    effect_row: Option<Box<OperationEffectRow>>,
 }
 
 #[derive(Clone, Debug, Eq)]
@@ -129,6 +136,7 @@ impl OperationDescriptor {
             input_schema_ref: DescriptorText::static_str(input_schema_ref),
             output_schema_ref: DescriptorText::static_str(output_schema_ref),
             receipt_kind: DescriptorText::static_str(receipt_kind),
+            effect_row: None,
         }
     }
 
@@ -150,6 +158,7 @@ impl OperationDescriptor {
             input_schema_ref: DescriptorText::static_str(input_schema_ref),
             output_schema_ref: DescriptorText::static_str(output_schema_ref),
             receipt_kind: DescriptorText::static_str(receipt_kind),
+            effect_row: None,
         }
     }
 
@@ -170,6 +179,7 @@ impl OperationDescriptor {
             input_schema_ref: DescriptorText::owned(input_schema_ref),
             output_schema_ref: DescriptorText::owned(output_schema_ref),
             receipt_kind: DescriptorText::owned(receipt_kind),
+            effect_row: None,
         }
     }
 
@@ -185,6 +195,17 @@ impl OperationDescriptor {
     #[must_use]
     pub fn with_owned_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(DescriptorText::owned(title));
+        self
+    }
+
+    /// Return a copy of this descriptor with an explicit fine-grained effect row.
+    #[must_use]
+    pub fn with_effect_row(mut self, effect_row: OperationEffectRow) -> Self {
+        self.effect_row = if effect_row.is_empty() {
+            None
+        } else {
+            Some(Box::new(effect_row))
+        };
         self
     }
 
@@ -218,6 +239,15 @@ impl OperationDescriptor {
         self.receipt_kind.as_str()
     }
 
+    /// Fine-grained declared effects enforced against handler observations.
+    #[must_use]
+    pub fn effect_row(&self) -> &OperationEffectRow {
+        // `None` is the empty row; hand out a shared empty so callers always
+        // see a `&OperationEffectRow` regardless of the boxed representation.
+        static EMPTY_EFFECT_ROW: OperationEffectRow = OperationEffectRow::empty();
+        self.effect_row.as_deref().unwrap_or(&EMPTY_EFFECT_ROW)
+    }
+
     /// Validate descriptor fields before insertion into a live runtime catalog.
     ///
     /// # Errors
@@ -246,7 +276,9 @@ impl OperationDescriptor {
             "receipt_kind",
             self.receipt_kind(),
             MAX_DESCRIPTOR_REF_BYTES,
-        )
+        )?;
+        self.effect_row()
+            .validate_for_descriptor(self.effect, self.receipt_kind())
     }
 }
 
@@ -302,7 +334,11 @@ pub struct DescriptorValidationError {
 }
 
 impl DescriptorValidationError {
-    fn new(field: &'static str, value: impl Into<String>, message: &'static str) -> Self {
+    pub(crate) fn new(
+        field: &'static str,
+        value: impl Into<String>,
+        message: &'static str,
+    ) -> Self {
         Self {
             field,
             value: value.into(),

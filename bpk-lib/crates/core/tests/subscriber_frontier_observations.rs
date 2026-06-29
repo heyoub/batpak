@@ -5,18 +5,16 @@
 //! observations for unknown precision, and nondeterministic body hashes.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::{
     LossPrecision, SubscriberDeliveryState, SubscriberFrontierEvidenceReport,
     SubscriberFrontierFinding, SubscriberFrontierHash, SubscriberFrontierReportBody,
     SubscriberFrontierReportError, SubscriberFrontierRequest, SubscriberFrontierSource,
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::error::Error;
-use support::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -29,7 +27,7 @@ fn current_subscriber_reports_deterministic_frontier_state() -> TestResult {
     let receipt = store.append(&coord, kind, &serde_json::json!({"step": 0}))?;
 
     let request = SubscriberFrontierRequest::lossy_push(
-        Some(receipt.sequence),
+        Some(receipt.global_sequence),
         SubscriberDeliveryState::Active,
         LossPrecision::Unknown,
     );

@@ -1,6 +1,4 @@
 #![cfg(feature = "dangerous-test-hooks")]
-// justifies: INV-TEST-PANIC-AS-ASSERTION; dangerous-test-hooks regression in tests/fault_hooks.rs uses panic as the direct assertion surface for injected failure paths.
-#![allow(clippy::panic)]
 
 use std::sync::Arc;
 
@@ -19,10 +17,8 @@ fn probabilistic_injector_and_maybe_inject_surface_faults() {
         CountdownAction::Fail("boom"),
     )));
 
-    let err = match batpak::store::fault::maybe_inject(point, &injector) {
-        Ok(()) => panic!("PROPERTY: probability=1.0 must force fault injection"),
-        Err(err) => err,
-    };
+    let err = batpak::store::fault::maybe_inject(point, &injector)
+        .expect_err("PROPERTY: probability=1.0 must force fault injection");
 
     assert!(
         matches!(err, StoreError::FaultInjected(ref message) if message.contains("boom")),

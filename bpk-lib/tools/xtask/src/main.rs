@@ -1,5 +1,5 @@
-// justifies: INV-ALLOW-IS-DESIGN; xtask is the repository-owned command-line tool and its subcommands intentionally write human and CI status messages to stdout/stderr from tools/xtask/src/main.rs.
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+#[macro_use]
+mod cli_out;
 
 mod bench;
 mod commands;
@@ -33,6 +33,13 @@ enum XtaskCommand {
     Doctor,
     Traceability,
     Structural,
+    /// Cross-oracle triangulation gate (GAUNTLET-TRIANGULATION): workspace
+    /// crate-graph acyclicity cross-checked by two independent derivations.
+    Triangulation,
+    /// Prove the gates bite (GAUNTLET-TQL): rebuild every `ProductionFlip` red
+    /// fixture under `--cfg gauntlet_red_fixture` and assert each test FAILS. A
+    /// fixture that cannot red has laundered blocking authority.
+    ProveGatesBite,
     /// Check the repo layout contract: root docs/cookbook plus bpk-lib workspace.
     Layout,
     /// Check stack dependency direction and runtime boundary discipline.
@@ -92,16 +99,9 @@ enum XtaskCommand {
     SemverCheck(SemverCheckArgs),
     /// Write a local release proof manifest under the Cargo workspace target dir.
     ReleaseManifest(ReleaseManifestArgs),
-    /// Export the BatPAK TypeScript SDK manifest from the reference host
-    /// descriptors. Consumed by `bpk-ts/packages/codegen`.
-    ExportTsManifest(ExportTsManifestArgs),
-    /// Prove the host profile end-to-end: manifest, codegen, TS, hbat, spike.
-    HostDev(HostDevArgs),
-    /// Prove the living TS audit-loop: seed, restart hbat, replay-only.
-    HostLoop,
     /// Opt-in factory command proof ledger backed by a local BatPAK store.
     FactoryLedger(FactoryLedgerArgs),
-    /// Emit a PCP-aligned handoff packet under `target/context/`.
+    /// Emit a portable context handoff packet under `target/context/`.
     Context(ContextArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),
@@ -135,7 +135,29 @@ enum XtaskCommand {
     Preflight,
     PreCommit,
     Docs(DocsArgs),
+    /// GAUNT-CAPSNAP: regenerate the committed capability FLOOR
+    /// (`traceability/capability_snapshot.yaml`) from each backend's
+    /// `support_matrix()` best-case table + the witnessed-invariant set. The
+    /// matching `--check` mode runs inside `structural-check` (drift => fail).
+    CapabilitySnapshot,
+    /// Platform qualification matrix mirror for bvisor backend cells.
+    PlatformQualificationMatrix,
+    /// Validate the release terminal-status ledger (`traceability/releases/*.yaml`).
+    ReleaseStatus(ReleaseStatusArgs),
     Release(ReleaseArgs),
+}
+
+#[derive(Args, Clone, Debug, Default)]
+pub(crate) struct ReleaseStatusArgs {
+    /// Release version to check (for example `0.9.0`).
+    #[arg(long)]
+    pub(crate) target: Option<String>,
+    /// Require exactly one `active: true` release target.
+    #[arg(long)]
+    pub(crate) active: bool,
+    /// Fail when any `terminal_required` row is not in a terminal status.
+    #[arg(long)]
+    pub(crate) strict: bool,
 }
 
 #[derive(Args, Clone, Copy)]
@@ -521,27 +543,6 @@ pub(crate) struct ReleaseManifestArgs {
 }
 
 #[derive(Args, Clone, Debug)]
-pub(crate) struct HostDevArgs {
-    /// Skip `pnpm -w test` (inner loop only; canonical proof runs tests).
-    #[arg(long)]
-    pub(crate) skip_tests: bool,
-    /// Skip the regeneration git-diff determinism check.
-    #[arg(long)]
-    pub(crate) skip_determinism: bool,
-}
-
-#[derive(Args, Clone, Debug)]
-pub(crate) struct ExportTsManifestArgs {
-    /// Output path for the rendered manifest. The parent directory is
-    /// created on demand.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) out: PathBuf,
-    /// Refuse descriptor drift instead of rewriting the manifest.
-    #[arg(long)]
-    pub(crate) check: bool,
-}
-
-#[derive(Args, Clone, Debug)]
 pub(crate) struct ArchitectureIrArgs {
     /// Output path for the rendered IR. Defaults to target/architecture.ir.json.
     #[arg(long, value_name = "PATH")]
@@ -584,6 +585,8 @@ fn main() -> Result<()> {
         XtaskCommand::Doctor => commands::doctor(),
         XtaskCommand::Traceability => commands::integrity("traceability-check", []),
         XtaskCommand::Structural => commands::integrity("structural-check", []),
+        XtaskCommand::Triangulation => commands::integrity("triangulation-check", []),
+        XtaskCommand::ProveGatesBite => commands::prove_gates_bite(),
         XtaskCommand::Layout => commands::integrity("structural-check", []),
         XtaskCommand::Boundary => commands::integrity("structural-check", []),
         XtaskCommand::StalePaths => commands::integrity("structural-check", []),
@@ -614,9 +617,6 @@ fn main() -> Result<()> {
         XtaskCommand::PublicApi(args) => public_api::public_api(args),
         XtaskCommand::SemverCheck(args) => public_api::semver_check(args),
         XtaskCommand::ReleaseManifest(args) => commands::release_manifest(args),
-        XtaskCommand::ExportTsManifest(args) => commands::export_ts_manifest(&args),
-        XtaskCommand::HostDev(args) => commands::host_dev(&args),
-        XtaskCommand::HostLoop => commands::host_loop(),
         XtaskCommand::FactoryLedger(args) => commands::factory_ledger(args),
         XtaskCommand::Context(args) => commands::context(args),
         XtaskCommand::Scaffold(args) => commands::scaffold(args),
@@ -697,6 +697,11 @@ fn main() -> Result<()> {
             commands::integrity("structural-check", [])
         }
         XtaskCommand::Docs(args) => docs::docs(args),
+        XtaskCommand::CapabilitySnapshot => commands::integrity("capability-snapshot", []),
+        XtaskCommand::PlatformQualificationMatrix => {
+            commands::integrity("platform-qualification-matrix", [])
+        }
+        XtaskCommand::ReleaseStatus(args) => commands::release_status(args),
         XtaskCommand::Release(args) => commands::release(args),
     }
 }

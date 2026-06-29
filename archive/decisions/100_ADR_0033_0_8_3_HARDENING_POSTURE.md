@@ -70,4 +70,4 @@ panic is recoverable and observable; corrupt durable state is neither.
 - `100_ADR_0032_SIDX_SDX3_INTEGRITY_FOOTER.md`
 - `100_ADR_0026_PRE_1_0_PUBLIC_SURFACE_STRATEGY.md`
 - `CHANGELOG.md`
-- `EVENTS.md`
+- `06_EVENTS.md`

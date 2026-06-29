@@ -71,9 +71,6 @@ fn restart_policy_shape(policy: &RestartPolicy) -> StoreResourceRestartPolicySha
             max_restarts: *max_restarts,
             within_ms: *within_ms,
         },
-        // justifies: forward compatible default for future RestartPolicy variants on this non exhaustive enum without changing stable resource evidence shape; anchor src/store/write/writer.rs
-        #[allow(unreachable_patterns)]
-        _ => StoreResourceRestartPolicyShape::Once,
     }
 }
 
@@ -199,7 +196,7 @@ pub fn store_resource_report_body_from_diagnostics(
         fd_budget: u64::try_from(d.fd_budget).unwrap_or(u64::MAX),
         restart_policy: restart_policy_shape(&d.restart_policy),
         writer_pressure: d.writer_pressure,
-        frontier: StoreResourceFrontierBody::from(d.frontier),
+        frontier: StoreResourceFrontierBody::from(d.frontier.clone()),
         index_topology: d.index_topology.to_string(),
         tile_count: u64::try_from(d.tile_count).unwrap_or(u64::MAX),
         open_report: d.open_report.clone(),

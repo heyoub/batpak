@@ -13,6 +13,5 @@ durable records, receipts, evidence, and delivery witnesses stay in `batpak`.
 The request/response boundary contract is documented in repository ADR-0029.
 The streaming contract shape is documented in repository ADR-0030.
 
-Live terminals: [TERMINALS.md](../../../TERMINALS.md). Composition:
-[INTEGRATION.md](../../../INTEGRATION.md). TypeScript clients:
-[bpk-ts/README.md](../../../bpk-ts/README.md).
+Live terminals: [05_TERMINALS.md](../../../05_TERMINALS.md). Composition:
+[11_INTEGRATION.md](../../../11_INTEGRATION.md).

@@ -1,12 +1,9 @@
 #![cfg(feature = "dangerous-test-hooks")]
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0006; retry-poll loops in tests/store_restart_policy.rs use panic! as the escape hatch when the expected transition never arrives within the bound.
-#![allow(clippy::panic)]
 //! Restart policy tests split out of store_advanced.rs.
 
-mod support;
 use batpak::store::{HlcPoint, RestartPolicy, Store, StoreConfig, StoreError};
+use batpak_testkit::prelude::*;
 use std::time::Duration;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]
@@ -20,11 +17,11 @@ fn writer_restart_once_recovers_from_panic() {
     let coord = Coordinate::new("restart:test", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &"before_panic")
         .expect("append before panic");
     store.panic_writer_for_test().expect("send panic command");
-    store.append(&coord, kind, &"after_panic").expect(
+    let _ = store.append(&coord, kind, &"after_panic").expect(
         "RESTART FAILED: append after writer panic should succeed with RestartPolicy::Once.\n\
          Investigate: src/store/write/writer.rs writer_thread_main() catch_unwind logic.",
     );
@@ -51,11 +48,11 @@ fn writer_restart_recovers_durability_gate_after_panic() {
     let coord = Coordinate::new("restart:durable", "restart:scope").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &"before_panic")
         .expect("append before panic");
     store.panic_writer_for_test().expect("send panic command");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic")
         .expect("append after restart");
 
@@ -86,21 +83,19 @@ fn writer_restart_once_gives_up_after_second_panic() {
     // process the panic command and exit; sleeping a fixed amount makes
     // the test flaky on slow CI runners. Retry append with a deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let final_err = loop {
+    let final_err: Option<StoreError> = loop {
         match store.append(&coord, kind, &"should_fail") {
-            Err(e) => break e,
-            Ok(_) if std::time::Instant::now() >= deadline => {
-                panic!(
-                    "PROPERTY: after exhausting RestartPolicy::Once, append \
-                     must fail. Writer thread did not die within 5s of \
-                     receiving the second PanicForTest command. \
-                     Investigate: src/store/write/writer.rs writer_thread_main \
-                     restart counter."
-                )
-            }
+            Err(e) => break Some(e),
+            Ok(_) if std::time::Instant::now() >= deadline => break None,
             Ok(_) => std::thread::yield_now(),
         }
     };
+    let final_err = final_err.expect(
+        "PROPERTY: after exhausting RestartPolicy::Once, append must fail. \
+         Writer thread did not die within 5s of receiving the second \
+         PanicForTest command. Investigate: src/store/write/writer.rs \
+         writer_thread_main restart counter.",
+    );
     assert!(
         matches!(final_err, StoreError::WriterCrashed),
         "PROPERTY: append after exhausted restart budget must surface as \
@@ -124,11 +119,11 @@ fn writer_restart_bounded_respects_limit() {
     let kind = EventKind::custom(0xF, 1);
 
     store.panic_writer_for_test().expect("first panic");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic_1")
         .expect("append after first restart");
     store.panic_writer_for_test().expect("second panic");
-    store
+    let _ = store
         .append(&coord, kind, &"after_panic_2")
         .expect("append after second restart");
     let _ = store.panic_writer_for_test();
@@ -136,19 +131,18 @@ fn writer_restart_bounded_respects_limit() {
     // Poll for the writer to die instead of sleeping a fixed duration —
     // see writer_restart_once_gives_up_after_second_panic for rationale.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let final_err = loop {
+    let final_err: Option<StoreError> = loop {
         match store.append(&coord, kind, &"should_fail") {
-            Err(e) => break e,
-            Ok(_) if std::time::Instant::now() >= deadline => {
-                panic!(
-                    "PROPERTY: after exhausting RestartPolicy::Bounded, \
-                     append must fail. Writer thread did not die within 5s. \
-                     Investigate: src/store/write/writer.rs restart counter."
-                )
-            }
+            Err(e) => break Some(e),
+            Ok(_) if std::time::Instant::now() >= deadline => break None,
             Ok(_) => std::thread::yield_now(),
         }
     };
+    let final_err = final_err.expect(
+        "PROPERTY: after exhausting RestartPolicy::Bounded, append must fail. \
+         Writer thread did not die within 5s. \
+         Investigate: src/store/write/writer.rs restart counter.",
+    );
     assert!(
         matches!(final_err, StoreError::WriterCrashed),
         "PROPERTY: append after exhausted bounded restart budget must \

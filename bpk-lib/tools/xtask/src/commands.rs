@@ -3,10 +3,7 @@ mod ast_grep_family_version;
 mod ci;
 mod context;
 mod disk_audit;
-mod export_ts_manifest;
 mod factory_ledger;
-mod host_dev;
-mod host_loop;
 mod loom;
 mod manifest;
 mod meta_gate;
@@ -14,6 +11,7 @@ mod msrv_check;
 mod mutants;
 mod package_scan;
 mod platform;
+mod prove_gates_bite;
 mod release;
 mod release_manifest;
 mod sbom;
@@ -28,9 +26,8 @@ mod version_pins;
 use crate::util::{cargo, cargo_target_dir};
 use crate::CleanGeneratedArgs;
 use crate::{
-    ArchitectureIrArgs, ChaosArgs, ContextArgs, ExportTsManifestArgs, FactoryLedgerArgs, FuzzArgs,
-    HostDevArgs, MutantsArgs, PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs,
-    SetupArgs,
+    ArchitectureIrArgs, ChaosArgs, ContextArgs, FactoryLedgerArgs, FuzzArgs, MutantsArgs,
+    PackageLeakScanArgs, PlatformArgs, ReleaseArgs, ScaffoldArgs, SetupArgs,
 };
 use anyhow::Result;
 
@@ -67,6 +64,39 @@ pub(crate) fn integrity<const N: usize>(subcommand: &str, extra: [&str; N]) -> R
     cargo(args)
 }
 
+pub(crate) fn release_status(args: crate::ReleaseStatusArgs) -> Result<()> {
+    let mut extra: Vec<&str> = Vec::new();
+    if args.strict {
+        extra.push("--strict");
+    }
+    if args.active {
+        extra.push("--active");
+    }
+    let target_buf;
+    if let Some(target) = args.target {
+        target_buf = target;
+        extra.push("--target");
+        extra.push(target_buf.as_str());
+    }
+    let mut cargo_args = vec![
+        "run",
+        "--package",
+        "batpak-integrity",
+        "--",
+        "release-status-check",
+    ];
+    cargo_args.extend(extra);
+    cargo(cargo_args)
+}
+
+pub(crate) fn release_status_strict_active() -> Result<()> {
+    release_status(crate::ReleaseStatusArgs {
+        target: None,
+        active: true,
+        strict: true,
+    })
+}
+
 pub(crate) fn scaffold(args: ScaffoldArgs) -> Result<()> {
     scaffold::scaffold(args)
 }
@@ -83,6 +113,12 @@ pub(crate) fn templates() -> Result<()> {
 /// the binary is missing rather than auto-installing or no-opping.
 pub(crate) fn sbom() -> Result<()> {
     sbom::sbom()
+}
+
+/// Prove every `ProductionFlip` gate's red fixture actually reds under
+/// `--cfg gauntlet_red_fixture` (the anti-laundering "prove the gates bite" lane).
+pub(crate) fn prove_gates_bite() -> Result<()> {
+    prove_gates_bite::run()
 }
 
 /// Detect dependencies declared in `Cargo.toml` that are never referenced
@@ -122,18 +158,6 @@ pub(crate) fn staged_diff() -> Result<()> {
 
 pub(crate) fn release_manifest(args: crate::ReleaseManifestArgs) -> Result<()> {
     release_manifest::release_manifest(args)
-}
-
-pub(crate) fn export_ts_manifest(args: &ExportTsManifestArgs) -> Result<()> {
-    export_ts_manifest::export_ts_manifest(args)
-}
-
-pub(crate) fn host_dev(args: &HostDevArgs) -> Result<()> {
-    host_dev::host_dev(args)
-}
-
-pub(crate) fn host_loop() -> Result<()> {
-    host_loop::host_loop()
 }
 
 pub(crate) fn factory_ledger(args: FactoryLedgerArgs) -> Result<()> {

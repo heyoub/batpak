@@ -1,13 +1,10 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this contract-table harness uses panic! to make variant/source drift fail loudly and locally.
-#![allow(clippy::panic)]
 //! PROVES: domain-class `StoreError` variants and the coordinate/IO conversion
 //! routes preserve handling class, source forwarding, and `Display` fields.
 //! CATCHES: drift where a domain-fault `StoreError` arm or a `From` conversion
 //! drops identity, source, or handling-class stability without a table update.
 //! SEEDED: deterministic contract table (domain family + conversion routes).
 
-#[path = "support/store_error_contract.rs"]
-mod store_error_support;
+use batpak_testkit::store_error_contract as store_error_support;
 
 use batpak::coordinate::{Coordinate, CoordinateError};
 use batpak::event::{EventPayloadKindCollision, EventPayloadRegistryError};
@@ -49,7 +46,7 @@ fn one_of_every_variant() -> Vec<StoreError> {
             segment_id: 1,
             detail: "d".into(),
         },
-        StoreError::NotFound(1),
+        StoreError::NotFound(batpak::id::EventId::from(1u128)),
         StoreError::SequenceMismatch {
             entity: "e".into(),
             expected: 1,
@@ -112,6 +109,27 @@ fn one_of_every_variant() -> Vec<StoreError> {
             stored: 2,
             current: 1,
         },
+        StoreError::MmapFutureVersion {
+            found: 6,
+            supported: 5,
+        },
+        StoreError::CheckpointFutureVersion {
+            found: 7,
+            supported: 6,
+        },
+        StoreError::HiddenRangesFutureVersion {
+            path: PathBuf::from("p"),
+            found: 2,
+            supported: 1,
+        },
+        StoreError::ForkEvidenceFutureVersion {
+            found: 2,
+            supported: 1,
+        },
+        StoreError::ImportProvenanceFutureVersion {
+            found: 2,
+            supported: 1,
+        },
         StoreError::IdempotencyOverflowFailClosed {
             len: 1,
             max_keys: 1,
@@ -126,10 +144,13 @@ fn one_of_every_variant() -> Vec<StoreError> {
             segment_id: 1,
             count: 1,
         },
+        StoreError::InternerExhausted { count: 1 },
         StoreError::DataDirMalformed {
             path: PathBuf::from("p"),
         },
-        StoreError::AncestryCorrupt { cycle_at: 1 },
+        StoreError::AncestryCorrupt {
+            cycle_at: batpak::id::EventId::from(1u128),
+        },
         StoreError::RangeMalformed { start: 2, end: 1 },
         StoreError::InvalidCoordinate {
             index: None,
@@ -225,10 +246,16 @@ fn one_of_every_variant() -> Vec<StoreError> {
             | StoreError::BatchSyncFailed { .. }
             | StoreError::IdempotencyPartialBatch { .. }
             | StoreError::IdempotencyFutureVersion { .. }
+            | StoreError::MmapFutureVersion { .. }
+            | StoreError::CheckpointFutureVersion { .. }
+            | StoreError::HiddenRangesFutureVersion { .. }
+            | StoreError::ForkEvidenceFutureVersion { .. }
+            | StoreError::ImportProvenanceFutureVersion { .. }
             | StoreError::IdempotencyOverflowFailClosed { .. }
             | StoreError::InvalidPayloadVersion { .. }
             | StoreError::CorruptFrame { .. }
             | StoreError::SegmentTooManyEntries { .. }
+            | StoreError::InternerExhausted { .. }
             | StoreError::DataDirMalformed { .. }
             | StoreError::AncestryCorrupt { .. }
             | StoreError::RangeMalformed { .. }
@@ -316,10 +343,12 @@ fn coordinate_and_io_conversion_preserve_store_error_routing() {
 
     let empty_entity = Coordinate::new("", "scope").expect_err("empty entity should be rejected");
     let routed = StoreError::from(empty_entity.clone());
+    assert!(
+        matches!(routed, StoreError::Coordinate(_)),
+        "COORDINATE ROUTING DRIFT: EmptyEntity should stay wrapped in StoreError::Coordinate"
+    );
     let StoreError::Coordinate(inner) = routed else {
-        panic!(
-            "COORDINATE ROUTING DRIFT: EmptyEntity should stay wrapped in StoreError::Coordinate"
-        );
+        unreachable!("matched StoreError::Coordinate above")
     };
     assert_eq!(
         inner, empty_entity,
@@ -333,8 +362,12 @@ fn coordinate_and_io_conversion_preserve_store_error_routing() {
 
     let io_error = io::Error::new(io::ErrorKind::TimedOut, "fsync timed out");
     let routed = StoreError::from(io_error);
+    assert!(
+        matches!(routed, StoreError::Io(_)),
+        "IO ROUTING DRIFT: std::io::Error should stay wrapped in StoreError::Io"
+    );
     let StoreError::Io(source) = routed else {
-        panic!("IO ROUTING DRIFT: std::io::Error should stay wrapped in StoreError::Io");
+        unreachable!("matched StoreError::Io above")
     };
     assert_eq!(source.kind(), io::ErrorKind::TimedOut);
 }

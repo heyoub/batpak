@@ -92,7 +92,7 @@ fn bench_batch_vs_single(c: &mut Criterion) {
                     || open_bench_store(SyncMode::SyncData, 1),
                     |(store, _dir, coord, kind)| {
                         for i in 0..total_events {
-                            store
+                            let _ = store
                                 .append(
                                     &coord,
                                     kind,
@@ -274,7 +274,7 @@ fn bench_batch_recovery(c: &mut Criterion) {
                     let config = StoreConfig::new(dir.path());
                     let store =
                         Store::open(config).expect("open store for recovery benchmark baseline");
-                    store
+                    let _ = store
                         .append(
                             &Coordinate::new("test", "test")
                                 .expect("valid recovery benchmark coordinate"),

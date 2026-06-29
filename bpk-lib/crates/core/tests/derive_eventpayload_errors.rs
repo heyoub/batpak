@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; trybuild fixtures in tests/derive_eventpayload_errors.rs surface fixture-mismatch failures via panic; the compile-fail harness relies on that assertion shape.
-#![allow(clippy::panic)]
 //! Compile-fail coverage for the `#[derive(EventPayload)]` parser contract.
 //! Harness pattern: Fault-Injection Harness (compile-fail lane).
 //!
@@ -23,6 +21,7 @@ fn compile_fail_derive_errors() {
     t.compile_fail("tests/ui/ep_duplicate_key.rs");
     t.compile_fail("tests/ui/ep_missing_key.rs");
     t.compile_fail("tests/ui/ep_invalid_category.rs");
+    t.compile_fail("tests/ui/ep_category_overflows_u8.rs");
     t.compile_fail("tests/ui/ep_invalid_type_id.rs");
     t.compile_fail("tests/ui/ep_multiple_attrs.rs");
 }

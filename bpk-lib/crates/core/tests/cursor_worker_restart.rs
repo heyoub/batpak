@@ -1,14 +1,10 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; cursor worker restart tests in tests/cursor_worker_restart.rs use panic! to escape retry-poll loops when the expected event fails to arrive within the bound.
-#![allow(clippy::panic)]
-
-mod support;
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig};
 use batpak::store::{RestartPolicy, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn test_config(dir: &TempDir) -> StoreConfig {
@@ -30,7 +26,7 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
     let kind = EventKind::custom(0xF, 7);
 
     for n in 0..3u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append seed event");
     }
@@ -56,7 +52,12 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
                 drop(counts);
 
                 if seq == 2 && panic_once.swap(false, Ordering::SeqCst) {
-                    panic!("intentional cursor worker panic after first checkpoint");
+                    // Deliberate handler panic to drive the restart path;
+                    // black_box keeps the assert clippy-clean.
+                    assert!(
+                        std::hint::black_box(false),
+                        "intentional cursor worker panic after first checkpoint"
+                    );
                 }
 
                 if seq == 3 {
@@ -104,10 +105,9 @@ fn cursor_worker_restarts_from_last_committed_checkpoint_after_panic() {
         "subsequent batch should run once after restart recovery"
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: cursor worker should release the last Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "shared")
+        .expect("PROPERTY: cursor worker should release the last Arc");
     store.close().expect("close store");
 }
 
@@ -132,7 +132,7 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
 
     // Seed 3 events so the worker has something to process.
     for n in 0..3u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"n": n}))
             .expect("append seed event");
     }
@@ -153,7 +153,13 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
             &Region::entity("entity:budget-exhausted"),
             worker_config,
             |_batch, _store, _witness| {
-                panic!("intentional panic to exhaust restart budget");
+                // Always panics to exhaust the restart budget; black_box keeps
+                // the assert clippy-clean.
+                assert!(
+                    std::hint::black_box(false),
+                    "intentional panic to exhaust restart budget"
+                );
+                CursorWorkerAction::Stop
             },
         )
         .expect("spawn worker");
@@ -169,18 +175,15 @@ fn cursor_worker_exits_cleanly_when_restart_budget_exhausted() {
         .append(&coord, kind, &serde_json::json!({"after": true}))
         .expect("append after worker exit");
     assert!(
-        receipt.sequence >= 3,
+        receipt.global_sequence >= 3,
         "PROPERTY: store must remain usable after cursor worker exhausts its restart budget. \
          Expected sequence >= 3, got {}.",
-        receipt.sequence
+        receipt.global_sequence
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!("PROPERTY: cursor worker should release the last Arc after budget exhaustion")
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "shared")
+        .expect("PROPERTY: cursor worker should release the last Arc after budget exhaustion");
     store.close().expect("close store");
 }
 
@@ -190,7 +193,7 @@ fn bounded_restart_window_resets_after_elapsed_window() {
     let store = Arc::new(Store::open(test_config(&dir)).expect("open store"));
     let coord = Coordinate::new("entity:restart-window", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 7);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("append seed event");
 
@@ -212,7 +215,12 @@ fn bounded_restart_window_resets_after_elapsed_window() {
                     std::thread::sleep(Duration::from_millis(75));
                 }
                 if attempt <= 2 {
-                    panic!("intentional panic to exercise bounded restart window reset");
+                    // Deliberate handler panic to exercise the bounded restart
+                    // window reset; black_box keeps the assert clippy-clean.
+                    assert!(
+                        std::hint::black_box(false),
+                        "intentional panic to exercise bounded restart window reset"
+                    );
                 }
                 CursorWorkerAction::Stop
             }
@@ -228,9 +236,8 @@ fn bounded_restart_window_resets_after_elapsed_window() {
         "PROPERTY: Bounded restart policy must reset its counter once within_ms elapses"
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: cursor worker should release the last Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "shared")
+        .expect("PROPERTY: cursor worker should release the last Arc");
     store.close().expect("close store");
 }

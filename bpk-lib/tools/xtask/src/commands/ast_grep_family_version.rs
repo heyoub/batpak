@@ -5,55 +5,20 @@ use std::process::Command;
 
 /// Version-coupled surfaces that must track `batpak`'s workspace release line.
 ///
-/// Uses ast-grep for Rust/JSON/YAML/TypeScript literals and a text scan for
+/// Uses ast-grep for traceability semver checklist literals and a text scan for
 /// family `Cargo.toml` files (ast-grep has no built-in TOML support).
 pub(crate) fn ast_grep_family_version() -> Result<()> {
     let root = project_root()?;
     let current = read_family_version(&root)?;
     let stale = stale_patch_versions(&current)?;
     if stale.is_empty() {
-        println!("ast-grep-family-version: ok; no stale patch versions below {current}");
+        outln!("ast-grep-family-version: ok; no stale patch versions below {current}");
         return Ok(());
     }
 
-    let stale_json_alt = stale
-        .iter()
-        .map(|version| escape_regex(version))
-        .collect::<Vec<_>>()
-        .join("|");
     let stale_yaml_alt = stale.join("|");
 
     let mut inline_rules = String::new();
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-npm
-message: Stale @batpak/* package version in package.json; sync to the workspace release line ({current}).
-severity: error
-language: Json
-rule:
-  kind: pair
-  regex: "^version$"
-  has:
-    kind: string
-    regex: '^({stale_json_alt})$'"#
-    )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-manifest-json
-message: Stale batpakVersion in batpak.manifest.json; sync to the workspace release line ({current}).
-severity: error
-language: Json
-rule:
-  kind: pair
-  regex: "^batpakVersion$"
-  has:
-    kind: string
-    regex: '^({stale_json_alt})$'"#
-    )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
     writeln!(
         inline_rules,
         r#"id: stale-family-version-traceability
@@ -64,77 +29,19 @@ rule:
   kind: plain_scalar
   regex: '^current_version: ({stale_yaml_alt})$'"#
     )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
-    let mut ts_any = String::new();
-    for (index, version) in stale.iter().enumerate() {
-        if index > 0 {
-            ts_any.push_str("\n    - ");
-        } else {
-            ts_any.push_str("    - ");
-        }
-        ts_any.push_str(&format!(
-            "pattern: 'export const BATPAK_VERSION = \"{version}\" as const;'"
-        ));
-    }
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-generated-ts
-message: Stale BATPAK_VERSION in generated manifest.ts; run export-ts-manifest and pnpm generate ({current}).
-severity: error
-language: TypeScript
-rule:
-  any:
-{ts_any}"#
-    )
-    .unwrap();
-    writeln!(inline_rules, "---").unwrap();
-    let rust_any = stale
-        .iter()
-        .map(|version| format!("    - pattern: 'const BATPAK_VERSION: &str = \"{version}\";'"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    writeln!(
-        inline_rules,
-        r#"id: stale-family-version-rust-const
-message: Stale BATPAK_VERSION const; sync to the workspace release line ({current}).
-severity: error
-language: Rust
-rule:
-  any:
-{rust_any}"#
-    )
-    .unwrap();
+    .expect("writing to an in-memory String is infallible");
 
     let mut command = Command::new("sg");
     command.current_dir(&root).args([
         "scan",
         "--config",
-        "sgconfig.yml",
+        "bpk-lib/tools/ast-grep/sgconfig.yml",
         "--inline-rules",
         &inline_rules,
         "--report-style",
         "short",
         "--globs",
-        "bpk-ts/packages/canonical/package.json",
-        "--globs",
-        "bpk-ts/packages/client/package.json",
-        "--globs",
-        "bpk-ts/packages/schema/package.json",
-        "--globs",
-        "bpk-ts/packages/generated/package.json",
-        "--globs",
-        "bpk-ts/packages/sdk/package.json",
-        "--globs",
-        "bpk-ts/batpak.manifest.json",
-        "--globs",
-        "bpk-ts/packages/generated/src/manifest.ts",
-        "--globs",
         "bpk-lib/traceability/public_api/*_semver_checklist.yaml",
-        "--globs",
-        "bpk-lib/tools/xtask/src/commands/export_ts_manifest.rs",
-        "--globs",
-        "bpk-lib/crates/hbat/src/manifest.rs",
     ]);
     run(command).with_context(|| {
         format!(
@@ -145,7 +52,7 @@ rule:
 
     scan_family_cargo_versions(&root, &stale, &current)?;
 
-    println!("ast-grep-family-version: ok; no stale patch versions below {current}");
+    outln!("ast-grep-family-version: ok; no stale patch versions below {current}");
     Ok(())
 }
 
@@ -165,14 +72,24 @@ fn read_family_version(root: &std::path::Path) -> Result<String> {
 
 fn stale_patch_versions(current: &str) -> Result<Vec<String>> {
     let (major, minor, patch) = parse_family_version(current)?;
-    if major != 0 || minor != 8 {
-        bail!("ast-grep-family-version: unsupported family version line `{current}`");
+    let mut stale = Vec::new();
+    match (major, minor) {
+        (0, 9) => {
+            for value in 0..=3 {
+                stale.push(format!("0.8.{value}"));
+            }
+            for value in 0..patch {
+                stale.push(format!("0.9.{value}"));
+            }
+        }
+        (0, 8) => {
+            for value in 0..patch {
+                stale.push(format!("0.8.{value}"));
+            }
+        }
+        _ => bail!("ast-grep-family-version: unsupported family version line `{current}`"),
     }
-    Ok((0..patch).map(|value| format!("0.8.{value}")).collect())
-}
-
-fn escape_regex(input: &str) -> String {
-    input.replace('.', r"\.")
+    Ok(stale)
 }
 
 fn parse_family_version(version: &str) -> Result<(u64, u64, u64)> {
@@ -205,13 +122,15 @@ fn scan_family_cargo_versions(
 ) -> Result<()> {
     let family_roots = [
         "bpk-lib/crates/bench-support",
+        "bpk-lib/crates/bvisor",
         "bpk-lib/crates/core",
-        "bpk-lib/crates/hbat",
+        "bpk-lib/crates/batpak-examples",
+        "bpk-lib/crates/hostbat",
         "bpk-lib/crates/macros-support",
         "bpk-lib/crates/macros",
         "bpk-lib/crates/netbat",
-        "bpk-lib/crates/syncbat-macros",
         "bpk-lib/crates/syncbat",
+        "bpk-lib/crates/testkit",
         "bpk-lib/tools/xtask",
     ];
     let mut hits = Vec::new();

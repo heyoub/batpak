@@ -1,7 +1,7 @@
 # syncbat semver-check classification (baseline: crates.io 0.7.0 train posture).
 # syncbat is not published on crates.io yet; `cargo semver-checks` registry lookup
 # fails. Entries classify CHANGELOG-documented breaks vs the pre-0.8.0 transitional
-# surface. hbat is reference-host only (`publish = false`); out of scope for this cut.
+# surface.
 package: syncbat
 baseline_version: 0.7.0
 current_version: 0.8.2

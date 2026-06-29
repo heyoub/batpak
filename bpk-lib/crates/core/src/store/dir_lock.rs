@@ -16,8 +16,8 @@ pub(crate) const STORE_LOCK_FILENAME: &str = ".batpak.lock";
 /// critically, `mmap` — a sealed segment that this owner assumes is immutable,
 /// which violates the mmap immutability SAFETY contract (undefined behavior).
 /// Advisory locks are also unreliable on networked filesystems (NFS/CIFS).
-/// Single-process exclusion is covered; cross-process behavior is not yet
-/// exercised by a two-process test (0.8.3 audit C3).
+/// Single-process exclusion is covered in `store_locking.rs`; cross-process
+/// refusal is witnessed by `dir_lock_two_process.rs` (0.8.3 audit C3).
 pub(crate) struct StoreDirLock {
     _file: File,
 }

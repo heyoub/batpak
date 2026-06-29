@@ -12,7 +12,7 @@ mod by_hash;
 /// event fails (CRC/IO corruption on a known-present event), rather than
 /// only on cycle. This matches the public `Store::walk_ancestors`
 /// signature, which returns `Vec<_>` unconditionally.
-pub(super) fn collect_ancestors<State, Cursor, Step>(
+pub(super) fn collect_ancestors<State: crate::store::StoreState, Cursor, Step>(
     store: &Store<State>,
     mut cursor: Option<Cursor>,
     limit: usize,
@@ -47,7 +47,7 @@ where
     results
 }
 
-pub(super) fn read_entry_and_event<State>(
+pub(super) fn read_entry_and_event<State: crate::store::StoreState>(
     store: &Store<State>,
     event_id: u128,
 ) -> Option<(IndexEntry, StoredEvent<serde_json::Value>)> {
@@ -76,7 +76,7 @@ pub(crate) fn parent_event_id_by_hash(
         .map(|candidate| candidate.event_id)
 }
 
-pub(crate) fn walk_ancestors<State>(
+pub(crate) fn walk_ancestors<State: crate::store::StoreState>(
     store: &Store<State>,
     event_id: u128,
     limit: usize,

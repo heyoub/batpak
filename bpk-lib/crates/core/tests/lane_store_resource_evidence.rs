@@ -7,7 +7,6 @@
 //! identity, and silent drift between free-function and `Store` entrypoints.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexReport;
 use batpak::store::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
@@ -16,11 +15,10 @@ use batpak::store::{
     StoreResourceReportBody, StoreResourceReportError, StoreResourceRestartPolicyShape,
     STORE_RESOURCE_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::error::Error;
-use support::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -61,8 +59,8 @@ fn store_resource_evidence_family_invariants_and_reopen_stable() -> TestResult {
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:lane-store-resource", "scope:lane_sr")?;
     let kind = EventKind::custom(0xE, 0x91);
-    store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
 
     let before_ct = store.stats().event_count;
     let diag = store.diagnostics();

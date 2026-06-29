@@ -143,9 +143,10 @@ impl CacheMeta {
     /// Legacy entries return `None` for the monotonic fields.
     ///
     /// Current-vs-legacy is disambiguated by a trailing-8-byte magic heuristic
-    /// (there is no leading magic/version/length header). This is safe because
-    /// the cache is fully rebuildable — a misread is a miss, not corruption — so
-    /// a leading versioned header is deferred (0.8.3 audit R18).
+    /// (there is no leading magic/version/length header). Terminal FAIL-CLOSED
+    /// policy (audit R18): the cache is fully rebuildable — a misread is a miss,
+    /// not corruption — witnessed by
+    /// `projection/mod.rs::cache_meta_rebuild_only_policy_uses_trailing_magic_not_leading_header`.
     pub(crate) fn decode_from_bytes(bytes: &[u8]) -> Result<(Vec<u8>, Self), StoreError> {
         // Try current format first: last 8 bytes == magic.
         if bytes.len() >= CACHE_META_CURRENT_SIZE {
@@ -461,7 +462,10 @@ mod tests {
     fn cache_meta_decode_rejects_short_buffer() {
         let short = [0u8; 8];
         let result = CacheMeta::decode_from_bytes(&short);
-        assert!(result.is_err());
+        assert!(
+            result.is_err(),
+            "PROPERTY: cache metadata shorter than the fixed header is rejected before decode"
+        );
     }
 
     #[test]
@@ -515,6 +519,37 @@ mod tests {
         assert_eq!(meta.watermark, 7);
         assert_eq!(meta.cached_at_us, 123);
         assert!(meta.cached_at_mono_ns.is_none());
+    }
+
+    #[test]
+    fn cache_meta_rebuild_only_policy_uses_trailing_magic_not_leading_header() {
+        let meta = CacheMeta {
+            watermark: 5,
+            cached_at_us: 99,
+            cached_at_mono_ns: Some(1),
+            process_boot_ns: Some(2),
+        };
+        let value = br#"{"count":1}"#;
+        let encoded = meta.encode_with_value(value);
+
+        assert!(
+            encoded.starts_with(value),
+            "PROPERTY: rebuild-only cache entries lead with value bytes, not a version header"
+        );
+        assert_eq!(
+            encoded.len(),
+            value.len() + CACHE_META_CURRENT_SIZE,
+            "PROPERTY: metadata is a fixed trailing trailer only"
+        );
+        let magic = u64::from_le_bytes(
+            encoded[encoded.len() - 8..]
+                .try_into()
+                .expect("trailing magic width"),
+        );
+        assert_eq!(
+            magic, CACHE_META_MAGIC,
+            "PROPERTY: current-format entries are identified by trailing magic"
+        );
     }
 
     #[test]

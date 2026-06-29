@@ -1,11 +1,10 @@
 //! Projection wiring tests split out of store_advanced.rs.
 
-mod support;
 use batpak::store::projection::{CacheCapabilities, CacheMeta, ProjectionCache};
 use batpak::store::{Freshness, Store, StoreConfig, StoreError};
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[cfg(feature = "dangerous-test-hooks")]
@@ -61,7 +60,7 @@ fn project_calls_prefetch_only_when_supported() {
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store with cache");
     let coord = Coordinate::new("entity:pf", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"data": 1}))
         .expect("append");
 
@@ -72,6 +71,8 @@ fn project_calls_prefetch_only_when_supported() {
 
     impl EventSourced for Counter {
         type Input = batpak::prelude::JsonValueInput;
+        const STATE_CONTRACT: ProjectionStateContract =
+            ProjectionStateContract::single_entity("store-projection-wiring-counter");
 
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(Counter {
@@ -85,6 +86,10 @@ fn project_calls_prefetch_only_when_supported() {
 
         fn relevant_event_kinds() -> &'static [EventKind] {
             &[]
+        }
+
+        fn state_extent(&self) -> StateExtent {
+            StateExtent::single_entity()
         }
     }
 
@@ -111,7 +116,7 @@ fn first_projection_report_can_lower_overstated_applied_frontier() {
     let kind = EventKind::custom(0xF, 2);
 
     for n in 1..=5 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({ "n": n }))
             .expect("append projection progress event");
     }

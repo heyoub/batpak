@@ -92,6 +92,7 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
             "compaction",
             "evidence_reports",
             "frontier_waiters",
+            "fork_cost",
             "projection_latency",
             "query_materialization",
             "recovery_lanes",
@@ -107,11 +108,8 @@ pub(crate) fn bench_targets(surface: BenchSurface) -> &'static [&'static str] {
     }
 }
 
-const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] = &[
-    ("syncbat", &["dispatch"]),
-    ("netbat", &["boundary"]),
-    ("hbat", &["live_operations"]),
-];
+const FAMILY_BENCH_TARGETS: &[(&str, &[&str])] =
+    &[("syncbat", &["dispatch"]), ("netbat", &["boundary"])];
 
 fn family_bench_compile_args(
     package: &str,
@@ -182,22 +180,22 @@ fn criterion_args(
 fn print_bench_plan(surface: BenchSurface, save: Option<&str>, compare: bool, baseline: &str) {
     match (save, compare) {
         (Some(_), false) => {
-            println!(
+            outln!(
                 "Running {} benchmarks and saving baseline {}...",
                 surface_name(surface),
                 baseline
             );
         }
         (None, true) => {
-            println!(
+            outln!(
                 "Comparing {} benchmarks against baseline {}...",
                 surface_name(surface),
                 baseline
             );
         }
         (None, false) => {
-            println!("Running {} benchmarks...", surface_name(surface));
-            println!("Baseline name: {}", baseline);
+            outln!("Running {} benchmarks...", surface_name(surface));
+            outln!("Baseline name: {}", baseline);
         }
         (Some(_), true) => {}
     }
@@ -298,6 +296,7 @@ mod tests {
                 "compaction",
                 "evidence_reports",
                 "frontier_waiters",
+                "fork_cost",
                 "projection_latency",
                 "query_materialization",
                 "recovery_lanes",
@@ -391,6 +390,8 @@ mod tests {
             "--bench",
             "frontier_waiters",
             "--bench",
+            "fork_cost",
+            "--bench",
             "projection_latency",
             "--bench",
             "query_materialization",
@@ -456,8 +457,8 @@ mod tests {
     #[test]
     fn family_bench_run_args_include_package_and_criterion_args() {
         let args = family_bench_run_args(
-            "hbat",
-            &["live_operations"],
+            "netbat",
+            &["boundary"],
             &["--save-baseline".to_owned(), "windows-native-v3".to_owned()],
         );
         assert_eq!(
@@ -465,9 +466,9 @@ mod tests {
             vec![
                 "bench",
                 "-p",
-                "hbat",
+                "netbat",
                 "--bench",
-                "live_operations",
+                "boundary",
                 "--",
                 "--save-baseline",
                 "windows-native-v3"
@@ -496,14 +497,6 @@ mod tests {
                     .find_map(|(name, benches)| (*name == "netbat").then_some(*benches))
                     .expect("netbat family benches are wired"),
                 include_str!("../../../crates/netbat/Cargo.toml"),
-            ),
-            (
-                "hbat",
-                FAMILY_BENCH_TARGETS
-                    .iter()
-                    .find_map(|(name, benches)| (*name == "hbat").then_some(*benches))
-                    .expect("hbat family benches are wired"),
-                include_str!("../../../crates/hbat/Cargo.toml"),
             ),
         ] {
             let manifest: toml::Value = toml::from_str(manifest).expect("parse package manifest");

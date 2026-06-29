@@ -1,5 +1,3 @@
-// justifies: pins MaybeStale freshness-window decisions, anchors INV-CLOCK-NOW-US-LIVE in src/store/projection/flow.rs
-#![allow(clippy::too_many_lines)]
 //! Cache-FRESHNESS window semantics for projection reads: the watermark and
 //! age-window decisions that pick between serving a cached value and forcing a
 //! fresh replay under `Freshness::MaybeStale` and `Freshness::Consistent`.
@@ -20,8 +18,7 @@
 //! INVARIANTS: INV-CLOCK-NOW-US-LIVE (freshness semantics),
 //!   INV-REPLAY-LANE-SELECTION (replay path selection).
 
-#[path = "support/projection_cache.rs"]
-mod pc_support;
+use batpak_testkit::projection_cache as pc_support;
 
 use batpak::store::projection::{CacheMeta, ProjectionCache};
 use batpak::store::StoreError;
@@ -82,6 +79,10 @@ struct MaybeStaleGenerationCounter {
 
 impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: batpak::prelude::ProjectionStateContract =
+        batpak::prelude::ProjectionStateContract::single_entity(
+            "projection-cache-freshness-generation-counter",
+        );
 
     fn from_events(events: &[batpak::prelude::Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -95,6 +96,10 @@ impl batpak::prelude::EventSourced for MaybeStaleGenerationCounter {
 
     fn relevant_event_kinds() -> &'static [batpak::prelude::EventKind] {
         &[MAYBE_STALE_GENERATION_KIND]
+    }
+
+    fn state_extent(&self) -> batpak::prelude::StateExtent {
+        batpak::prelude::StateExtent::single_entity()
     }
 }
 
@@ -115,10 +120,10 @@ fn freshness_maybe_stale_serves_stale_cache_within_window() {
 
     let coord = Coordinate::new("entity:besteff1", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("append 1");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 2}))
         .expect("append 2");
 
@@ -129,7 +134,7 @@ fn freshness_maybe_stale_serves_stale_cache_within_window() {
     assert_eq!(result, Some(MaybeStaleCounter { count: 2 }));
 
     // Append a third event — cache is now stale
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 3}))
         .expect("append 3");
 
@@ -183,14 +188,14 @@ fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
     let store = Store::open_with_cache(config, Box::new(cache)).expect("open store");
 
     let coord = Coordinate::new("entity:generation-honesty", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(
             &coord,
             MAYBE_STALE_GENERATION_KIND,
             &serde_json::json!({"x": 1}),
         )
         .expect("append 1");
-    store
+    let _ = store
         .append(
             &coord,
             MAYBE_STALE_GENERATION_KIND,
@@ -207,7 +212,7 @@ fn project_if_changed_never_pairs_maybe_stale_cache_with_new_generation() {
         .entity_generation("entity:generation-honesty")
         .expect("baseline generation");
 
-    store
+    let _ = store
         .append(
             &coord,
             MAYBE_STALE_GENERATION_KIND,
@@ -317,10 +322,10 @@ fn consistent_replays_when_reopened_native_cache_row_is_stale() {
 
     {
         let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
         let seeded: Option<MaybeStaleCounter> = store
@@ -332,7 +337,7 @@ fn consistent_replays_when_reopened_native_cache_row_is_stale() {
 
     {
         let store = Store::open_with_native_cache(config, &cache_path).expect("reopen store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
         let result: Option<MaybeStaleCounter> = store
@@ -367,10 +372,10 @@ fn freshness_maybe_stale_replays_at_exact_age_boundary() {
 
     let coord = Coordinate::new("entity:maybe-stale-boundary", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("append 1");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 2}))
         .expect("append 2");
 
@@ -379,7 +384,7 @@ fn freshness_maybe_stale_replays_at_exact_age_boundary() {
         .expect("seed cache");
     assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 3}))
         .expect("append 3");
 

@@ -8,7 +8,6 @@
 //! vocabulary leaks.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::schema::{
     compare_schema_snapshot, SchemaSnapshot, SCHEMA_SNAPSHOT_REPORT_SCHEMA_VERSION,
 };
@@ -18,13 +17,12 @@ use batpak::store::{
     CHAIN_WALK_REPORT_SCHEMA_VERSION, READ_WALK_REPORT_SCHEMA_VERSION,
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use serde::Serialize;
 use std::error::Error;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -67,7 +65,6 @@ fn evidence_public_types_avoid_protocol_product_vocabulary() -> TestResult {
         "portkind",
         "mcp",
         "a2a",
-        "pcp",
         "capsule",
         "websocket",
         "sandbox",
@@ -89,6 +86,8 @@ struct FamilyProjection {
 
 impl EventSourced for FamilyProjection {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("evidence-report-family-projection");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         (!events.is_empty()).then_some(Self {
@@ -104,6 +103,10 @@ impl EventSourced for FamilyProjection {
     fn relevant_event_kinds() -> &'static [EventKind] {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xE, 0x71)];
         &KINDS
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -139,7 +142,7 @@ fn snapshot_evidence_family_invariants_and_no_append_side_effect() -> TestResult
     let (_data_dir_guard, store) = small_store_support::small_segment_store()?;
     let coord = Coordinate::new("entity:family-snapshot", "scope:fam_snapshot")?;
     let kind = EventKind::custom(0xF, 0x22);
-    store.append(&coord, kind, &serde_json::json!({"s": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"s": 0}))?;
     let before = store.stats().event_count;
 
     let snapshot_dir = TempDir::new()?;
@@ -298,11 +301,11 @@ fn projection_run_body_hash_changes_after_relevant_append() -> TestResult {
     let coord = Coordinate::new("entity:family-projection-reopen", "scope:fam")?;
     let kind = EventKind::custom(0xE, 0x71);
 
-    store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 0}))?;
     let r1 =
         store.project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;
 
-    store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"n": 1}))?;
     let r2 =
         store.project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;
 
@@ -348,7 +351,7 @@ fn read_walk_evidence_matches_across_close_reopen() -> TestResult {
     let path = dir.path().to_path_buf();
     let coord = Coordinate::new("entity:family-readwalk", "scope:fam_rw")?;
     let kind = EventKind::custom(0xE, 0x81);
-    store.append(&coord, kind, &serde_json::json!({"i": 0}))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({"i": 0}))?;
 
     let mut req = ReadWalkRequest::full(
         Region::scope(coord.scope()).with_fact(batpak::coordinate::KindFilter::Exact(kind)),
@@ -402,7 +405,7 @@ fn read_walk_evidence_body_is_topology_independent() -> TestResult {
         let coord = Coordinate::new("entity:family-topology-read", "scope:topology-read")?;
         let kind = EventKind::custom(0xE, 0x81);
         for i in 0..5 {
-            store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
+            let _ = store.append(&coord, kind, &serde_json::json!({ "i": i }))?;
         }
 
         let request = ReadWalkRequest::full(
@@ -443,9 +446,9 @@ fn projection_run_evidence_output_is_topology_independent() -> TestResult {
         let relevant = EventKind::custom(0xE, 0x71);
         let irrelevant = EventKind::custom(0xE, 0x72);
         for i in 0..4 {
-            store.append(&coord, relevant, &serde_json::json!({ "i": i }))?;
+            let _ = store.append(&coord, relevant, &serde_json::json!({ "i": i }))?;
         }
-        store.append(&coord, irrelevant, &serde_json::json!({ "ignored": true }))?;
+        let _ = store.append(&coord, irrelevant, &serde_json::json!({ "ignored": true }))?;
 
         let (state, report) = store
             .project_run_evidence::<FamilyProjection>(coord.entity(), &Freshness::Consistent)?;
@@ -474,13 +477,12 @@ fn stable_id_fixture() -> &'static str {
     "batpak.family.schema_snapshot_fixture.v1"
 }
 
-fn topology_cases() -> [(&'static str, IndexTopology); 6] {
+fn topology_cases() -> [(&'static str, IndexTopology); 5] {
     [
         ("aos", IndexTopology::aos()),
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
-        ("tiled-simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ]
 }

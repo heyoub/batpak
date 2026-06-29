@@ -1,5 +1,3 @@
-// justifies: pins cache-corruption fall-back shapes, anchors INV-CACHE-CAPABILITIES-EXPLICIT in src/store/projection/flow.rs
-#![allow(clippy::too_many_lines)]
 //! Cache-CORRUPTION shapes for projection reads: garbage files, single-bit
 //! flips, metadata-only/truncated payloads, and a failing cache backend. Every
 //! shape must degrade to an honest replay (or a clean cache miss) instead of
@@ -19,8 +17,7 @@
 //!   INV-CLOCK-NOW-US-LIVE (freshness window cannot rescue corruption),
 //!   INV-REPLAY-LANE-SELECTION (replay path selection).
 
-#[path = "support/projection_cache.rs"]
-mod pc_support;
+use batpak_testkit::projection_cache as pc_support;
 
 use batpak::store::projection::{CacheMeta, ProjectionCache};
 use batpak::store::StoreError;
@@ -143,10 +140,10 @@ fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
 
     {
         let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
 
@@ -158,7 +155,7 @@ fn freshness_maybe_stale_replays_when_stale_cache_bytes_are_corrupt() {
         // Advance the entity so the warmed cache row is stale by watermark,
         // but keep the row young enough that MaybeStale would otherwise try
         // to serve it from the external cache.
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
         store.close().expect("close seeded store");
@@ -208,10 +205,10 @@ fn freshness_maybe_stale_replays_when_fresh_cache_bytes_are_corrupt() {
 
     {
         let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
 
@@ -262,17 +259,17 @@ fn maybe_stale_replays_when_cache_row_has_valid_metadata_but_empty_payload() {
 
     {
         let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
         let seeded: Option<MaybeStaleCounter> = store
             .project("entity:metadata-only-stale", &Freshness::Consistent)
             .expect("seed cache");
         assert_eq!(seeded, Some(MaybeStaleCounter { count: 2 }));
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 3}))
             .expect("append 3");
         store.close().expect("close seeded store");
@@ -315,10 +312,10 @@ fn consistent_replays_when_cache_row_has_valid_metadata_but_truncated_payload() 
 
     {
         let store = Store::open_with_native_cache(config.clone(), &cache_path).expect("open store");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 1}))
             .expect("append 1");
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"x": 2}))
             .expect("append 2");
         let seeded: Option<MaybeStaleCounter> = store
@@ -357,10 +354,10 @@ fn projection_replays_when_cache_get_errors() {
     let store = Store::open_with_cache(config, Box::new(GetErrorCache)).expect("open store");
     let coord = Coordinate::new("entity:cache-get-error", "scope:test").expect("coord");
     let kind = EventKind::custom(0xF, 1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("append 1");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 2}))
         .expect("append 2");
 

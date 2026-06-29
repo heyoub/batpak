@@ -1,9 +1,10 @@
 use crate::coordinate::CoordinateError;
-use crate::event::EventPayloadRegistryError;
+use crate::event::{EventPayloadRegistryError, ProjectionStateContract, StateExtent};
 use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
 
+mod display;
 mod hidden_ranges;
 mod invariant;
 mod platform;
@@ -46,7 +47,7 @@ pub enum StoreError {
         detail: String,
     },
     /// No event with the given ID exists in the index.
-    NotFound(u128),
+    NotFound(crate::id::EventId),
     /// CAS check failed: the entity's current sequence did not match the expected value.
     SequenceMismatch {
         /// Entity whose sequence was checked.
@@ -70,6 +71,31 @@ pub enum StoreError {
     },
     /// A projection cache operation failed.
     CacheFailed(Box<dyn std::error::Error + Send + Sync>),
+    /// A projection was materialized without declaring a growth contract.
+    ProjectionStateContractUnspecified {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+    },
+    /// A bounded projection could not report its current state extent.
+    ProjectionStateExtentUnavailable {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+        /// Declared growth contract for the projection (boxed to keep
+        /// `StoreError` small enough for the clippy large-Err threshold).
+        declared: Box<ProjectionStateContract>,
+        /// Actual extent report returned by the projection.
+        actual: StateExtent,
+    },
+    /// A bounded projection exceeded its declared maximum cardinality.
+    ProjectionStateBoundExceeded {
+        /// Projection identity rejected at materialization time.
+        projection: String,
+        /// Declared growth contract for the projection (boxed to keep
+        /// `StoreError` small enough for the clippy large-Err threshold).
+        declared: Box<ProjectionStateContract>,
+        /// Actual extent report returned by the projection.
+        actual: StateExtent,
+    },
     /// A visibility-watermark publish request violated sequence-gate bounds.
     SequenceGateViolation {
         /// Human-readable operation that attempted the publish.
@@ -159,10 +185,57 @@ pub enum StoreError {
     /// future-version artifact is a hard, canonical refusal: a future writer may
     /// have written segments or summaries this reader cannot interpret, so
     /// silently rebuilding from scan would risk a silent downgrade rather than a
-    /// legally reachable state. Mirrors [`IdempotencyFutureVersion`]. Upgrade the
+    /// legally reachable state. Mirrors [`Self::IdempotencyFutureVersion`]. Upgrade the
     /// reader. justifies: INV-MMAP-SEALED-READS
     MmapFutureVersion {
         /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// The on-disk checkpoint (`index.ckpt`) declares a format version strictly
+    /// newer than this binary understands. Unlike a corrupt or older checkpoint —
+    /// which the cold-start flow safely rebuilds from the durable segments — a
+    /// future-version checkpoint is a hard, canonical refusal: a future writer
+    /// may have written a snapshot this reader cannot interpret, so silently
+    /// rebuilding from scan would risk a silent downgrade rather than a legally
+    /// reachable state. Mirrors [`Self::MmapFutureVersion`]. Upgrade the reader.
+    CheckpointFutureVersion {
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// The on-disk hidden-ranges metadata (`visibility_ranges.fbv`) declares a
+    /// format version strictly newer than this binary understands. Unlike a
+    /// corrupt or older artifact — surfaced as [`Self::HiddenRangesCorrupt`] for the
+    /// caller to remediate — a future-version artifact is a distinct canonical
+    /// refusal: a future writer may have recorded cancelled ranges in a layout
+    /// this reader cannot interpret, so treating it as remediable corruption (or
+    /// silently empty) would risk resurrecting cancelled events. Mirrors
+    /// [`Self::MmapFutureVersion`]. Upgrade the reader.
+    HiddenRangesFutureVersion {
+        /// Path of the future-version metadata file.
+        path: PathBuf,
+        /// Version stamped on the on-disk file.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// A fork evidence report body declares a schema version strictly newer than
+    /// this binary understands. Mirrors [`Self::MmapFutureVersion`]: silently
+    /// accepting an unknown fork-evidence layout would mis-classify fork outcomes.
+    ForkEvidenceFutureVersion {
+        /// Version stamped on the wire artifact.
+        found: u16,
+        /// The maximum version this binary understands.
+        supported: u16,
+    },
+    /// An import provenance extension body declares a schema version strictly
+    /// newer than this binary understands. Mirrors [`Self::MmapFutureVersion`]:
+    /// silently decoding unknown provenance would break import idempotency audits.
+    ImportProvenanceFutureVersion {
+        /// Version stamped on the wire artifact.
         found: u16,
         /// The maximum version this binary understands.
         supported: u16,
@@ -205,6 +278,14 @@ pub enum StoreError {
         /// Actual entry count that exceeded the supported `u32` range.
         count: u64,
     },
+    /// The `u32` interner id domain is exhausted: every one of the ~4 billion
+    /// available `InternId` slots has
+    /// been allocated, so no further entity/scope string can be interned.
+    InternerExhausted {
+        /// The interned-string count at the point of exhaustion (the last id
+        /// successfully assigned before the domain overflowed).
+        count: u64,
+    },
     /// The data directory contains a file that does not match the expected
     /// segment-filename convention (`NNNNNN.fbat`).
     DataDirMalformed {
@@ -214,7 +295,7 @@ pub enum StoreError {
     /// The ancestry walk detected a cycle in the hash chain.
     AncestryCorrupt {
         /// Event id at which the cycle was closed.
-        cycle_at: u128,
+        cycle_at: crate::id::EventId,
     },
     /// A caller-supplied visibility range is malformed (`start >= end`).
     RangeMalformed {
@@ -353,229 +434,6 @@ pub enum StoreError {
     },
 }
 
-impl std::fmt::Display for StoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "IO error: {e}"),
-            Self::StoreLocked { path, mode } => {
-                let mode = match mode {
-                    StoreLockMode::Mutable => "mutable",
-                    StoreLockMode::ReadOnly => "read-only",
-                };
-                write!(
-                    f,
-                    "store at {} is already locked; could not acquire {mode} access; ensure no other process holds this directory and remove {} only after verifying no owner is alive",
-                    path.display(),
-                    path.join(".batpak.lock").display()
-                )
-            }
-            Self::Coordinate(e) => write!(f, "coordinate error: {e}"),
-            Self::CheckpointId(e) => write!(f, "checkpoint id error: {e}"),
-            Self::Serialization(e) => write!(f, "serialization error: {e}"),
-            Self::CrcMismatch { segment_id, offset } => {
-                write!(f, "CRC mismatch in segment {segment_id} at offset {offset}")
-            }
-            Self::CorruptSegment { segment_id, detail } => {
-                write!(f, "corrupt segment {segment_id}: {detail}")
-            }
-            Self::NotFound(id) => write!(f, "event {id:032x} not found"),
-            Self::SequenceMismatch {
-                entity,
-                expected,
-                actual,
-            } => write!(
-                f,
-                "CAS failed for {entity}: expected seq {expected}, got {actual}"
-            ),
-            Self::WriterCrashed => write!(f, "writer thread crashed"),
-            Self::WaitTimeout {
-                watermark,
-                target,
-                waited_ms,
-            } => write!(
-                f,
-                "wait for {watermark:?} watermark to reach {target:?} timed out after {waited_ms}ms"
-            ),
-            Self::CacheFailed(e) => write!(f, "cache error: {e}"),
-            Self::SequenceGateViolation {
-                operation,
-                requested,
-                allocated,
-                visible,
-            } => write!(
-                f,
-                "sequence gate rejected {operation} publish({requested}) with allocated={allocated} visible={visible}"
-            ),
-            Self::Configuration(msg) => write!(f, "invalid config: {msg}"),
-            Self::PlatformProfileInvalid { path, kind } => write!(
-                f,
-                "platform profile at {} is invalid: {kind}",
-                path.display()
-            ),
-            Self::PlatformProfileMismatch { path, reason } => write!(
-                f,
-                "platform profile at {} does not match current platform evidence: {reason}",
-                path.display()
-            ),
-            Self::PlatformAdmissionFailed { capability, reason } => {
-                write!(f, "platform admission failed for {capability}: {reason}")
-            }
-            Self::EventPayloadRegistry(error) => write!(f, "{error}"),
-            Self::IdempotencyRequired => write!(
-                f,
-                "group commit (batch > 1) requires an idempotency key on every append"
-            ),
-            Self::VisibilityFenceActive => write!(f, "a visibility fence is already active"),
-            Self::VisibilityFenceNotActive => {
-                write!(f, "no matching visibility fence is currently active")
-            }
-            Self::VisibilityFenceCancelled => {
-                write!(f, "visibility fence was cancelled before publish")
-            }
-            Self::BatchFailed { item_index, source } => {
-                write!(f, "batch failed at item {}: {}", item_index, source)
-            }
-            Self::BatchSyncFailed { item_count, source } => {
-                write!(
-                    f,
-                    "batch sync failed after writing {} items: {}",
-                    item_count, source
-                )
-            }
-            #[cfg(feature = "dangerous-test-hooks")]
-            Self::FaultInjected(msg) => write!(f, "fault injected: {msg}"),
-            Self::IdempotencyPartialBatch { reason } => {
-                write!(f, "batch rejected: {reason}")
-            }
-            Self::IdempotencyFutureVersion { stored, current } => write!(
-                f,
-                "durable idempotency store on disk is version {stored} but this binary understands \
-                 at most version {current}; upgrade the reader"
-            ),
-            Self::MmapFutureVersion { found, supported } => write!(
-                f,
-                "mmap index on disk is version {found} but this binary understands at most version \
-                 {supported}; refusing to rebuild from scan (a future writer may have written data \
-                 this reader cannot interpret); upgrade the reader"
-            ),
-            Self::IdempotencyOverflowFailClosed { len, max_keys } => write!(
-                f,
-                "durable idempotency store at soft cap ({len}/{max_keys}); new keyed append \
-                 refused (overflow policy fail-closed)"
-            ),
-            Self::InvalidPayloadVersion { kind } => write!(
-                f,
-                "typed append for kind 0x{kind:04X} declared PAYLOAD_VERSION 0; version 0 is the \
-                 reserved legacy/untyped sentinel and is never a valid declared payload version"
-            ),
-            Self::CorruptFrame {
-                segment_id,
-                offset,
-                reason,
-            } => write!(
-                f,
-                "corrupt frame in segment {segment_id} at offset {offset}: {reason}"
-            ),
-            Self::SegmentTooManyEntries { segment_id, count } => write!(
-                f,
-                "segment {segment_id} has {count} entries, exceeding the u32 footer capacity"
-            ),
-            Self::DataDirMalformed { path } => {
-                write!(
-                    f,
-                    "data directory contains unexpected file: {}",
-                    path.display()
-                )
-            }
-            Self::AncestryCorrupt { cycle_at } => {
-                write!(f, "ancestry walk detected a cycle at event {cycle_at:032x}")
-            }
-            Self::RangeMalformed { start, end } => {
-                write!(
-                    f,
-                    "malformed range: start={start} end={end} (start must be < end)"
-                )
-            }
-            Self::InvalidCoordinate { index, reason } => match index {
-                Some(i) => write!(f, "invalid coordinate at batch item {i}: {reason}"),
-                None => write!(f, "invalid coordinate: {reason}"),
-            },
-            Self::ReservedKind { index, kind } => match index {
-                Some(i) => write!(
-                    f,
-                    "reserved kind 0x{kind:04X} at batch item {i} cannot be appended through the public surface"
-                ),
-                None => write!(
-                    f,
-                    "reserved kind 0x{kind:04X} cannot be appended through the public surface"
-                ),
-            },
-            Self::InvalidCausation {
-                prior_idx,
-                item_index,
-                reason,
-            } => write!(
-                f,
-                "invalid causation at item {item_index} referencing prior {prior_idx}: {reason}"
-            ),
-            Self::InvalidCommitMetadata { reason } => {
-                write!(f, "invalid commit metadata: {reason}")
-            }
-            Self::CoordinateNulByte => {
-                write!(f, "coordinate component contains forbidden NUL byte")
-            }
-            Self::CoordinatePathTraversal => write!(
-                f,
-                "coordinate component contains forbidden path-traversal substring (`..` or `/`)"
-            ),
-            Self::CoordinateControlChar => write!(
-                f,
-                "coordinate component contains forbidden ASCII control character"
-            ),
-            Self::HiddenRangesCorrupt { path, kind } => write!(
-                f,
-                "hidden-ranges metadata at {} is corrupt: {kind}",
-                path.display()
-            ),
-            Self::BatchItemTooLarge { index, size, limit } => write!(
-                f,
-                "batch item {index} append bytes {size} exceeds per-item ceiling {limit}"
-            ),
-            Self::EntityClockOverflow { entity } => write!(
-                f,
-                "entity {entity} per-entity clock reached u32::MAX; further appends rejected"
-            ),
-            Self::InvalidClock {
-                timestamp_us,
-                reason,
-            } => write!(
-                f,
-                "custom clock returned invalid timestamp_us {timestamp_us}: {reason}"
-            ),
-            Self::CheckpointWriteFailed { id, source } => {
-                write!(f, "cursor checkpoint {id} write failed: {source}")
-            }
-            Self::CursorCheckpointCorrupt { path, reason } => write!(
-                f,
-                "durable cursor checkpoint at {} is corrupt: {reason}",
-                path.display()
-            ),
-            Self::CursorCheckpointRegionMismatch {
-                path,
-                stored,
-                expected,
-            } => write!(
-                f,
-                "durable cursor checkpoint at {} belongs to region {:?}, expected {}",
-                path.display(),
-                stored,
-                expected
-            ),
-            Self::InvariantViolation { kind } => write!(f, "invariant violation: {kind}"),
-        }
-    }
-}
-
 impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -595,6 +453,9 @@ impl std::error::Error for StoreError {
             | Self::WaitTimeout { .. }
             | Self::SequenceGateViolation { .. }
             | Self::Configuration(_)
+            | Self::ProjectionStateContractUnspecified { .. }
+            | Self::ProjectionStateExtentUnavailable { .. }
+            | Self::ProjectionStateBoundExceeded { .. }
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::IdempotencyRequired
@@ -604,10 +465,15 @@ impl std::error::Error for StoreError {
             | Self::IdempotencyPartialBatch { .. }
             | Self::IdempotencyFutureVersion { .. }
             | Self::MmapFutureVersion { .. }
+            | Self::CheckpointFutureVersion { .. }
+            | Self::HiddenRangesFutureVersion { .. }
+            | Self::ForkEvidenceFutureVersion { .. }
+            | Self::ImportProvenanceFutureVersion { .. }
             | Self::IdempotencyOverflowFailClosed { .. }
             | Self::InvalidPayloadVersion { .. }
             | Self::CorruptFrame { .. }
             | Self::SegmentTooManyEntries { .. }
+            | Self::InternerExhausted { .. }
             | Self::DataDirMalformed { .. }
             | Self::AncestryCorrupt { .. }
             | Self::RangeMalformed { .. }

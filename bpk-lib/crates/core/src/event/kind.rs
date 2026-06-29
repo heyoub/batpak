@@ -94,6 +94,18 @@ impl EventKind {
         Self(((category as u16) << 12) | type_id)
     }
 
+    /// Reconstruct a kind from its raw `u16` encoding.
+    ///
+    /// This is the inverse of [`as_raw_u16`](Self::as_raw_u16) and performs no
+    /// validation: it is for round-tripping an already-encoded `u16` (e.g. the
+    /// packed `kind_bits` carried by a registry collision record) back into a
+    /// kind so its [`category`](Self::category)/[`type_id`](Self::type_id)
+    /// accessors can narrow the nibbles without an unchecked cast.
+    #[inline]
+    pub(crate) const fn from_raw_u16(raw: u16) -> Self {
+        Self(raw)
+    }
+
     /// Returns the canonical on-disk and over-the-wire `u16` encoding.
     ///
     /// This value must stay byte-for-byte equal to `(category << 12) | type_id`.
@@ -178,20 +190,18 @@ impl EventKind {
     /// Used by compact() for tombstone markers. Public so consumers can detect them.
     pub const TOMBSTONE: Self = Self(0x0FFE);
 
-    /// Fixture-only: NETBAT/1 wire-parity heartbeat request payload used by
-    /// the `hbat` reference host. Category `0xF`, type_id `0xA01`.
+    /// Reserved: NETBAT/1 wire-parity heartbeat request kind. Category `0xF`,
+    /// type_id `0xA01`.
     ///
-    /// This constant lives in `batpak::event::kind` so the substrate owns
-    /// the numeric registry naming, but the payload struct itself
-    /// (`hbat::heartbeat::SystemHeartbeatRequest`) lives in `hbat` — it is
-    /// a fixture, not a substrate-promoted public event. The constant
-    /// remains in sync with the `#[batpak(category = 0xF, type_id =
-    /// 0xA01)]` attribute on the struct via a compile-time alignment test
-    /// in `crates/hbat/src/heartbeat.rs`.
+    /// This constant lives in `batpak::event::kind` so the substrate owns the
+    /// numeric registry naming; the payload struct itself belongs to a
+    /// downstream NETBAT/1 host (a fixture kind, not a substrate-promoted public
+    /// event). The numeric slot stays reserved here so downstream hosts align
+    /// against one registry.
     pub const SYSTEM_HEARTBEAT_REQUEST: Self = Self::custom(0xF, 0xA01);
 
-    /// Fixture-only: NETBAT/1 wire-parity heartbeat ack payload used by
-    /// the `hbat` reference host. Category `0xF`, type_id `0xA02`. See
+    /// Reserved: NETBAT/1 wire-parity heartbeat ack kind. Category `0xF`,
+    /// type_id `0xA02`. See
     /// [`SYSTEM_HEARTBEAT_REQUEST`](Self::SYSTEM_HEARTBEAT_REQUEST) for
     /// the substrate-vs-fixture placement rationale.
     pub const SYSTEM_HEARTBEAT_ACK: Self = Self::custom(0xF, 0xA02);

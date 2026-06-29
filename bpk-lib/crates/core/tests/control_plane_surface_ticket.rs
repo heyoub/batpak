@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this ticket-surface harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the ready-ticket polling surface -- `AppendTicket`/`BatchAppendTicket`
 //! `try_check` exposes committed receipts (identity + visible sequence order)
 //! once the writer reply lands -- and that a lossy scan fold converges with the
@@ -10,14 +8,13 @@
 //! SEEDED: a deterministic per-test store; scan parity seeds 10 + appends 10.
 
 use batpak::coordinate::{Coordinate, Region};
-use batpak::event::{Event, EventKind, EventSourced};
+use batpak::event::{Event, EventKind, EventSourced, ProjectionStateContract, StateExtent};
 use batpak::store::Freshness;
 use batpak::store::{AppendOptions, BatchAppendItem, Store, StoreError};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-#[path = "support/control_plane_surface.rs"]
-mod cps_support;
+use batpak_testkit::control_plane_surface as cps_support;
 use cps_support::{test_config, KIND_COUNTER};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -27,6 +24,8 @@ struct CounterProjection {
 
 impl EventSourced for CounterProjection {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("control-plane-ticket-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -49,6 +48,10 @@ impl EventSourced for CounterProjection {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -77,16 +80,13 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         .submit(&coord, kind, &serde_json::json!({"n": "append"}))
         .expect("submit append ticket");
     wait_until_ticket_receiver_has_value(append_ticket.receiver(), "append ticket receiver");
-    let append_receipt = match append_ticket.try_check() {
-        Some(Ok(receipt)) => receipt,
-        Some(Err(err)) => panic!(
-            "PROPERTY: ready append ticket must surface its receipt through try_check, got error {err:?}"
-        ),
-        None => panic!(
-            "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(Ok(_))"
-        ),
-    };
-    assert_eq!(append_receipt.sequence, 1);
+    let append_receipt = append_ticket
+        .try_check()
+        .expect(
+            "PROPERTY: once the append ticket receiver is non-empty, try_check must return Some(_)",
+        )
+        .expect("PROPERTY: ready append ticket must surface its receipt through try_check");
+    assert_eq!(append_receipt.global_sequence, 1);
     assert_ne!(
         append_receipt.event_id,
         batpak::id::EventId::from(0u128),
@@ -114,15 +114,12 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
         ])
         .expect("submit batch ticket");
     wait_until_ticket_receiver_has_value(batch_ticket.receiver(), "batch ticket receiver");
-    let batch_receipts = match batch_ticket.try_check() {
-        Some(Ok(receipts)) => receipts,
-        Some(Err(err)) => panic!(
-            "PROPERTY: ready batch ticket must surface its receipts through try_check, got error {err:?}"
-        ),
-        None => panic!(
-            "PROPERTY: once the batch ticket receiver is non-empty, try_check must return Some(Ok(_))"
-        ),
-    };
+    let batch_receipts = batch_ticket
+        .try_check()
+        .expect(
+            "PROPERTY: once the batch ticket receiver is non-empty, try_check must return Some(_)",
+        )
+        .expect("PROPERTY: ready batch ticket must surface its receipts through try_check");
     assert_eq!(batch_receipts.len(), 2);
     assert!(
         batch_receipts
@@ -137,7 +134,7 @@ fn try_check_surfaces_ready_append_and_batch_tickets() {
     assert_eq!(
         batch_receipts
             .iter()
-            .map(|receipt| receipt.sequence)
+            .map(|receipt| receipt.global_sequence)
             .collect::<Vec<_>>(),
         vec![2, 3],
         "PROPERTY: batch try_check must expose the committed receipts in visible sequence order."
@@ -153,7 +150,7 @@ fn scan_fold_converges_to_project_count() {
 
     // Phase 1: seed 10 events before subscribing.
     for i in 0..10u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"phase": 1, "i": i}))
             .expect("append seed event");
     }
@@ -196,7 +193,7 @@ fn scan_fold_converges_to_project_count() {
 
     // Append 10 more events from the main thread.
     for i in 0..10u32 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"phase": 2, "i": i}))
             .expect("append phase 2 event");
     }

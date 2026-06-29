@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening_untrusted_tail.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: the untrusted-footer governing principle at the SEGMENT TAIL — an
 //! out-of-bounds forged offset, a torn/truncated SDX3 trailer, and a no-footer
 //! segment whose final payload coincidentally ends in the SIDX magic each leave
@@ -14,8 +12,7 @@
 //! magic-tail payload) whose SDX3 trailer is forged, torn, or stripped to a
 //! coincidental magic before reopen.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::coordinate::Coordinate;
 use batpak::store::Store;
@@ -159,11 +156,11 @@ fn no_footer_segment_ending_in_coincidental_magic_recovers_all_frames() {
     // Append several frames; the LAST user frame's payload deliberately ends with
     // the SIDX magic so the segment tail coincidentally matches.
     for i in 0..5u32 {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("append");
     }
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -268,10 +265,12 @@ fn untrusted_footer_adversarial_offsets_always_recover_all_frames() {
         std::fs::write(&seg, &bytes).expect("write adversarial-offset segment");
 
         let store = Store::open(config(&dir)).unwrap_or_else(|err| {
-            panic!(
+            assert!(
+                std::hint::black_box(false),
                 "PROPERTY: an UNTRUSTED footer with adversarial offset '{offset_kind}' \
                  ({forged_offset}) must recover, never error; got {err:?}"
-            )
+            );
+            unreachable!("the recovery assertion above always fails on error")
         });
         let entries = user_entries(&store);
         assert_eq!(

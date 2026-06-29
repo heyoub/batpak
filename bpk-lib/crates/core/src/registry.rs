@@ -497,3 +497,80 @@ pub fn registry_row_body_hash_matches_signing_bytes(
     let b = registry_row_body_bytes(body)?;
     Ok(a == b)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{registry_drift_findings_sorted, RegistryDriftFinding, RegistryRowId};
+
+    /// Build a `(row_id, hash)` pair whose id and hash are both stamped from a
+    /// single discriminant byte, so ordering is the leading byte of the id.
+    fn pair(id_byte: u8, hash_byte: u8) -> (RegistryRowId, [u8; 32]) {
+        let mut id = [0u8; 32];
+        id[0] = id_byte;
+        let mut hash = [0u8; 32];
+        hash[0] = hash_byte;
+        (RegistryRowId(id), hash)
+    }
+
+    fn row_id(id_byte: u8) -> RegistryRowId {
+        let mut id = [0u8; 32];
+        id[0] = id_byte;
+        RegistryRowId(id)
+    }
+
+    #[test]
+    fn drift_merge_advances_both_cursors_across_every_branch_kind() {
+        // expected ids: 1 (missing from observed), 2 (hash mismatch), 4 (present, equal).
+        // observed ids: 2 (mismatching hash), 3 (extra), 4 (matching hash).
+        //
+        // The Less branch fires FIRST at index 0 (expected id 1 < observed id 2),
+        // so an `i += 1` -> `i *= 1` mutant never advances past it; an
+        // `j += 1` -> `j *= 1` mutant stalls on the Greater branch (observed id 3).
+        // Asserting the EXACT finding set fails fast on any stalled cursor before
+        // a non-terminating loop can hang the test.
+        let expected = [pair(1, 10), pair(2, 20), pair(4, 40)];
+        let observed = [pair(2, 99), pair(3, 30), pair(4, 40)];
+
+        let findings = registry_drift_findings_sorted(&expected, &observed);
+
+        // `registry_drift_findings_sorted` sorts findings before returning.
+        let mut want = vec![
+            RegistryDriftFinding::MissingRow { row_id: row_id(1) },
+            RegistryDriftFinding::HashMismatch {
+                row_id: row_id(2),
+                expected: pair(2, 20).1,
+                observed: pair(2, 99).1,
+            },
+            RegistryDriftFinding::ExtraRow { row_id: row_id(3) },
+        ];
+        crate::evidence::sort_findings(&mut want);
+
+        assert_eq!(
+            findings, want,
+            "PROPERTY: the sorted merge-diff visits Missing, HashMismatch, and Extra \
+             exactly once each — every cursor advance must be `+= 1`"
+        );
+    }
+
+    #[test]
+    fn drift_merge_drains_observed_tail_as_extra_rows() {
+        // expected is a single early id; observed carries a tail of higher ids.
+        // The Greater branch (and the observed-tail drain) must `j += 1`; a
+        // mutant that fails to advance observed yields the wrong Extra set.
+        let expected = [pair(1, 10)];
+        let observed = [pair(1, 10), pair(2, 20), pair(3, 30)];
+
+        let findings = registry_drift_findings_sorted(&expected, &observed);
+
+        let mut want = vec![
+            RegistryDriftFinding::ExtraRow { row_id: row_id(2) },
+            RegistryDriftFinding::ExtraRow { row_id: row_id(3) },
+        ];
+        crate::evidence::sort_findings(&mut want);
+
+        assert_eq!(
+            findings, want,
+            "PROPERTY: every surplus observed row past the expected set is reported once"
+        );
+    }
+}

@@ -4,7 +4,7 @@
 # Gate DEPTH is a function of AL, not of which CI label happened to fire.
 #
 #   L0  hygiene/format/lint-only surfaces
-#   L1  normal library code (default for any unmatched production file)
+#   L1  normal library code (derived from Cargo production roots when no glob matches)
 #   L2  contracts: public API + on-disk / serialized / wire shapes
 #   L3  deterministic runtime: writer/visibility/projection/frontier/cold-start
 #   L4  "if it lies, downstream trusts a forged reality": durability,
@@ -67,6 +67,19 @@
   globs:
     - crates/core/src/store/platform/**/*.rs
 
+- level: L4
+  seam: fork-isolation
+  rationale: "fork CoW isolation classification and evidence report are durability boundaries"
+  globs:
+    - crates/core/src/store/file_classification.rs
+    - crates/core/src/store/fork_report.rs
+
+- level: L4
+  seam: import-reapply
+  rationale: "import key derivation, dedup, and hash-chain regeneration are durability boundaries"
+  globs:
+    - crates/core/src/store/import.rs
+
 # --- L3: deterministic runtime (writer/visibility/projection/frontier/cold-start) ---
 - level: L3
   seam: cursor-delivery
@@ -108,7 +121,15 @@
   rationale: "durable register catalog rebuild is deterministic runtime"
   globs:
     - crates/syncbat/src/register.rs
-    - crates/syncbat/src/register_store.rs
+    - crates/syncbat/src/register_store/**/*.rs
+
+- level: L3
+  seam: syncbat-subscription-runtime
+  rationale: "store-backed subscription replay/live delivery is deterministic runtime"
+  globs:
+    - crates/syncbat/src/subscription_runtime/**/*.rs
+    - crates/syncbat/src/operation_status.rs
+    - crates/syncbat/src/operation_status_sink.rs
 
 - level: L3
   seam: netbat-boundary-protocol
@@ -116,7 +137,7 @@
   globs:
     - crates/netbat/src/lib.rs
     - crates/netbat/src/route.rs
-    - crates/netbat/src/transport.rs
+    - crates/netbat/src/transport/**/*.rs
 
 # --- L2: public API + on-disk / serialized / wire contracts ---
 - level: L2

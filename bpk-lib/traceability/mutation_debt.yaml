@@ -1,0 +1,32 @@
+# mutation_debt.yaml — typed debt ledger for surviving (missed) mutants.
+#
+# GAUNT-MUT-4. This file is the canonical record of mutants that the repo-wide
+# mutation lane currently fails to catch. Each surviving mutant must be tracked
+# here as explicit, typed debt rather than silently tolerated. Consumers (split by
+# what each can see):
+#   LOCAL  — tools/integrity/src/mutation_debt.rs::check schema-validates every
+#            entry on each `structural-check` (fields present, ISO `first_seen`,
+#            `file` exists, `line` >= 1); a malformed or rotted entry reds the build.
+#   CLOUD  — the repo-wide mutation lane reds when a NEW surviving mutant appears
+#            that is not recorded below (needs the cloud missed.txt, so it cannot be
+#            a pure structural check; see decision-1 baseline).
+# Mirrors the existing allowlist patterns (e.g. FROZEN_FIXTURE_DEBT).
+#
+# Schema — a list of entries, each with the following fields:
+#   mutant:     str  - the cargo-mutants mutant description (the exact line printed
+#                       in missed.txt, e.g. "replace == with != in unregister").
+#   file:       str  - repo-relative path to the source file the mutant lives in.
+#   line:       int  - 1-based line number of the mutated expression.
+#   seam:       str  - the mutation seam/lane slug that covers this file
+#                       (e.g. "projection-fusion", "lane-frontier", "repo-wide").
+#   first_seen: str  - ISO-8601 date (YYYY-MM-DD) the mutant first survived, so debt
+#                       age is auditable.
+#   reason:     str  - why it is currently tolerated and the plan to kill it
+#                       (e.g. "no falsifying test yet — tracked in #NNN").
+#   proof:      str  - optional proven-equivalence argument; **required** for L4
+#                       seam survivors (#64-A). L3 survivors without proof warn
+#                       against [`L3_MUTATION_DEBT_BUDGET`] in mutation_debt.rs.
+#
+# Empty list = no tolerated surviving mutants. Keep this list at zero whenever
+# possible; every entry is a falsifying test that has not been written yet.
+[]

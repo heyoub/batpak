@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/react_loop_multi.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Integration tests for `#[derive(MultiEventReactor)]` + `react_loop_multi`
 //! (Dispatch Chapter T6). Cover the JSON lane here; raw-msgpack lane
 //! parity is covered in `react_loop_multi_raw.rs`.
@@ -18,11 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use batpak::event::StoredEvent;
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, EventPayload)]
@@ -101,13 +97,13 @@ impl Counter {
 }
 
 fn emit(out: &mut ReactionBatch, tag: &str) -> Result<(), NeverFails> {
-    let coord = Coordinate::new("entity:multi-out", "scope:test").unwrap();
+    let coord = Coordinate::new("entity:multi-out", "scope:test").expect("reaction coord");
     out.push_typed(
         coord,
         &ReactionOut { source: tag.into() },
         CausationRef::None,
     )
-    .unwrap();
+    .expect("push reaction event");
     Ok(())
 }
 
@@ -123,11 +119,11 @@ fn wait_for<F: Fn() -> bool>(cond: F, timeout: Duration) -> bool {
 }
 
 fn source_coord() -> Coordinate {
-    Coordinate::new("entity:multi-src", "scope:test").unwrap()
+    Coordinate::new("entity:multi-src", "scope:test").expect("source coord")
 }
 
 fn test_store() -> (tempfile::TempDir, Arc<Store>) {
-    let (d, s) = small_segment_store().unwrap();
+    let (d, s) = small_segment_store().expect("small segment store");
     (d, Arc::new(s))
 }
 
@@ -142,16 +138,22 @@ fn join_with_timeout(
             let _ = tx.send(handle.join());
         })
         .expect("spawn bounded join worker");
-    match rx.recv_timeout(timeout) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => panic!(
-            "multi-reactor dispatch contract: expected reactor to stop within {:?}",
-            timeout
-        ),
-        Err(mpsc::RecvTimeoutError::Disconnected) => {
-            panic!("multi-reactor dispatch contract: join worker disconnected")
+    rx.recv_timeout(timeout).unwrap_or_else(|err| match err {
+        mpsc::RecvTimeoutError::Timeout => {
+            assert!(
+                std::hint::black_box(false),
+                "multi-reactor dispatch contract: expected reactor to stop within {timeout:?}"
+            );
+            unreachable!()
         }
-    }
+        mpsc::RecvTimeoutError::Disconnected => {
+            assert!(
+                std::hint::black_box(false),
+                "multi-reactor dispatch contract: join worker disconnected"
+            );
+            unreachable!()
+        }
+    })
 }
 
 #[test]
@@ -171,21 +173,21 @@ fn multi_kind_dispatch_routes_each_kind_to_right_handler() {
         .expect("spawn");
 
     // Interleaved stream across all three kinds.
-    store
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 1 })
-        .unwrap();
-    store
+        .expect("append PayloadA n=1");
+    let _ = store
         .append_typed(&source_coord(), &PayloadB { label: "x".into() })
-        .unwrap();
-    store
+        .expect("append PayloadB x");
+    let _ = store
         .append_typed(&source_coord(), &PayloadA { n: 2 })
-        .unwrap();
-    store
+        .expect("append PayloadA n=2");
+    let _ = store
         .append_typed(&source_coord(), &PayloadC { amount: 7 })
-        .unwrap();
-    store
+        .expect("append PayloadC");
+    let _ = store
         .append_typed(&source_coord(), &PayloadB { label: "y".into() })
-        .unwrap();
+        .expect("append PayloadB y");
 
     assert!(
         wait_for(
@@ -261,21 +263,22 @@ fn matched_kind_decode_failure_surfaces_reactor_error_decode() {
         .expect("spawn");
 
     // Write an event at ShapeY::KIND with a payload that will not decode.
-    store
+    let _ = store
         .append(
             &source_coord(),
             ShapeY::KIND,
             &serde_json::json!({ "wrong_field": "nope" }),
         )
-        .unwrap();
+        .expect("append undecodable matched-kind event");
 
     // Under the Once policy the worker exhausts its restart budget on its
     // own after the matched-kind decode fails. `join` is the passive wait
     // for that natural exit — no explicit stop needed.
-    match join_with_timeout(handle, Duration::from_secs(2)) {
-        Err(ReactorError::Decode(_)) => {}
-        other => panic!("expected ReactorError::Decode, got {other:?}"),
-    }
+    let join_result = join_with_timeout(handle, Duration::from_secs(2));
+    assert!(
+        matches!(join_result, Err(ReactorError::Decode(_))),
+        "expected ReactorError::Decode, got {join_result:?}"
+    );
 }
 
 #[test]

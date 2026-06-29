@@ -5,6 +5,7 @@
 //! `use batpak::EventPayload;` or `use batpak::EventSourced;`.
 
 mod event_payload;
+mod operation;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -23,6 +24,20 @@ pub fn derive_event_payload(input: TokenStream) -> TokenStream {
     match event_payload::expand(&input) {
         Ok(ts) => ts.into(),
         Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// `#[operation(...)]` — generate a syncbat operation descriptor + optional
+/// registration fns. Re-exported as `syncbat::operation`; users never name this
+/// crate. (Moved here from the former `syncbat-macros` crate — the family has one
+/// proc-macro crate.)
+#[proc_macro_attribute]
+pub fn operation(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr as operation::OperationArgs);
+    let function = parse_macro_input!(item as syn::ItemFn);
+    match operation::expand_operation(args, &function) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
     }
 }
 
@@ -95,7 +110,7 @@ pub fn derive_multi_event_reactor(input: TokenStream) -> TokenStream {
 /// recovery), implement `EventSourced` manually. The derive does not offer a
 /// fallible mode because the trait signature does not support one.
 ///
-/// See `TERMINALS.md`, `CIRCUITS.md`, and the Dispatch Chapter plan
+/// See `05_TERMINALS.md`, `08_CIRCUITS.md`, and the Dispatch Chapter plan
 /// for the full contract.
 #[proc_macro_derive(EventSourced, attributes(batpak))]
 pub fn derive_event_sourced(input: TokenStream) -> TokenStream {
@@ -117,144 +132,196 @@ struct EventBinding {
 
 /// Parsed state for a single `#[batpak(...)]` attribute on an `EventSourced`
 /// or `MultiEventReactor` derive. Each attribute is either a `Config` attr
-/// (containing `input`, `cache_version`, or `error`) or an `EventBinding`
-/// attr (containing `event` and `handler`). Mixing keys is a compile-time
-/// error.
+/// (containing `input`, `cache_version`, `error`, or projection state
+/// contract fields) or an `EventBinding` attr (containing `event` and
+/// `handler`). Mixing keys is a compile-time error.
 enum BatpakAttrKind {
     Config {
         input: Option<Path>,
         cache_version: Option<LitInt>,
+        state_max_cardinality: Option<LitInt>,
         error: Option<Path>,
     },
     Event(EventBinding),
 }
 
-fn classify_batpak_attr(attr: &Attribute) -> syn::Result<BatpakAttrKind> {
-    // Collect all key/value pairs without deciding the kind yet.
-    let mut input: Option<Path> = None;
-    let mut cache_version: Option<LitInt> = None;
-    let mut error_ty: Option<Path> = None;
-    let mut event: Option<Path> = None;
-    let mut handler: Option<Ident> = None;
-
-    attr.parse_nested_meta(|meta| {
-        let key = meta.path.get_ident().ok_or_else(|| {
-            meta.error("expected `input`, `cache_version`, `error`, `event`, or `handler`")
-        })?;
-        match key.to_string().as_str() {
-            "input" => {
-                if input.is_some() {
-                    return Err(meta.error("duplicate `input` key within attribute"));
-                }
-                input = Some(meta.value()?.parse::<Path>()?);
-            }
-            "cache_version" => {
-                if cache_version.is_some() {
-                    return Err(meta.error("duplicate `cache_version` key within attribute"));
-                }
-                cache_version = Some(meta.value()?.parse::<LitInt>()?);
-            }
-            "error" => {
-                if error_ty.is_some() {
-                    return Err(meta.error("duplicate `error` key within attribute"));
-                }
-                error_ty = Some(meta.value()?.parse::<Path>()?);
-            }
-            "event" => {
-                if event.is_some() {
-                    return Err(meta.error("duplicate `event` key within attribute"));
-                }
-                event = Some(meta.value()?.parse::<Path>()?);
-            }
-            "handler" => {
-                if handler.is_some() {
-                    return Err(meta.error("duplicate `handler` key within attribute"));
-                }
-                handler = Some(meta.value()?.parse::<Ident>()?);
-            }
-            other => {
-                return Err(meta.error(format!(
-                    "unknown key `{other}`, expected `input`, `cache_version`, `error`, `event`, or `handler`"
-                )));
-            }
-        }
-        Ok(())
-    })?;
-
-    let has_config = input.is_some() || cache_version.is_some() || error_ty.is_some();
-    let has_event = event.is_some() || handler.is_some();
-
-    if has_config && has_event {
-        return Err(syn::Error::new(
-            attr.span(),
-            "`#[batpak(...)]` attribute must contain either config keys \
-             (`input`, `cache_version`, `error`) or an event-binding pair (`event`, `handler`), not both",
-        ));
-    }
-
-    if has_event {
-        let event = event.ok_or_else(|| {
-            syn::Error::new(
-                attr.span(),
-                "event-binding attribute is missing `event = <PayloadType>`",
-            )
-        })?;
-        let handler = handler.ok_or_else(|| {
-            syn::Error::new(
-                attr.span(),
-                "event-binding attribute is missing `handler = <fn_name>`",
-            )
-        })?;
-        return Ok(BatpakAttrKind::Event(EventBinding { event, handler }));
-    }
-
-    // Config (possibly empty — still an error if completely empty)
-    if !has_config {
-        return Err(syn::Error::new(
-            attr.span(),
-            "`#[batpak(...)]` must contain at least one key: `input`, `cache_version`, `error`, or the `event`/`handler` pair",
-        ));
-    }
-    Ok(BatpakAttrKind::Config {
-        input,
-        cache_version,
-        error: error_ty,
-    })
+#[derive(Default)]
+struct BatpakAttrParts {
+    input: Option<Path>,
+    cache_version: Option<LitInt>,
+    state_max_cardinality: Option<LitInt>,
+    error_ty: Option<Path>,
+    event: Option<Path>,
+    handler: Option<Ident>,
 }
 
-fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    // ─── Shape check: named-field struct only (same rule as EventPayload) ───
-    match &input.data {
-        Data::Struct(s) => match &s.fields {
-            Fields::Named(_) => {}
-            Fields::Unnamed(f) => {
-                return Err(syn::Error::new(
-                    f.span(),
-                    "#[derive(EventSourced)] requires a named-field struct; tuple structs are not supported",
-                ));
-            }
-            Fields::Unit => {
-                return Err(syn::Error::new(
-                    input.ident.span(),
-                    "#[derive(EventSourced)] requires a named-field struct; unit structs are not supported",
-                ));
-            }
-        },
-        Data::Enum(e) => {
-            return Err(syn::Error::new(
-                e.enum_token.span,
-                "#[derive(EventSourced)] requires a named-field struct; enums are not supported",
-            ));
+impl BatpakAttrParts {
+    fn set_nested(&mut self, meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<()> {
+        let key = meta.path.get_ident().ok_or_else(|| {
+            meta.error("expected `input`, `cache_version`, `state_max_cardinality`, `error`, `event`, or `handler`")
+        })?;
+        let key_name = key.to_string();
+        if self.set_config_nested(key_name.as_str(), meta)? {
+            return Ok(());
         }
-        Data::Union(u) => {
-            return Err(syn::Error::new(
-                u.union_token.span,
-                "#[derive(EventSourced)] requires a named-field struct; unions are not supported",
-            ));
+        if self.set_event_nested(key_name.as_str(), meta)? {
+            return Ok(());
         }
+        Err(meta.error(format!(
+            "unknown key `{key_name}`, expected `input`, `cache_version`, `state_max_cardinality`, `error`, `event`, or `handler`"
+        )))
     }
 
-    // ─── Collect & classify all #[batpak(...)] attrs ─────────────────────────
+    fn set_config_nested(
+        &mut self,
+        key: &str,
+        meta: &syn::meta::ParseNestedMeta<'_>,
+    ) -> syn::Result<bool> {
+        match key {
+            "input" => {
+                if self.input.is_some() {
+                    return Err(meta.error("duplicate `input` key within attribute"));
+                }
+                self.input = Some(meta.value()?.parse::<Path>()?);
+            }
+            "cache_version" => {
+                if self.cache_version.is_some() {
+                    return Err(meta.error("duplicate `cache_version` key within attribute"));
+                }
+                self.cache_version = Some(meta.value()?.parse::<LitInt>()?);
+            }
+            "state_max_cardinality" => {
+                if self.state_max_cardinality.is_some() {
+                    return Err(
+                        meta.error("duplicate `state_max_cardinality` key within attribute")
+                    );
+                }
+                self.state_max_cardinality = Some(meta.value()?.parse::<LitInt>()?);
+            }
+            "error" => {
+                if self.error_ty.is_some() {
+                    return Err(meta.error("duplicate `error` key within attribute"));
+                }
+                self.error_ty = Some(meta.value()?.parse::<Path>()?);
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn set_event_nested(
+        &mut self,
+        key: &str,
+        meta: &syn::meta::ParseNestedMeta<'_>,
+    ) -> syn::Result<bool> {
+        match key {
+            "event" => {
+                if self.event.is_some() {
+                    return Err(meta.error("duplicate `event` key within attribute"));
+                }
+                self.event = Some(meta.value()?.parse::<Path>()?);
+            }
+            "handler" => {
+                if self.handler.is_some() {
+                    return Err(meta.error("duplicate `handler` key within attribute"));
+                }
+                self.handler = Some(meta.value()?.parse::<Ident>()?);
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    fn finish(self, attr: &Attribute) -> syn::Result<BatpakAttrKind> {
+        let has_config = self.input.is_some()
+            || self.cache_version.is_some()
+            || self.state_max_cardinality.is_some()
+            || self.error_ty.is_some();
+        let has_event = self.event.is_some() || self.handler.is_some();
+
+        if has_config && has_event {
+            return Err(syn::Error::new(
+                attr.span(),
+                "`#[batpak(...)]` attribute must contain either config keys \
+                 (`input`, `cache_version`, `state_max_cardinality`, `error`) or an event-binding pair (`event`, `handler`), not both",
+            ));
+        }
+
+        if has_event {
+            let event = self.event.ok_or_else(|| {
+                syn::Error::new(
+                    attr.span(),
+                    "event-binding attribute is missing `event = <PayloadType>`",
+                )
+            })?;
+            let handler = self.handler.ok_or_else(|| {
+                syn::Error::new(
+                    attr.span(),
+                    "event-binding attribute is missing `handler = <fn_name>`",
+                )
+            })?;
+            return Ok(BatpakAttrKind::Event(EventBinding { event, handler }));
+        }
+
+        if !has_config {
+            return Err(syn::Error::new(
+                attr.span(),
+                "`#[batpak(...)]` must contain at least one key: `input`, `cache_version`, `state_max_cardinality`, `error`, or the `event`/`handler` pair",
+            ));
+        }
+        Ok(BatpakAttrKind::Config {
+            input: self.input,
+            cache_version: self.cache_version,
+            state_max_cardinality: self.state_max_cardinality,
+            error: self.error_ty,
+        })
+    }
+}
+
+fn classify_batpak_attr(attr: &Attribute) -> syn::Result<BatpakAttrKind> {
+    let mut parts = BatpakAttrParts::default();
+    attr.parse_nested_meta(|meta| parts.set_nested(&meta))?;
+    parts.finish(attr)
+}
+
+fn ensure_named_field_struct(input: &DeriveInput, derive_name: &str) -> syn::Result<()> {
+    match &input.data {
+        Data::Struct(s) => match &s.fields {
+            Fields::Named(_) => Ok(()),
+            Fields::Unnamed(f) => Err(syn::Error::new(
+                f.span(),
+                format!(
+                    "#[derive({derive_name})] requires a named-field struct; tuple structs are not supported"
+                ),
+            )),
+            Fields::Unit => Err(syn::Error::new(
+                input.ident.span(),
+                format!(
+                    "#[derive({derive_name})] requires a named-field struct; unit structs are not supported"
+                ),
+            )),
+        },
+        Data::Enum(e) => Err(syn::Error::new(
+            e.enum_token.span,
+            format!("#[derive({derive_name})] requires a named-field struct; enums are not supported"),
+        )),
+        Data::Union(u) => Err(syn::Error::new(
+            u.union_token.span,
+            format!(
+                "#[derive({derive_name})] requires a named-field struct; unions are not supported"
+            ),
+        )),
+    }
+}
+
+struct EventSourcedDeriveAttrs {
+    input_path: Path,
+    cache_version_lit: Option<LitInt>,
+    state_max_cardinality_lit: Option<LitInt>,
+    bindings: Vec<EventBinding>,
+}
+
+fn collect_event_sourced_attrs(input: &DeriveInput) -> syn::Result<EventSourcedDeriveAttrs> {
     let batpak_attrs: Vec<&Attribute> = input
         .attrs
         .iter()
@@ -270,6 +337,7 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
 
     let mut input_path: Option<Path> = None;
     let mut cache_version_lit: Option<LitInt> = None;
+    let mut state_max_cardinality_lit: Option<LitInt> = None;
     let mut bindings: Vec<EventBinding> = Vec::new();
     let mut seen_events: HashSet<String> = HashSet::new();
 
@@ -278,43 +346,26 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
             BatpakAttrKind::Config {
                 input: attr_input,
                 cache_version: attr_cache,
+                state_max_cardinality: attr_state_max,
                 error: attr_error,
             } => {
-                if let Some(path) = attr_error {
-                    return Err(syn::Error::new(
-                        path.span(),
-                        "`error` is not valid on `#[derive(EventSourced)]` — projections do not have an associated error type",
-                    ));
-                }
-                if let Some(path) = attr_input {
-                    if input_path.is_some() {
-                        return Err(syn::Error::new(
-                            path.span(),
-                            "duplicate `input =` across `#[batpak(...)]` config attributes — `input` must appear exactly once",
-                        ));
-                    }
-                    input_path = Some(path);
-                }
-                if let Some(lit) = attr_cache {
-                    if cache_version_lit.is_some() {
-                        return Err(syn::Error::new(
-                            lit.span(),
-                            "duplicate `cache_version =` across `#[batpak(...)]` config attributes",
-                        ));
-                    }
-                    cache_version_lit = Some(lit);
-                }
+                collect_event_sourced_config(
+                    &mut input_path,
+                    &mut cache_version_lit,
+                    &mut state_max_cardinality_lit,
+                    attr_input,
+                    attr_cache,
+                    attr_state_max,
+                    attr_error,
+                )?;
             }
             BatpakAttrKind::Event(binding) => {
-                require_single_segment_event_path(&binding.event)?;
-                let key = binding.event.to_token_stream_string();
-                if !seen_events.insert(key) {
-                    return Err(syn::Error::new(
-                        binding.event.span(),
-                        "duplicate `event = X` — each payload type may be bound to exactly one handler per projection",
-                    ));
-                }
-                bindings.push(binding);
+                collect_unique_event_binding(
+                    &mut bindings,
+                    &mut seen_events,
+                    binding,
+                    "projection",
+                )?;
             }
         }
     }
@@ -333,6 +384,88 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
         ));
     }
 
+    Ok(EventSourcedDeriveAttrs {
+        input_path,
+        cache_version_lit,
+        state_max_cardinality_lit,
+        bindings,
+    })
+}
+
+fn collect_event_sourced_config(
+    input_path: &mut Option<Path>,
+    cache_version_lit: &mut Option<LitInt>,
+    state_max_cardinality_lit: &mut Option<LitInt>,
+    attr_input: Option<Path>,
+    attr_cache: Option<LitInt>,
+    attr_state_max: Option<LitInt>,
+    attr_error: Option<Path>,
+) -> syn::Result<()> {
+    if let Some(path) = attr_error {
+        return Err(syn::Error::new(
+            path.span(),
+            "`error` is not valid on `#[derive(EventSourced)]` — projections do not have an associated error type",
+        ));
+    }
+    if let Some(path) = attr_input {
+        if input_path.is_some() {
+            return Err(syn::Error::new(
+                path.span(),
+                "duplicate `input =` across `#[batpak(...)]` config attributes — `input` must appear exactly once",
+            ));
+        }
+        *input_path = Some(path);
+    }
+    if let Some(lit) = attr_cache {
+        if cache_version_lit.is_some() {
+            return Err(syn::Error::new(
+                lit.span(),
+                "duplicate `cache_version =` across `#[batpak(...)]` config attributes",
+            ));
+        }
+        *cache_version_lit = Some(lit);
+    }
+    if let Some(lit) = attr_state_max {
+        if state_max_cardinality_lit.is_some() {
+            return Err(syn::Error::new(
+                lit.span(),
+                "duplicate `state_max_cardinality =` across `#[batpak(...)]` config attributes",
+            ));
+        }
+        *state_max_cardinality_lit = Some(lit);
+    }
+    Ok(())
+}
+
+fn collect_unique_event_binding(
+    bindings: &mut Vec<EventBinding>,
+    seen_events: &mut HashSet<String>,
+    binding: EventBinding,
+    owner: &str,
+) -> syn::Result<()> {
+    require_single_segment_event_path(&binding.event)?;
+    let key = binding.event.to_token_stream_string();
+    if !seen_events.insert(key) {
+        return Err(syn::Error::new(
+            binding.event.span(),
+            format!(
+                "duplicate `event = X` — each payload type may be bound to exactly one handler per {owner}"
+            ),
+        ));
+    }
+    bindings.push(binding);
+    Ok(())
+}
+
+fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    ensure_named_field_struct(input, "EventSourced")?;
+
+    let attrs = collect_event_sourced_attrs(input)?;
+    let input_path = attrs.input_path;
+    let cache_version_lit = attrs.cache_version_lit;
+    let state_max_cardinality_lit = attrs.state_max_cardinality_lit;
+    let bindings = attrs.bindings;
+
     // ─── Validate cache_version fits u64 ────────────────────────────────────
     let cache_version_value: u64 = match &cache_version_lit {
         Some(lit) => lit.base10_parse::<u64>()?,
@@ -342,6 +475,46 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
     // ─── Codegen ─────────────────────────────────────────────────────────────
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let state_contract_impl = match &state_max_cardinality_lit {
+        Some(lit) => {
+            let state_max_cardinality_value = lit.base10_parse::<u64>()?;
+            // The derived `state_extent` reports a fixed cardinality of 1, so a
+            // declared bound above 1 would be vacuous (always 1 <= n). Reject it:
+            // multi-key projections must hand-implement `EventSourced` with a real
+            // `state_extent()` so the P2 bound check stays meaningful.
+            if state_max_cardinality_value != 1 {
+                return Err(syn::Error::new_spanned(
+                    lit,
+                    "#[derive(EventSourced)] supports only single-aggregate state (n = 1); \
+                     implement EventSourced by hand with a real `state_extent()` for multi-key state",
+                ));
+            }
+            quote! {
+                const STATE_CONTRACT: ::batpak::event::ProjectionStateContract =
+                    ::batpak::event::ProjectionStateContract::Bounded {
+                        key_space: ::core::concat!(
+                            ::core::module_path!(),
+                            "::",
+                            ::core::stringify!(#ident)
+                        ),
+                        max_cardinality: #state_max_cardinality_value,
+                        retention_policy: "derive-event-sourced-state-object",
+                        compaction_policy: "projection-cache-overwrite",
+                        checkpoint_policy: "projection-cache",
+                    };
+
+                fn state_extent(&self) -> ::batpak::event::StateExtent {
+                    let _ = self;
+                    ::batpak::event::StateExtent::cardinality(
+                        1,
+                        ::batpak::event::StateExtentCost::ConstantTime,
+                    )
+                }
+            }
+        }
+        None => quote! {},
+    };
 
     // Build apply_event dispatch arms — one per event-binding. Handlers
     // take `&T` so users can read fields without being forced to consume
@@ -423,6 +596,8 @@ fn expand_event_sourced(input: &DeriveInput) -> syn::Result<proc_macro2::TokenSt
         impl #impl_generics ::batpak::event::EventSourced for #ident #ty_generics #where_clause {
             type Input = #input_path;
 
+            #state_contract_impl
+
             fn from_events(
                 events: &[::batpak::event::ProjectionEvent<Self>],
             ) -> ::core::option::Option<Self> {
@@ -496,36 +671,7 @@ fn require_single_segment_event_path(path: &Path) -> syn::Result<()> {
 // ─── MultiEventReactor derive expansion ──────────────────────────────────────
 
 fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
-    // Shape check — same rule as EventPayload / EventSourced.
-    match &input.data {
-        Data::Struct(s) => match &s.fields {
-            Fields::Named(_) => {}
-            Fields::Unnamed(f) => {
-                return Err(syn::Error::new(
-                    f.span(),
-                    "#[derive(MultiEventReactor)] requires a named-field struct; tuple structs are not supported",
-                ));
-            }
-            Fields::Unit => {
-                return Err(syn::Error::new(
-                    input.ident.span(),
-                    "#[derive(MultiEventReactor)] requires a named-field struct; unit structs are not supported",
-                ));
-            }
-        },
-        Data::Enum(e) => {
-            return Err(syn::Error::new(
-                e.enum_token.span,
-                "#[derive(MultiEventReactor)] requires a named-field struct; enums are not supported",
-            ));
-        }
-        Data::Union(u) => {
-            return Err(syn::Error::new(
-                u.union_token.span,
-                "#[derive(MultiEventReactor)] requires a named-field struct; unions are not supported",
-            ));
-        }
-    }
+    ensure_named_field_struct(input, "MultiEventReactor")?;
 
     let batpak_attrs: Vec<&Attribute> = input
         .attrs
@@ -550,6 +696,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
             BatpakAttrKind::Config {
                 input: attr_input,
                 cache_version,
+                state_max_cardinality,
                 error: attr_error,
             } => {
                 if let Some(lit) = cache_version {
@@ -557,6 +704,13 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                         lit.span(),
                         "`cache_version` is not valid on `#[derive(MultiEventReactor)]` — \
                          `cache_version` is a projection-cache key, not a reactor setting",
+                    ));
+                }
+                if let Some(lit) = state_max_cardinality {
+                    return Err(syn::Error::new(
+                        lit.span(),
+                        "`state_max_cardinality` is not valid on `#[derive(MultiEventReactor)]` — \
+                         state cardinality is a projection contract, not a reactor setting",
                     ));
                 }
                 if let Some(path) = attr_input {
@@ -579,15 +733,7 @@ fn expand_multi_event_reactor(input: &DeriveInput) -> syn::Result<proc_macro2::T
                 }
             }
             BatpakAttrKind::Event(binding) => {
-                require_single_segment_event_path(&binding.event)?;
-                let key = binding.event.to_token_stream_string();
-                if !seen_events.insert(key) {
-                    return Err(syn::Error::new(
-                        binding.event.span(),
-                        "duplicate `event = X` — each payload type may be bound to exactly one handler per reactor",
-                    ));
-                }
-                bindings.push(binding);
+                collect_unique_event_binding(&mut bindings, &mut seen_events, binding, "reactor")?;
             }
         }
     }

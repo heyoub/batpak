@@ -119,7 +119,7 @@ pub(crate) fn platform(args: PlatformArgs) -> Result<()> {
     match args.command {
         PlatformCommand::Doctor(args) => {
             let profile = collect_platform_profile(&args.store_path)?;
-            println!(
+            outln!(
                 "platform doctor ok: store_path={} fingerprint_crc32={}",
                 args.store_path.display(),
                 profile.fingerprint_crc32
@@ -137,7 +137,7 @@ pub(crate) fn platform(args: PlatformArgs) -> Result<()> {
             let bytes = serde_json::to_vec_pretty(&profile)?;
             fs::write(&args.profile, bytes)
                 .with_context(|| format!("write {}", args.profile.display()))?;
-            println!(
+            outln!(
                 "wrote platform profile {} for store_path={}",
                 args.profile.display(),
                 args.store_path.display()
@@ -155,7 +155,7 @@ pub(crate) fn platform(args: PlatformArgs) -> Result<()> {
                     profile_body_tuple(&observed)
                 );
             }
-            println!(
+            outln!(
                 "platform profile verified: {} fingerprint_crc32={}",
                 args.profile.display(),
                 expected.fingerprint_crc32

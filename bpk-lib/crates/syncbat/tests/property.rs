@@ -17,7 +17,9 @@
 
 use proptest::prelude::*;
 
-use syncbat::{EffectClass, OperationDescriptor, OperationName, RegisterOperationRowV1};
+use syncbat::{
+    EffectClass, OperationDescriptor, OperationEffectRow, OperationName, RegisterOperationRowV1,
+};
 
 // ─── arbitrary generators ──────────────────────────────────────────────────
 
@@ -44,6 +46,17 @@ fn arb_effect_class() -> impl Strategy<Value = EffectClass> {
         Just(EffectClass::Inspect),
         Just(EffectClass::Compute),
     ]
+}
+
+fn valid_row_for(effect: EffectClass, target: &str, receipt_kind: &str) -> OperationEffectRow {
+    match effect {
+        EffectClass::Persist => OperationEffectRow::new().appends_event(target.to_owned()),
+        EffectClass::Inspect => OperationEffectRow::new(),
+        EffectClass::Compute => OperationEffectRow::new(),
+        EffectClass::Emit => OperationEffectRow::new().emits_receipt(receipt_kind.to_owned()),
+        EffectClass::Control => OperationEffectRow::new().uses_host_control(),
+        _ => OperationEffectRow::new(),
+    }
 }
 
 // ─── OperationName grammar ─────────────────────────────────────────────────
@@ -118,7 +131,8 @@ proptest! {
             input_ref.clone(),
             output_ref.clone(),
             receipt_kind.clone(),
-        );
+        )
+        .with_effect_row(valid_row_for(action, &name, &receipt_kind));
         descriptor
             .validate()
             .expect("well-formed descriptor must validate");
@@ -173,8 +187,9 @@ proptest! {
             EffectClass::Persist,
             input_ref,
             output_ref,
-            receipt_kind,
-        );
+            receipt_kind.clone(),
+        )
+        .with_effect_row(OperationEffectRow::new().appends_event(name.clone()));
         let row = match action_disc {
             0 => RegisterOperationRowV1::from_descriptor(&descriptor),
             1 => RegisterOperationRowV1::update(&descriptor),

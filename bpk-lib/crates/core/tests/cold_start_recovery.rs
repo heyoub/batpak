@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/cold_start_recovery.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Cold-start recovery artifacts.
 //! Harness pattern: Fault-Injection Harness (artifact recovery lane).
 //!
@@ -29,7 +27,7 @@ fn config_with_artifacts(dir: &TempDir) -> StoreConfig {
 fn append_seed(store: &Store, entity: &str, scope: &str, count: u32) -> u32 {
     let coord = Coordinate::new(entity, scope).expect("valid coord");
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, KIND, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -59,7 +57,9 @@ fn find_single_segment(dir: &TempDir) -> std::path::PathBuf {
     entries.into_iter().next().expect("exactly one segment")
 }
 
-fn user_visible_entries<State>(store: &Store<State>) -> Vec<batpak::store::index::IndexEntry> {
+fn user_visible_entries<State: batpak::store::StoreState>(
+    store: &Store<State>,
+) -> Vec<batpak::store::index::IndexEntry> {
     store
         .query(&Region::all())
         .into_iter()
@@ -212,7 +212,7 @@ fn forced_rotation_then_unclean_reopen_sees_all_segment_entries() {
         let store = Store::open(config.clone()).expect("open store");
         let coord = Coordinate::new("entity:rot", "scope:test").expect("valid coord");
         for i in 0..count {
-            store
+            let _ = store
                 .append(&coord, KIND, &serde_json::json!({"i": i}))
                 .expect("append");
         }
@@ -243,7 +243,8 @@ fn forced_rotation_then_unclean_reopen_sees_all_segment_entries() {
     let store = Store::<ReadOnly>::open_read_only(config).expect("reopen after unclean shutdown");
     let recovered = user_visible_entries(&store).len();
     assert_eq!(
-        recovered, count as usize,
+        recovered,
+        usize::try_from(count).expect("seeded event count fits in usize"),
         "PROPERTY: every rotated segment's directory entry must survive an unclean shutdown so \
          cold-start recovers all {count} events; got {recovered}"
     );

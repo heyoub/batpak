@@ -1,4 +1,4 @@
-error: `#[batpak(...)]` attribute must contain either config keys (`input`, `cache_version`, `error`) or an event-binding pair (`event`, `handler`), not both
+error: `#[batpak(...)]` attribute must contain either config keys (`input`, `cache_version`, `state_max_cardinality`, `error`) or an event-binding pair (`event`, `handler`), not both
   --> tests/ui/es_mixed_attr_keys.rs:11:1
    |
 11 | #[batpak(input = JsonValueInput, event = Ping, handler = on_ping)]

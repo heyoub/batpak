@@ -1,27 +1,20 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
 //! PROVES: INV-SCHEMA-VERSION-ISOLATION.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path projection tests in tests/unified_projection_red.rs use unwrap/panic as the assertion style and narrow bounded test counters that fit in u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/red_counters.rs"]
-mod red_counters;
-#[path = "support/red_kind_b.rs"]
-mod red_kind_b;
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_versioned_counters.rs"]
-mod red_versioned_counters;
+use batpak_testkit::red_counters;
+use batpak_testkit::red_kind_b;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_versioned_counters;
 
 use red_counters::*;
 use red_kind_b::*;
 use red_kinds::*;
 use red_versioned_counters::*;
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]
@@ -30,8 +23,8 @@ fn relevant_kinds_filters_before_disk_read() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("kf:entity", "kf:scope").expect("coord");
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("target");
-        store.append(&coord, kind_b(), &payload(i)).expect("noise");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("target");
+        let _ = store.append(&coord, kind_b(), &payload(i)).expect("noise");
     }
     let result: Option<KindFilteredCounter> = store
         .project("kf:entity", &Freshness::Consistent)
@@ -58,8 +51,15 @@ fn empty_kinds_replays_all() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("rek:entity", "rek:scope").expect("coord");
     for i in 0u32..3 {
-        store
-            .append(&coord, EventKind::custom(0xF, i as u16 + 1), &payload(i))
+        let _ = store
+            .append(
+                &coord,
+                EventKind::custom(
+                    0xF,
+                    u16::try_from(i).expect("bounded loop counter fits u16") + 1,
+                ),
+                &payload(i),
+            )
             .expect("append");
     }
     let result: Option<AllCounter> = store
@@ -97,7 +97,7 @@ fn versioned_cache_key_isolates_versions() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("sv:entity", "sv:scope").expect("coord");
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let r1: Option<AllCounter> = store
         .project("sv:entity", &Freshness::Consistent)
@@ -124,7 +124,7 @@ fn versioned_cache_key_isolates_with_native_cache() {
     let store = Store::open_with_native_cache(config, &cache_path).expect("open with native cache");
     let coord = Coordinate::new("svr:entity", "svr:scope").expect("coord");
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let r1: Option<AllCounter> = store
         .project("svr:entity", &Freshness::Consistent)
@@ -158,14 +158,14 @@ fn incremental_apply_delta_only() {
     let store = Store::open(config).expect("open");
     let coord = Coordinate::new("inc:entity", "inc:scope").expect("coord");
     for i in 0u32..5 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let r1: Option<IncrementalCounter> = store
         .project("inc:entity", &Freshness::Consistent)
         .expect("first project");
     assert_eq!(r1.expect("some").count, 5);
     for i in 5u32..8 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let r2: Option<IncrementalCounter> = store
         .project("inc:entity", &Freshness::Consistent)
@@ -190,13 +190,13 @@ fn maybe_stale_uses_milliseconds_not_microseconds_for_external_cache_age() {
     let store = Store::open_with_native_cache(config, &cache_path).expect("open with cache");
     let coord = Coordinate::new("stale:entity", "stale:scope").expect("coord");
 
-    store.append(&coord, kind_a(), &payload(1)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(1)).expect("append");
     let first: Option<AllCounter> = store
         .project("stale:entity", &Freshness::Consistent)
         .expect("initial project");
     assert_eq!(first.expect("cached").count, 1);
 
-    store.append(&coord, kind_a(), &payload(2)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(2)).expect("append");
     now_us.store(1_002_000, Ordering::SeqCst);
     let maybe_stale: Option<AllCounter> = store
         .project("stale:entity", &Freshness::MaybeStale { max_stale_ms: 5 })
@@ -217,7 +217,7 @@ fn batch_read_matches_sequential() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("batch:entity", "batch:scope").expect("coord");
     for i in 0u32..30 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let result: Option<AllCounter> = store
         .project("batch:entity", &Freshness::Consistent)
@@ -237,7 +237,7 @@ fn single_slot_hit_on_repeat_project() {
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("slot:entity", "slot:scope").expect("coord");
     for i in 0u32..10 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     let r1: Option<AllCounter> = store
         .project("slot:entity", &Freshness::Consistent)
@@ -261,8 +261,8 @@ fn single_slot_miss_on_different_entity() {
     let coord_a = Coordinate::new("slot:a", "slot:scope").expect("coord");
     let coord_b = Coordinate::new("slot:b", "slot:scope").expect("coord");
     for i in 0u32..5 {
-        store.append(&coord_a, kind_a(), &payload(i)).expect("a");
-        store.append(&coord_b, kind_a(), &payload(i)).expect("b");
+        let _ = store.append(&coord_a, kind_a(), &payload(i)).expect("a");
+        let _ = store.append(&coord_b, kind_a(), &payload(i)).expect("b");
     }
     let r1: Option<AllCounter> = store
         .project("slot:a", &Freshness::Consistent)

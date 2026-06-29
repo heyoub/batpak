@@ -1,18 +1,13 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path group-commit tests in tests/unified_group_commit_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_test_coord.rs"]
-mod red_test_coord;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_test_coord;
 
 use red_kinds::*;
 use red_test_coord::*;
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 #[test]
@@ -24,9 +19,9 @@ fn group_commit_batches_under_load() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..32 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
-        store
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
+        let _ = store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");
     }
@@ -45,7 +40,7 @@ fn group_commit_batch_1_is_backward_compat() {
     let config = StoreConfig::new(dir.path()).with_group_commit_max_batch(1);
     let store = Store::open(config).expect("open");
     let coord = test_coord();
-    store.append(&coord, kind_a(), &payload(0)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(0)).expect("append");
     assert_eq!(store.by_entity("entity:test").len(), 1);
     store.close().expect("close");
 }
@@ -75,9 +70,9 @@ fn group_commit_mid_batch_shutdown_safe() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..10 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
-        store
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
+        let _ = store
             .append_with_options(&coord, kind_a(), &payload(i), opts)
             .expect("append");
     }

@@ -11,12 +11,11 @@
 //!
 //! SEEDED: checked-in fixture stores under `tests/fixtures/cold_start/adr0009`.
 
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
 use batpak::store::ExtensionKey;
+use batpak_testkit::prelude::*;
 use std::fs;
 use std::path::Path;
-use support::prelude::*;
 use tempfile::TempDir;
 
 const FIXTURE_ROOT: &str = concat!(
@@ -74,7 +73,7 @@ fn assert_historical_fixture_opens(
     assert_eq!(entries[0].dag_depth(), depth);
 
     let stored = store
-        .get(batpak::id::EventId::from(entries[0].event_id()))
+        .get(entries[0].event_id())
         .expect("fetch fixture event");
     assert_eq!(stored.event.header.position.lane(), lane);
     assert_eq!(stored.event.header.position.depth(), depth);
@@ -99,7 +98,7 @@ fn assert_historical_fixture_opens(
         ]),
         "older artifact restore must hydrate receipt extensions from the backing .fbat frame"
     );
-    assert!(store.verify_append_receipt(&replay));
+    assert!(store.verify_append_receipt(&replay).is_valid());
 }
 
 #[test]

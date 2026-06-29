@@ -5,7 +5,7 @@ use crate::typed_waivers::{self, WaiverKind};
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
     check_doc_hidden_public_surface(repo_root, source_cache)?;
@@ -19,7 +19,7 @@ pub(crate) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     let waived: BTreeSet<String> = typed_waivers::targets_for(&waivers, WaiverKind::PubItem);
 
     let test_files: Vec<PathBuf> = rust_files(&core_tests_root(repo_root));
-    let mut parsed_tests: Vec<(PathBuf, Arc<syn::File>)> = Vec::with_capacity(test_files.len());
+    let mut parsed_tests: Vec<(PathBuf, Rc<syn::File>)> = Vec::with_capacity(test_files.len());
     for path in test_files {
         let file = source_cache
             .parse_rust(&path)
@@ -59,12 +59,43 @@ fn check_doc_hidden_public_surface(repo_root: &Path, source_cache: &mut SourceCa
     let allowed: BTreeSet<&str> = [
         "crates/core/src/lib.rs::__private",
         "crates/core/src/lib.rs::batpak",
+        // GAUNT-FUZZ-1: the `#[cfg(feature = "dangerous-test-hooks")]`
+        // `#[doc(hidden)] pub mod __fuzz` exposes thin wrappers over real decode
+        // entry points for the workspace-excluded `batpak-fuzz` cargo-fuzz crate.
+        // It is feature-gated (absent from any default/published build) and
+        // doc-hidden by design; these entries are the reviewed escape-hatch.
+        "crates/core/src/lib.rs::__fuzz",
+        "crates/core/src/__fuzz.rs::FuzzProjectionState",
+        "crates/core/src/__fuzz.rs::__fuzz_segment_header",
+        "crates/core/src/__fuzz.rs::__fuzz_sidx_entry",
+        "crates/core/src/__fuzz.rs::__fuzz_checkpoint_data",
+        "crates/core/src/__fuzz.rs::__fuzz_checkpoint_snapshot_v6",
+        "crates/core/src/__fuzz.rs::__fuzz_mmap_entry",
+        "crates/core/src/__fuzz.rs::__fuzz_cache_meta",
+        "crates/core/src/__fuzz.rs::__fuzz_projection_state",
+        "crates/core/src/__fuzz.rs::__fuzz_hidden_ranges",
+        "crates/core/src/__fuzz.rs::__fuzz_mmap_index_load",
+        "crates/core/src/__fuzz.rs::__fuzz_sidx_footer",
+        // GAUNT-SIM-2c: the `#[cfg(feature = "dangerous-test-hooks")]`
+        // `#[doc(hidden)] pub mod __sim` exposes the seeded deterministic
+        // simulation driver (run_seeded_workload / replay_seed) to the
+        // `sim_is_deterministic` integration test. Feature-gated (absent from
+        // any default/published build) and doc-hidden by design; mirrors the
+        // reviewed __fuzz escape-hatch above.
+        "crates/core/src/lib.rs::__sim",
+        "crates/core/src/store/sim/mod.rs::run_seeded_workload",
+        "crates/core/src/store/sim/mod.rs::replay_seed",
         "crates/core/src/store/delivery/subscription.rs::receiver",
         "crates/core/src/store/projection/flow/mod.rs::ReplayInput",
         "crates/core/src/store/projection/flow/replay_input.rs::ReplayInput",
         "crates/core/src/store/projection/watch.rs::subscription",
         "crates/core/src/store/segment/scan/mod.rs::Reader",
         "crates/core/src/store/test_support.rs::panic_writer_for_test",
+        // Sealing module for the public `StoreState` typestate-bound trait
+        // (mirrors `typestate/transition.rs::sealed`): a `#[doc(hidden)] pub mod
+        // sealed { pub trait Sealed {} }` Rust-visibility escape hatch so
+        // downstream crates cannot implement `StoreState` for new markers.
+        "crates/core/src/store/mod.rs::sealed",
         "crates/core/src/typestate/transition.rs::sealed",
     ]
     .into_iter()

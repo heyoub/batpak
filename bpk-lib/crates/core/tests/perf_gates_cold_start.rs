@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; perf-gate tests in tests/perf_gates_cold_start.rs stream benchmark timings to stderr, panic! on regressions, and narrow timing counters into smaller integer types.
-#![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)]
 //! PROVES: LAW-004 (Composition Over Construction — quadratic dogfooding) for the
 //! cold-start latency gate and the batch-append throughput gate, plus the
 //! tripwire test that the ColdStartGate itself rejects an over-budget cold start.
@@ -13,11 +11,10 @@
 //! ColdStartGate/ColdStartContext family and the BatchThroughputGate family.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::{Store, StoreConfig, SyncMode};
+use batpak_testkit::prelude::*;
+use std::io::Write;
 use std::time::Instant;
-use support::prelude::*;
 use tempfile::TempDir;
 
 /// A Gate that checks cold-start performance.
@@ -69,7 +66,7 @@ fn cold_start_1k_events_under_threshold() {
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("bench:entity", "bench:scope").expect("valid coord");
         for _ in 0..1_000 {
-            store.append(&coord, kind, &payload).expect("append");
+            let _ = store.append(&coord, kind, &payload).expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");
@@ -95,35 +92,24 @@ fn cold_start_1k_events_under_threshold() {
     };
 
     let proposal = Proposal::new(cold_start_ms);
-    let result = gates.evaluate(&ctx, proposal);
-
-    match result {
-        Ok(receipt) => {
-            let (ms, gate_names) = receipt.into_parts();
-            assert_eq!(
-                gate_names,
-                vec!["cold_start_performance"],
-                "PROPERTY: GateSet receipt must record the gate name 'cold_start_performance'.\n\
-                 Investigate: src/guard/mod.rs GateSet::evaluate() receipt gate_names collection.\n\
-                 Common causes: Gate::name() not being called or stored in the receipt, \
-                 or receipt.into_parts() returning an empty name list.\n\
-                 Run: cargo test --test perf_gates_cold_start cold_start_1k_events_under_threshold"
-            );
-            eprintln!(
-                "SELF-BENCHMARK: cold start for 1K events: {}ms (passed {})",
-                ms,
-                gate_names.join(", ")
-            );
-        }
-        Err(denial) => {
-            panic!(
-                "SELF-BENCHMARK FAILED: {}\n\
-                    The catastrophic regression guard detected a performance regression.\n\
-                    Context: {:?}",
-                denial, denial.context
-            );
-        }
-    }
+    let receipt = gates.evaluate(&ctx, proposal).expect(
+        "SELF-BENCHMARK FAILED: the catastrophic regression guard detected a cold-start regression",
+    );
+    let (ms, gate_names) = receipt.into_parts();
+    assert_eq!(
+        gate_names,
+        vec!["cold_start_performance"],
+        "PROPERTY: GateSet receipt must record the gate name 'cold_start_performance'.\n\
+         Investigate: src/guard/mod.rs GateSet::evaluate() receipt gate_names collection.\n\
+         Common causes: Gate::name() not being called or stored in the receipt, \
+         or receipt.into_parts() returning an empty name list.\n\
+         Run: cargo test --test perf_gates_cold_start cold_start_1k_events_under_threshold"
+    );
+    let _ = writeln!(
+        std::io::stderr(),
+        "SELF-BENCHMARK: cold start for 1K events: {ms}ms (passed {})",
+        gate_names.join(", ")
+    );
 
     store.sync().expect("sync");
 }
@@ -208,7 +194,8 @@ fn batch_throughput_performance_gate() {
 
     let batch_size = 100usize;
     let batch_count = 100usize;
-    let total_events = (batch_size * batch_count) as u64;
+    let total_events =
+        u64::try_from(batch_size * batch_count).expect("bounded test batch total fits u64");
 
     // Build batch items once
     let batch_template: Vec<_> = (0..batch_size)
@@ -255,27 +242,14 @@ fn batch_throughput_performance_gate() {
     });
 
     let proposal = Proposal::new(batch_events_per_sec);
-    match gates.evaluate(&ctx, proposal) {
-        Ok(receipt) => {
-            eprintln!(
-                "  BATCH SELF-BENCHMARK: {} batches of {} = {} events in {:?} ({:.0} events/sec) - passed {}",
-                batch_count,
-                batch_size,
-                total_events,
-                write_elapsed,
-                batch_events_per_sec,
-                receipt.gates_passed().join(", ")
-            );
-        }
-        Err(denial) => {
-            panic!(
-                "BATCH SELF-BENCHMARK FAILED: {}\n\
-                 Batch append throughput regression detected.\n\
-                 Context: {:?}",
-                denial, denial.context
-            );
-        }
-    }
+    let receipt = gates
+        .evaluate(&ctx, proposal)
+        .expect("BATCH SELF-BENCHMARK FAILED: batch append throughput regression detected");
+    let _ = writeln!(
+        std::io::stderr(),
+        "  BATCH SELF-BENCHMARK: {batch_count} batches of {batch_size} = {total_events} events in {write_elapsed:?} ({batch_events_per_sec:.0} events/sec) - passed {}",
+        receipt.gates_passed().join(", ")
+    );
 
     store.close().expect("close");
 }

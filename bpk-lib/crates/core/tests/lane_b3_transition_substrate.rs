@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; Lane B3 transition substrate doctrine uses panic for PROPERTY mismatches only.
-#![allow(clippy::panic)]
 //! PROVES: transition event digest sorts `causes`; report `body_hash` sorts findings; allowed-edge
 //! evaluation is deterministic on sorted edge inputs.
 //! CATCHES: unsorted causes/edges structural findings; disallowed `(from,to)` edges.

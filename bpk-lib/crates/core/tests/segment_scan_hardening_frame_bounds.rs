@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening_frame_bounds.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: the cold-start frame scan stays bounded and panic-free against
 //! frame-length and footer-boundary pathologies — a u32::MAX frame header on
 //! the tail stops the scan while preserving earlier frames, the same length in
@@ -13,8 +11,7 @@
 //! SEEDED: deterministic stores (single tail segment plus rotated multi-segment
 //! histories) whose frame-length fields and SIDX magic are surgically mutated.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
@@ -175,7 +172,7 @@ fn pathological_frame_length_is_bounded_not_panicking() {
 
     // The store remains usable.
     let coord = Coordinate::new("entity:scan", "scope:test").expect("valid coord");
-    store
+    let _ = store
         .append(&coord, KIND, &serde_json::json!({"post_poison": true}))
         .expect("append after corrupt reopen");
     store.close().expect("close");
@@ -190,7 +187,7 @@ fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
     let store = Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store");
     let coord = Coordinate::new("entity:scan-historical", "scope:test").expect("valid coord");
     for i in 0..40 {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -208,12 +205,9 @@ fn non_tail_pathological_frame_length_fails_closed_on_reopen() {
     );
     poison_first_frame_length_past_max(&segments[0]);
 
-    let err = match Store::open(config(&dir).with_segment_max_bytes(512)) {
-        Ok(_) => {
-            panic!("PROPERTY: non-tail impossible frame length must fail closed during reopen")
-        }
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir).with_segment_max_bytes(512))
+        .map(|_| ())
+        .expect_err("PROPERTY: non-tail impossible frame length must fail closed during reopen");
 
     assert!(
         matches!(
@@ -338,7 +332,7 @@ fn legacy_sdx2_non_tail_segment_recovers_all_events_via_frame_scan() {
         Store::open(config(&dir).with_segment_max_bytes(512)).expect("open store for rotation");
     let coord = Coordinate::new("entity:scan-legacy", "scope:test").expect("valid coord");
     for i in 0..40 {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,

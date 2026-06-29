@@ -13,13 +13,13 @@ pub(crate) fn disk_audit() -> Result<()> {
     if workspace_target.exists() {
         let bytes = dir_size(&workspace_target)
             .with_context(|| format!("measure {}", workspace_target.display()))?;
-        println!(
+        outln!(
             "disk-audit: workspace artifact target `{}`: {}",
             rel(&project_root, &workspace_target),
             human_bytes(bytes)
         );
     } else {
-        println!("disk-audit: workspace artifact target `bpk-lib/target/`: missing");
+        outln!("disk-audit: workspace artifact target `bpk-lib/target/`: missing");
     }
 
     let mut violations = Vec::new();
@@ -43,7 +43,7 @@ pub(crate) fn disk_audit() -> Result<()> {
                 human_bytes(bytes)
             ));
         } else {
-            println!("disk-audit: nested target `{relative}` is empty");
+            outln!("disk-audit: nested target `{relative}` is empty");
         }
     }
 
@@ -63,7 +63,7 @@ pub(crate) fn disk_audit() -> Result<()> {
 
     if !violations.is_empty() {
         for violation in &violations {
-            eprintln!("disk-audit: {violation}");
+            errln!("disk-audit: {violation}");
         }
         bail!(
             "disk-audit found {} generated artifact issue(s)",
@@ -71,7 +71,7 @@ pub(crate) fn disk_audit() -> Result<()> {
         );
     }
 
-    println!("disk-audit: ok");
+    outln!("disk-audit: ok");
     Ok(())
 }
 
@@ -81,28 +81,28 @@ pub(crate) fn clean_generated(args: CleanGeneratedArgs) -> Result<()> {
     let artifacts = generated_sprawl(&project_root, &workspace_root)?;
 
     if artifacts.is_empty() {
-        println!("clean-generated: nothing to remove");
+        outln!("clean-generated: nothing to remove");
         return Ok(());
     }
 
     for artifact in &artifacts {
         let rel = rel(&project_root, artifact.path());
         let action = if args.apply { "remove" } else { "would remove" };
-        println!(
+        outln!(
             "clean-generated: {action} {} `{rel}`",
             artifact.kind_label()
         );
     }
 
     if !args.apply {
-        println!("clean-generated: dry run; pass --apply to remove these generated artifacts");
+        outln!("clean-generated: dry run; pass --apply to remove these generated artifacts");
         return Ok(());
     }
 
     for artifact in artifacts {
         artifact.remove()?;
     }
-    println!("clean-generated: ok");
+    outln!("clean-generated: ok");
     Ok(())
 }
 
@@ -348,11 +348,11 @@ mod tests {
         let project = temp.path();
         let workspace = project.join("bpk-lib");
         fs::create_dir_all(workspace.join("target/debug")).expect("workspace target");
-        fs::create_dir_all(project.join("bpk-ts/target/debug")).expect("sibling target");
+        fs::create_dir_all(project.join("sibling-ws/target/debug")).expect("sibling target");
         fs::create_dir_all(project.join("node_modules/pkg/target")).expect("node target");
 
         let targets = nested_targets(project, &workspace.join("target")).expect("scan targets");
-        assert_eq!(targets, vec![project.join("bpk-ts/target")]);
+        assert_eq!(targets, vec![project.join("sibling-ws/target")]);
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
         let root = project.join("bpk-lib");
         fs::create_dir_all(root.join("crates/core/target/debug")).expect("target");
         fs::create_dir_all(root.join("templates/demo")).expect("template");
-        fs::create_dir_all(project.join("bpk-ts/target/debug")).expect("sibling target");
+        fs::create_dir_all(project.join("sibling-ws/target/debug")).expect("sibling target");
         fs::write(project.join("root.profraw"), "").expect("root profile");
         fs::create_dir_all(project.join("target")).expect("project target");
         fs::write(root.join("templates/demo/Cargo.lock"), "").expect("lock");
@@ -390,8 +390,8 @@ mod tests {
                 GeneratedArtifact::TemplateLockfile(
                     root.join("templates").join("demo").join("Cargo.lock")
                 ),
-                GeneratedArtifact::NestedTarget(project.join("bpk-ts").join("target")),
                 GeneratedArtifact::RawProfile(project.join("root.profraw")),
+                GeneratedArtifact::NestedTarget(project.join("sibling-ws").join("target")),
                 GeneratedArtifact::ProjectTarget(project.join("target")),
             ]
         );

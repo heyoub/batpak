@@ -5,6 +5,35 @@ fn generation_advanced_after_subscribe(baseline: u64, post_subscribe: u64) -> bo
     post_subscribe > baseline
 }
 
+/// Opaque, detach-on-drop handle to the background loop spawned by
+/// [`Store::react_loop`].
+///
+/// This legacy reactor is *fire-and-detach*: the loop runs the
+/// subscribe→react→append cycle for the life of the process and has no
+/// cooperative stop signal. The background worker also holds its own
+/// [`Arc<Store>`](std::sync::Arc) clone (it appends reactions through it), so
+/// the loop cannot be joined to completion from the outside — dropping every
+/// *other* `Arc<Store>` does not break that self-reference. The handle is
+/// therefore deliberately join-free: it exists only to keep the concrete
+/// background-thread type out of the public API and to make the detach explicit
+/// at the call site (drop = detach).
+///
+/// When you need cooperative shutdown — a `stop()`/`join()` lifecycle, restart
+/// policy, decode-error surfacing, or at-least-once checkpointing — use the
+/// typed reactors ([`Store::react_loop_typed`], [`Store::react_loop_multi`],
+/// [`Store::react_loop_multi_raw`]) and their
+/// [`TypedReactorHandle`](crate::store::TypedReactorHandle) instead.
+#[must_use = "dropping a ReactLoopHandle detaches (does not stop) the background reactor loop"]
+pub struct ReactLoopHandle {
+    _inner: std::thread::JoinHandle<()>,
+}
+
+impl std::fmt::Debug for ReactLoopHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReactLoopHandle").finish_non_exhaustive()
+    }
+}
+
 impl Store<Open> {
     /// SUBSCRIBE: push-based, lossy.
     pub fn subscribe_lossy(&self, region: &Region) -> Subscription {
@@ -22,7 +51,8 @@ impl Store<Open> {
     }
 
     /// REACT: spawn a background thread running the subscribe→react→append loop.
-    /// Returns a JoinHandle. The thread runs until the store is dropped (subscription closes).
+    /// Returns an opaque [`ReactLoopHandle`]. The loop runs until the store is
+    /// dropped (subscription closes).
     ///
     /// # Errors
     /// Returns `StoreError::Io` if the background thread cannot be spawned.
@@ -30,7 +60,7 @@ impl Store<Open> {
         self: &Arc<Self>,
         region: &Region,
         reactor: R,
-    ) -> Result<std::thread::JoinHandle<()>, StoreError>
+    ) -> Result<ReactLoopHandle, StoreError>
     where
         R: crate::event::sourcing::Reactive<serde_json::Value> + Send + 'static,
     {
@@ -43,6 +73,7 @@ impl Store<Open> {
         std::thread::Builder::new()
             .name("batpak-reactor".into())
             .spawn(move || {
+                use crate::id::EntityIdType;
                 while let Ok(envelope) = sub.recv() {
                     let notif = envelope.notification;
                     for (coord, kind, payload) in reactor.react(&envelope.stored.event) {
@@ -51,13 +82,14 @@ impl Store<Open> {
                             kind,
                             &payload,
                             crate::id::CorrelationId::from(notif.correlation_id),
-                            crate::id::CausationId::from(notif.event_id),
+                            crate::id::CausationId::from(notif.event_id.as_u128()),
                         ) {
                             tracing::warn!("react_loop: failed to append reaction: {e}");
                         }
                     }
                 }
             })
+            .map(|_inner| ReactLoopHandle { _inner })
             .map_err(StoreError::Io)
     }
 

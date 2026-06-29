@@ -16,6 +16,13 @@ use super::*;
 use std::io::Cursor;
 use tempfile::TempDir;
 
+/// Production [`RealFs`] behind the [`StoreFs`] seam, for the segment-create
+/// calls in these boundary tests (the durability seam is exercised by the sim
+/// tests; here we only need a real backing filesystem).
+fn realfs() -> std::sync::Arc<dyn crate::store::platform::fs::StoreFs> {
+    std::sync::Arc::new(crate::store::platform::fs::RealFs)
+}
+
 /// Build an in-memory buffer of `[real CRC-valid frames][CRC-valid SDX3 footer]`.
 /// Returns `(bytes, frames_end)` where `frames_end` is the SIDX
 /// `string_table_offset` the footer records (= the true end of the frames).
@@ -46,7 +53,9 @@ fn frames_then_sdx3_footer(payloads: &[&str]) -> (Vec<u8>, u64) {
             correlation_id: 1,
             causation_id: 0,
         };
-        collector.record(entry, "entity:test", "scope:test");
+        collector
+            .record(entry, "entity:test", "scope:test")
+            .expect("intern test strings");
     }
     let frames_end = bytes.len() as u64;
     let mut cursor = Cursor::new(&mut bytes);
@@ -388,7 +397,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_too_low_offset()
 
     // Source segment with one real frame.
     let mut source: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 1, 0).expect("create source");
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
     let frame =
         frame_encode(&serde_json::json!({"payload": "compaction-recover"})).expect("encode frame");
     source.write_frame(&frame).expect("write frame");
@@ -414,7 +423,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_too_low_offset()
 
     // Destination segment for the compaction copy.
     let mut dest: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 2, 0).expect("create dest");
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
     let dest_header_bytes = dest.written_bytes;
     dest.append_frames_from_segment(&source_path)
         .expect("PROPERTY: an untrusted too-low offset must recover the real frame, not error");
@@ -451,7 +460,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
     let dir = TempDir::new().expect("tmpdir");
 
     let mut source: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 1, 0).expect("create source");
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
     let frame = frame_encode(&serde_json::json!({"payload": "compaction-oob-recover"}))
         .expect("encode frame");
     source.write_frame(&frame).expect("write frame");
@@ -493,7 +502,7 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
     }
 
     let mut dest: Segment<Active> =
-        Segment::create_with_created_ns(dir.path(), 2, 0).expect("create dest");
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
     let dest_header_bytes = dest.written_bytes;
     dest.append_frames_from_segment(&source_path).expect(
         "PROPERTY: an out-of-bounds untrusted offset must recover the real frame during \
@@ -506,5 +515,76 @@ fn append_frames_from_segment_recovers_all_frames_for_untrusted_out_of_bounds_of
         "PROPERTY: compaction must copy the full CRC-valid frame for an out-of-bounds untrusted \
          offset (recover-what-was-found), not error or copy zero bytes; copied {copied}, frame {}",
         frame.len()
+    );
+}
+
+#[test]
+fn append_frames_from_segment_accepts_trusted_empty_frame_region() {
+    // Compaction copy of a sealed source with a CRC-valid SDX3 footer over an
+    // EMPTY frame region: the authenticated `string_table_offset` lands exactly
+    // at `frames_start` (8 + header_len) because no frames precede it. The
+    // lower-bound guard is `frames_end < frames_start`, so frames_end ==
+    // frames_start must stay VALID (no error). A `<` -> `==` mutant would treat
+    // this legitimate empty segment as corrupt and reject it, so this asserts the
+    // boundary is inclusive of the empty case.
+    use std::io::{Seek as _, Write as _};
+
+    let dir = TempDir::new().expect("tmpdir");
+
+    // Empty source segment: header only, zero frames. written_bytes == frames_start.
+    let source: Segment<Active> =
+        Segment::create_with_created_ns_on(dir.path(), 1, 0, &realfs()).expect("create source");
+    let source_path = source.path.clone();
+    let frames_start = source.written_bytes;
+    drop(source);
+
+    // Append a CRC-valid SDX3 footer for an EMPTY collector. write_footer records
+    // string_table_offset = current stream position = frames_start (no frames),
+    // and the CRC authenticates that offset -> the boundary is TRUSTED with
+    // frames_end == frames_start.
+    {
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&source_path)
+            .expect("open empty source to append footer");
+        f.seek(SeekFrom::End(0)).expect("seek to footer start");
+        let position = f.stream_position().expect("footer position");
+        assert_eq!(
+            position, frames_start,
+            "fixture sanity: an empty segment's footer must begin exactly at frames_start"
+        );
+        crate::store::segment::sidx::SidxEntryCollector::new()
+            .write_footer(&mut f, 1)
+            .expect("write empty CRC-valid footer");
+        f.flush().expect("flush footer");
+    }
+
+    // Sanity: the boundary detector must report a TRUSTED footer whose frames_end
+    // equals frames_start, which is exactly the input the guard must NOT reject.
+    {
+        let mut probe = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&source_path)
+            .expect("open source for boundary probe");
+        let file_len = probe.seek(SeekFrom::End(0)).expect("file_len");
+        let boundary = detect_sidx_boundary(&mut probe, file_len, 1)
+            .expect("boundary detect must not error")
+            .expect("CRC-valid SDX3 footer is a boundary");
+        assert_eq!(
+            boundary,
+            SidxBoundary {
+                frames_end: frames_start,
+                trusted: true,
+            },
+            "fixture sanity: empty trusted footer reports frames_end == frames_start"
+        );
+    }
+
+    let mut dest: Segment<Active> =
+        Segment::create_with_created_ns_on(dir.path(), 2, 0, &realfs()).expect("create dest");
+    dest.append_frames_from_segment(&source_path).expect(
+        "PROPERTY: a trusted EMPTY frame region (frames_end == frames_start) must copy cleanly — \
+         the lower-bound guard `frames_end < frames_start` must NOT reject the inclusive boundary",
     );
 }

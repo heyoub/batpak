@@ -276,8 +276,14 @@ fn read_active_frame_into_reads_the_full_requested_slice() {
 
 #[test]
 fn checked_frame_range_rejects_overflow_and_oversized_lengths() {
-    assert!(Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err());
-    assert!(Reader::checked_frame_len(1, 4).is_err());
+    assert!(
+        Reader::checked_frame_range(1, u64::MAX, 16, 1024).is_err(),
+        "PROPERTY: a frame range that overflows u64 must be rejected"
+    );
+    assert!(
+        Reader::checked_frame_len(1, 4).is_err(),
+        "PROPERTY: a frame shorter than the fixed header must be rejected"
+    );
     assert!(
         Reader::checked_frame_len(
             1,
@@ -292,13 +298,19 @@ fn checked_frame_range_rejects_overflow_and_oversized_lengths() {
             .expect("max frame length fits u32")
     )
     .is_ok());
-    assert!(Reader::checked_frame_len(
-        1,
-        u32::try_from(FRAME_HEADER_BYTES + segment::MAX_FRAME_PAYLOAD + 1)
-            .expect("one-past-max frame length fits u32")
-    )
-    .is_err());
-    assert!(Reader::checked_frame_len(1, u32::MAX).is_err());
+    assert!(
+        Reader::checked_frame_len(
+            1,
+            u32::try_from(FRAME_HEADER_BYTES + segment::MAX_FRAME_PAYLOAD + 1)
+                .expect("one-past-max frame length fits u32")
+        )
+        .is_err(),
+        "PROPERTY: a frame one byte above MAX_FRAME_PAYLOAD must be rejected"
+    );
+    assert!(
+        Reader::checked_frame_len(1, u32::MAX).is_err(),
+        "PROPERTY: a frame length at u32::MAX must be rejected before allocation"
+    );
 }
 
 #[test]
@@ -336,8 +348,14 @@ fn checked_header_len_respects_the_exact_boundary() {
 
 #[test]
 fn checked_batch_count_rejects_vacuous_or_implausible_counts() {
-    assert!(Reader::checked_batch_count(1, 0, 0).is_err());
-    assert!(Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err());
+    assert!(
+        Reader::checked_batch_count(1, 0, 0).is_err(),
+        "PROPERTY: a batch count of zero is malformed and must be rejected"
+    );
+    assert!(
+        Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err(),
+        "PROPERTY: a batch count above MAX_BATCH_RECOVERY_ITEMS is refused before allocation"
+    );
     assert_eq!(
         Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS)
             .expect("max batch count remains valid"),
@@ -347,6 +365,30 @@ fn checked_batch_count_rejects_vacuous_or_implausible_counts() {
     assert_eq!(
         Reader::checked_batch_count(1, 0, 3).expect("valid batch count"),
         3
+    );
+}
+
+#[test]
+fn scan_oom_posture_is_input_bounded_fail_closed() {
+    use crate::store::segment;
+
+    assert_eq!(
+        segment::MAX_FRAME_PAYLOAD,
+        256 * 1024 * 1024,
+        "PROPERTY: frame payload cap is fixed before vec allocation"
+    );
+    assert_eq!(
+        segment::MAX_SEGMENT_HEADER,
+        64 * 1024,
+        "PROPERTY: segment header cap is fixed before vec allocation"
+    );
+    assert!(
+        Reader::payload_len_exceeds_max(segment::MAX_FRAME_PAYLOAD + 1),
+        "PROPERTY: oversize frame claims are refused before allocation (no try_reserve path)"
+    );
+    assert!(
+        Reader::checked_batch_count(1, 0, MAX_BATCH_RECOVERY_ITEMS + 1).is_err(),
+        "PROPERTY: oversize recovery batch counts are refused before allocation"
     );
 }
 
@@ -378,9 +420,15 @@ fn write_valid_sealed_segment(
     };
     let frame_bytes = segment::frame_encode(&frame).expect("encode frame");
 
-    let mut active =
-        segment::Segment::<segment::Active>::create_with_created_ns(dir.path(), segment_id, 0)
-            .expect("create segment");
+    let fs: std::sync::Arc<dyn crate::store::platform::fs::StoreFs> =
+        std::sync::Arc::new(crate::store::platform::fs::RealFs);
+    let mut active = segment::Segment::<segment::Active>::create_with_created_ns_on(
+        dir.path(),
+        segment_id,
+        0,
+        &fs,
+    )
+    .expect("create segment");
     let offset = active.write_frame(&frame_bytes).expect("write frame");
     active
         .sync_with_mode(&crate::store::SyncMode::SyncAll)

@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/segment_scan_hardening_untrusted_offset.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! PROVES: the governing untrusted-footer principle for FORGED in-bounds offsets
 //! — once a forged SDX3 footer fails its CRC authentication, its
 //! `string_table_offset` is GARBAGE and FULLY INERT. Cold start discards the hint
@@ -13,8 +11,7 @@
 //! SEEDED: deterministic single-segment stores (6/8 user frames) whose SDX3
 //! trailer offset is forged or whose interior frame is corrupted before reopen.
 
-#[path = "support/segment_scan_hardening.rs"]
-mod ssh_support;
+use batpak_testkit::segment_scan_hardening as ssh_support;
 
 use batpak::store::{Store, StoreError};
 use ssh_support::*;
@@ -53,7 +50,11 @@ fn sidx_footer_offset_forged_too_low_into_an_interior_frame_recovers_all_frames(
     .expect("SIDX string table offset fits usize");
     let mut cursor = frames_start;
     // skip the first frame
-    let first_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    let first_len = u32::from_be_bytes(
+        bytes[cursor..cursor + 4]
+            .try_into()
+            .expect("4-byte frame length prefix"),
+    ) as usize;
     cursor += 8 + first_len;
     let forged_offset = cursor;
     assert!(
@@ -113,9 +114,17 @@ fn sidx_footer_offset_forged_mid_frame_recovers_all_frames() {
     // Skip the first two frames to land at the start of the THIRD frame, then
     // point the offset a few bytes INTO it (mid-header / mid-payload).
     let mut cursor = frames_start;
-    let first_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    let first_len = u32::from_be_bytes(
+        bytes[cursor..cursor + 4]
+            .try_into()
+            .expect("4-byte frame length prefix"),
+    ) as usize;
     cursor += 8 + first_len;
-    let second_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    let second_len = u32::from_be_bytes(
+        bytes[cursor..cursor + 4]
+            .try_into()
+            .expect("4-byte frame length prefix"),
+    ) as usize;
     cursor += 8 + second_len;
     let mid_frame_offset = cursor + 3; // strictly inside the third frame
     assert!(
@@ -240,15 +249,23 @@ fn untrusted_footer_mid_stream_corruption_fails_closed() {
     // that frame's CRC (interior corruption) while leaving every earlier and later
     // frame byte-for-byte intact and CRC-valid. Frames after it still decode.
     let mut cursor = frames_start;
-    let first_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    let first_len = u32::from_be_bytes(
+        bytes[cursor..cursor + 4]
+            .try_into()
+            .expect("4-byte frame length prefix"),
+    ) as usize;
     cursor += 8 + first_len;
-    let second_len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+    let second_len = u32::from_be_bytes(
+        bytes[cursor..cursor + 4]
+            .try_into()
+            .expect("4-byte frame length prefix"),
+    ) as usize;
     cursor += 8 + second_len;
     let third_frame_offset = cursor;
     let third_len = u32::from_be_bytes(
         bytes[third_frame_offset..third_frame_offset + 4]
             .try_into()
-            .unwrap(),
+            .expect("4-byte frame length prefix"),
     ) as usize;
     let third_tail = third_frame_offset + 8 + third_len;
     assert!(
@@ -277,13 +294,10 @@ fn untrusted_footer_mid_stream_corruption_fails_closed() {
 
     // Reopen MUST fail closed: interior corruption with valid frames after it must
     // never be silently truncated to the prefix.
-    let err = match Store::open(config(&dir)) {
-        Ok(_) => panic!(
-            "PROPERTY: untrusted-footer recovery must FailClosed on mid-stream corruption \
-             (CRC-valid frames follow the corrupt frame), not silently recover the prefix"
-        ),
-        Err(err) => err,
-    };
+    let err = Store::open(config(&dir)).map(|_| ()).expect_err(
+        "PROPERTY: untrusted-footer recovery must FailClosed on mid-stream corruption \
+         (CRC-valid frames follow the corrupt frame), not silently recover the prefix",
+    );
     assert!(
         matches!(err, StoreError::CorruptSegment { .. }),
         "PROPERTY: mid-stream corruption under an untrusted footer must surface as CorruptSegment; \
@@ -323,7 +337,11 @@ fn untrusted_footer_torn_last_frame_recovers_prefix() {
     let mut cursor = frames_start;
     let mut last_frame_offset = frames_start;
     while cursor < true_frames_end {
-        let len = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap()) as usize;
+        let len = u32::from_be_bytes(
+            bytes[cursor..cursor + 4]
+                .try_into()
+                .expect("4-byte frame length prefix"),
+        ) as usize;
         last_frame_offset = cursor;
         cursor += 8 + len;
     }
@@ -334,7 +352,7 @@ fn untrusted_footer_torn_last_frame_recovers_prefix() {
     let last_len = u32::from_be_bytes(
         bytes[last_frame_offset..last_frame_offset + 4]
             .try_into()
-            .unwrap(),
+            .expect("4-byte frame length prefix"),
     ) as usize;
     assert!(last_len > 4, "last frame must have a payload to tear");
 

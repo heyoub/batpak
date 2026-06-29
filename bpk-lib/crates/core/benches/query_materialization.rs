@@ -60,7 +60,7 @@ fn build_store(events_per_kind: u32) -> (Store, TempDir) {
     // Interleaved so the cursor scan sees all kinds mixed — worst case for selectivity.
     for seq in 0..events_per_kind {
         for (i, &kind) in KINDS.iter().enumerate() {
-            store
+            let _ = store
                 .append(&coords[i], kind, &serde_json::json!({"seq": seq}))
                 .expect("append");
         }

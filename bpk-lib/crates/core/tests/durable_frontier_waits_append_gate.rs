@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; append-gate tests use panic! through assert macros and explicit error extraction to pin the append-gate contract.
-#![allow(clippy::panic)]
 #![cfg(feature = "dangerous-test-hooks")]
 //! PROVES: INV-FRONTIER-APPEND-GATE-HONORED. `append_with_options` returns only
 //! after the requested `DurabilityGate` watermark covers the appended event, and
@@ -12,8 +10,7 @@
 //! SEEDED: deterministic single/batch appends with explicit durable/applied and
 //! visible gates, advanced from background threads.
 
-#[path = "support/durable_frontier_waits.rs"]
-mod dfw_support;
+use batpak_testkit::durable_frontier_waits as dfw_support;
 
 use batpak::prelude::Region;
 use batpak::store::{
@@ -37,24 +34,15 @@ fn batch_item(entity: &str, n: u32, options: AppendOptions) -> BatchAppendItem {
 }
 
 fn durable_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Durable,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Durable, timeout)
 }
 
 fn applied_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Applied,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Applied, timeout)
 }
 
 fn visible_gate(timeout: Duration) -> DurabilityGate {
-    DurabilityGate {
-        kind: WatermarkKind::Visible,
-        timeout,
-    }
+    DurabilityGate::new(WatermarkKind::Visible, timeout)
 }
 
 #[test]
@@ -62,7 +50,7 @@ fn append_without_gate_returns_immediately() {
     let (_dir, store) = open_store(1000);
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:none"),
             kind(),
@@ -86,7 +74,7 @@ fn append_with_durable_gate_blocks_until_synced() {
         .name("durable-gate-second-append".into())
         .spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
-            second_store
+            let _ = second_store
                 .append(
                     &coord("entity:gate:durable-second"),
                     kind(),
@@ -97,7 +85,7 @@ fn append_with_durable_gate_blocks_until_synced() {
         })
         .expect("spawn second append");
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:durable-first"),
             kind(),
@@ -142,7 +130,7 @@ fn append_with_applied_gate_blocks_until_min_projection_advances() {
         .expect("spawn projection notifier");
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:applied"),
             kind(),
@@ -167,7 +155,7 @@ fn append_with_visible_gate_returns_after_publish() {
     let (_dir, store) = open_store(1000);
 
     let started = Instant::now();
-    store
+    let _ = store
         .append_with_options(
             &coord("entity:gate:visible"),
             kind(),
@@ -192,10 +180,9 @@ fn append_with_gate_surfaces_wait_timeout_when_unreachable() {
         &serde_json::json!({ "n": 1 }),
         AppendOptions::default().with_gate(durable_gate(Duration::from_millis(100))),
     );
-    let err = match result {
-        Ok(_) => panic!("PROPERTY: unreachable durable gate must not return a receipt"),
-        Err(err) => err,
-    };
+    let err = result
+        .map(|_| ())
+        .expect_err("PROPERTY: unreachable durable gate must not return a receipt");
     assert!(
         matches!(
             err,

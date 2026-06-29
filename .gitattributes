@@ -12,3 +12,12 @@
 
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+
+# Fuzz corpus + regression seeds are raw byte fixtures (msgpack, arbitrary
+# bytes). Mark them binary so git never emits a raw-byte "text" diff for them:
+# an unmarked corpus seed without a NUL in its first 8 KiB is treated as text,
+# and the resulting non-UTF-8 diff bytes break tools that read `git diff`
+# (the diff-scoped mutation-smoke gate, meta-gate, etc.). `binary` => -diff, so
+# git prints "Binary files differ" instead.
+bpk-lib/fuzz/corpus/** binary
+bpk-lib/fuzz/regressions/** binary

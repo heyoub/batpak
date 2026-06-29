@@ -307,21 +307,6 @@ fn scan_capabilities_follow_topology_truth() {
             },
         ),
         (
-            crate::store::IndexTopology::tiled_simd(),
-            ScanCapabilities {
-                by_kind: ScanRoute::AoSoA64Simd,
-                by_scope: ScanRoute::AoSoA64Simd,
-                by_category: ScanRoute::AoSoA64Simd,
-                projection: ProjectionSupport {
-                    entity_generation_fast_path: false,
-                    cached_projection: false,
-                    projection_candidates: false,
-                },
-                topology_name: "tiled-simd",
-                tile_count: 0,
-            },
-        ),
-        (
             crate::store::IndexTopology::all(),
             ScanCapabilities {
                 by_kind: ScanRoute::SoA,
@@ -536,12 +521,10 @@ fn all_layouts_agree_on_by_kind() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for kind in [KIND_A, KIND_B, KIND_C] {
@@ -550,11 +533,6 @@ fn all_layouts_agree_on_by_kind() {
             seq_ids(&aosoa64.query_hits_by_kind(kind)),
             reference,
             "AoSoA64 by_kind({kind:?}) must match SoA"
-        );
-        assert_eq!(
-            seq_ids(&aosoa64_simd.query_hits_by_kind(kind)),
-            reference,
-            "AoSoA64Simd by_kind({kind:?}) must match SoA"
         );
         assert_eq!(
             seq_ids(&soaos.query_hits_by_kind(kind)),
@@ -569,12 +547,10 @@ fn all_layouts_agree_on_by_category() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for category in [0x1u8, 0x2u8] {
@@ -583,11 +559,6 @@ fn all_layouts_agree_on_by_category() {
             seq_ids(&aosoa64.query_hits_by_category(category)),
             reference,
             "AoSoA64 by_category(0x{category:x}) must match SoA"
-        );
-        assert_eq!(
-            seq_ids(&aosoa64_simd.query_hits_by_category(category)),
-            reference,
-            "AoSoA64Simd by_category(0x{category:x}) must match SoA"
         );
         assert_eq!(
             seq_ids(&soaos.query_hits_by_category(category)),
@@ -602,12 +573,10 @@ fn all_layouts_agree_on_by_kind_after() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for kind in [KIND_A, KIND_B, KIND_C] {
@@ -616,11 +585,6 @@ fn all_layouts_agree_on_by_kind_after() {
             seq_ids(&aosoa64.query_hits_by_kind_after(kind, 7, true, 5)),
             reference,
             "AoSoA64 by_kind_after({kind:?}) must match SoA"
-        );
-        assert_eq!(
-            seq_ids(&aosoa64_simd.query_hits_by_kind_after(kind, 7, true, 5)),
-            reference,
-            "AoSoA64Simd by_kind_after({kind:?}) must match SoA"
         );
         assert_eq!(
             seq_ids(&soaos.query_hits_by_kind_after(kind, 7, true, 5)),
@@ -635,12 +599,10 @@ fn all_layouts_agree_on_by_category_after() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for category in [0x1u8, 0x2u8] {
@@ -649,11 +611,6 @@ fn all_layouts_agree_on_by_category_after() {
             seq_ids(&aosoa64.query_hits_by_category_after(category, 7, true, 5)),
             reference,
             "AoSoA64 by_category_after(0x{category:x}) must match SoA"
-        );
-        assert_eq!(
-            seq_ids(&aosoa64_simd.query_hits_by_category_after(category, 7, true, 5)),
-            reference,
-            "AoSoA64Simd by_category_after(0x{category:x}) must match SoA"
         );
         assert_eq!(
             seq_ids(&soaos.query_hits_by_category_after(category, 7, true, 5)),
@@ -692,12 +649,10 @@ fn overlay_scope_queries_are_subset_of_ground_truth() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for scope in ["scope-one", "scope-two", "scope-missing"] {
@@ -705,7 +660,6 @@ fn overlay_scope_queries_are_subset_of_ground_truth() {
         for (name, overlay_hits) in [
             ("SoA", soa.query_hits_by_scope(scope)),
             ("AoSoA64", aosoa64.query_hits_by_scope(scope)),
-            ("AoSoA64Simd", aosoa64_simd.query_hits_by_scope(scope)),
             ("SoAoS", soaos.query_hits_by_scope(scope)),
         ] {
             assert!(
@@ -726,12 +680,10 @@ fn overlay_scope_queries_after_respect_limit_and_subset() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for scope in ["scope-one", "scope-two"] {
@@ -742,10 +694,6 @@ fn overlay_scope_queries_after_respect_limit_and_subset() {
                 (
                     "AoSoA64",
                     aosoa64.query_hits_by_scope_after(scope, 0, false, limit),
-                ),
-                (
-                    "AoSoA64Simd",
-                    aosoa64_simd.query_hits_by_scope_after(scope, 0, false, limit),
                 ),
                 (
                     "SoAoS",
@@ -807,12 +755,10 @@ fn all_layouts_agree_on_by_scope() {
     let corpus = build_oracle_corpus();
     let soa = ColumnarIndex::new_soa();
     let aosoa64 = ColumnarIndex::new_aosoa64();
-    let aosoa64_simd = ColumnarIndex::new_aosoa64_simd();
     let soaos = ColumnarIndex::new_soaos();
     for entry in &corpus {
         soa.insert(entry);
         aosoa64.insert(entry);
-        aosoa64_simd.insert(entry);
         soaos.insert(entry);
     }
     for scope in ["scope-one", "scope-two", "scope-missing"] {
@@ -821,11 +767,6 @@ fn all_layouts_agree_on_by_scope() {
             seq_ids(&aosoa64.query_hits_by_scope(scope)),
             reference,
             "AoSoA64 by_scope({scope:?}) must match SoA"
-        );
-        assert_eq!(
-            seq_ids(&aosoa64_simd.query_hits_by_scope(scope)),
-            reference,
-            "AoSoA64Simd by_scope({scope:?}) must match SoA"
         );
         assert_eq!(
             seq_ids(&soaos.query_hits_by_scope(scope)),

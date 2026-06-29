@@ -1,8 +1,8 @@
 //! Assurance Levels (AL-DEF) loader + anti-drift lockstep.
 //!
 //! Loads `traceability/assurance_levels.yaml`, resolves any production source
-//! path to its declared assurance level (default `L1`), and enforces the
-//! anti-laundering lockstep: the set of globs declared at `L3` or `L4` must
+//! path to its declared assurance level (explicit manifest globs, else derived
+//! `L1` from Cargo production roots), and enforces the anti-laundering lockstep: the set of globs declared at `L3` or `L4` must
 //! equal — exactly — the set of globs covered by `critical_mutation_seams()`
 //! in `bpk-lib/tools/xtask/src/commands/mutants/lanes.rs`, so a file's
 //! assurance level and its mutation criticality cannot drift apart.
@@ -14,7 +14,7 @@
 //! the mirror — the mirror is the integrity-side single source for "which
 //! globs are critical seams".
 
-use crate::repo_surface::{core_src_root, load_yaml, production_rust_roots, relative, rust_files};
+use crate::repo_surface::{load_yaml, production_rust_roots, relative, rust_files};
 use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -54,8 +54,36 @@ pub(crate) struct AssuranceEntry {
     pub(crate) globs: Vec<String>,
 }
 
-/// The default level for any production file that matches no glob.
+/// The default level for production files under a derived root with no manifest glob.
 pub(crate) const DEFAULT_LEVEL: AssuranceLevel = AssuranceLevel::L1;
+
+/// True when `rel` lies under any Cargo-derived production root.
+pub(crate) fn matches_derived_production_root(root_rels: &[String], rel: &str) -> bool {
+    root_rels
+        .iter()
+        .any(|root_rel| rel == root_rel || rel.starts_with(&format!("{root_rel}/")))
+}
+
+fn production_rel_paths(repo_root: &Path) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for root in production_rust_roots(repo_root)? {
+        paths.extend(rust_files(&root));
+    }
+    let mut rels: Vec<String> = paths.iter().map(|path| relative(repo_root, path)).collect();
+    rels.sort();
+    rels.dedup();
+    Ok(rels)
+}
+
+fn production_root_rels(repo_root: &Path) -> Result<Vec<String>> {
+    let mut root_rels: Vec<String> = production_rust_roots(repo_root)?
+        .iter()
+        .map(|root| relative(repo_root, root))
+        .collect();
+    root_rels.sort();
+    root_rels.dedup();
+    Ok(root_rels)
+}
 
 /// Mirror of the `*_MUTANT_FILES` glob arrays behind `critical_mutation_seams()`
 /// (`bpk-lib/tools/xtask/src/commands/mutants/lanes.rs`). Each tuple is
@@ -153,21 +181,64 @@ pub(crate) const CRITICAL_SEAM_MUTANT_GLOBS: &[(&str, &str)] = &[
     ("syncbat-register-catalog", "crates/syncbat/src/register.rs"),
     (
         "syncbat-register-catalog",
-        "crates/syncbat/src/register_store.rs",
+        "crates/syncbat/src/register_store/**/*.rs",
+    ),
+    (
+        "syncbat-subscription-runtime",
+        "crates/syncbat/src/subscription_runtime/**/*.rs",
+    ),
+    (
+        "syncbat-subscription-runtime",
+        "crates/syncbat/src/operation_status.rs",
+    ),
+    (
+        "syncbat-subscription-runtime",
+        "crates/syncbat/src/operation_status_sink.rs",
     ),
     // netbat-boundary-protocol (NETBAT_BOUNDARY_MUTANT_FILES)
     ("netbat-boundary-protocol", "crates/netbat/src/lib.rs"),
     ("netbat-boundary-protocol", "crates/netbat/src/route.rs"),
-    ("netbat-boundary-protocol", "crates/netbat/src/transport.rs"),
+    (
+        "netbat-boundary-protocol",
+        "crates/netbat/src/transport/**/*.rs",
+    ),
+    // fork-isolation (FORK_MUTANT_FILES)
+    (
+        "fork-isolation",
+        "crates/core/src/store/file_classification.rs",
+    ),
+    ("fork-isolation", "crates/core/src/store/fork_report.rs"),
+    // import-reapply (IMPORT_MUTANT_FILES)
+    ("import-reapply", "crates/core/src/store/import.rs"),
 ];
 
 pub(crate) fn manifest_path(repo_root: &Path) -> std::path::PathBuf {
     repo_root.join("traceability/assurance_levels.yaml")
 }
 
+pub(crate) fn seam_registry_path(repo_root: &Path) -> std::path::PathBuf {
+    repo_root.join("traceability/seam_registry.yaml")
+}
+
+/// One row of `traceability/seam_registry.yaml` — authoritative seam slug → globs
+/// map consumed by lockstep against [`CRITICAL_SEAM_MUTANT_GLOBS`].
+#[derive(Debug, Deserialize)]
+pub(crate) struct SeamRegistryEntry {
+    pub(crate) slug: String,
+    pub(crate) assurance_level: String,
+    #[serde(default)]
+    pub(crate) dst_coverage: bool,
+    pub(crate) globs: Vec<String>,
+}
+
 /// Load the assurance manifest entries from `traceability/assurance_levels.yaml`.
 pub(crate) fn load_manifest(repo_root: &Path) -> Result<Vec<AssuranceEntry>> {
     load_yaml(&manifest_path(repo_root))
+}
+
+/// Load the seam registry from `traceability/seam_registry.yaml`.
+pub(crate) fn load_seam_registry(repo_root: &Path) -> Result<Vec<SeamRegistryEntry>> {
+    load_yaml(&seam_registry_path(repo_root))
 }
 
 /// True when `rel` (a repo-root-relative, forward-slash path) is matched by the
@@ -221,8 +292,9 @@ pub(crate) fn entry_matches_path(entries: &[AssuranceEntry], rel: &str) -> bool 
 }
 
 /// Resolve a repo-root-relative source path to its assurance level. The highest
-/// matching level wins (so an L4 glob beats an overlapping L2 one); unmatched
-/// files default to [`DEFAULT_LEVEL`] (`L1`).
+/// matching manifest glob wins (so an L4 glob beats an overlapping L2 one).
+/// Files under a Cargo production root with no manifest match resolve to
+/// [`DEFAULT_LEVEL`] (`L1`) via derivation, not an invisible default.
 pub(crate) fn resolve_level(entries: &[AssuranceEntry], rel: &str) -> AssuranceLevel {
     let mut best: Option<AssuranceLevel> = None;
     for entry in entries {
@@ -296,43 +368,157 @@ pub(crate) fn check_seam_lockstep(entries: &[AssuranceEntry]) -> Result<()> {
     Ok(())
 }
 
-/// Advisory (non-blocking): list production `.rs` files matched by no glob in
-/// the manifest (i.e. files resolving to the default `L1`). Wired to print, not
-/// fail — earns blocking authority later.
-pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Vec<String> {
-    let mut paths = rust_files(&core_src_root(repo_root));
-    for root in production_rust_roots(repo_root) {
-        paths.extend(rust_files(&root));
+/// Lockstep: every `(slug, glob)` in `traceability/seam_registry.yaml` must equal
+/// the [`CRITICAL_SEAM_MUTANT_GLOBS`] mirror exactly — no drift between the
+/// authoritative YAML and the integrity-side seam map.
+pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Result<()> {
+    let mut registry_pairs: BTreeSet<(String, String)> = BTreeSet::new();
+    for entry in entries {
+        if entry.slug.is_empty() {
+            bail!("seam-registry-check: entry has empty slug");
+        }
+        if entry.assurance_level.is_empty() {
+            bail!(
+                "seam-registry-check: seam `{}` has empty assurance_level",
+                entry.slug
+            );
+        }
+        if entry.globs.is_empty() {
+            bail!(
+                "seam-registry-check: seam `{}` must declare at least one glob",
+                entry.slug
+            );
+        }
+        // A seam that claims DST corpus coverage must carry a real assurance
+        // level (never the bottom `L0`): the flag asserts a graduated-seed proof
+        // exists, so it cannot ride on an unassured seam. Reading the flag here
+        // keeps the schema field load-bearing.
+        if entry.dst_coverage && entry.assurance_level == "L0" {
+            bail!(
+                "seam-registry-check: seam `{}` declares dst_coverage but is assurance_level L0; \
+                 DST corpus coverage requires a real (non-L0) assurance level",
+                entry.slug
+            );
+        }
+        for glob in &entry.globs {
+            registry_pairs.insert((entry.slug.clone(), glob.clone()));
+        }
     }
-    let mut unleveled: Vec<String> = paths
+
+    let mirror_pairs: BTreeSet<(String, String)> = CRITICAL_SEAM_MUTANT_GLOBS
         .iter()
-        .map(|p| relative(repo_root, p))
-        .filter(|rel| !entry_matches_path(entries, rel))
+        .map(|(slug, glob)| ((*slug).to_owned(), (*glob).to_owned()))
+        .collect();
+
+    let registry_ref: BTreeSet<(&str, &str)> = registry_pairs
+        .iter()
+        .map(|(s, g)| (s.as_str(), g.as_str()))
+        .collect();
+    let mirror_ref: BTreeSet<(&str, &str)> = mirror_pairs
+        .iter()
+        .map(|(s, g)| (s.as_str(), g.as_str()))
+        .collect();
+
+    let missing_from_registry: Vec<(&str, &str)> =
+        mirror_ref.difference(&registry_ref).copied().collect();
+    if !missing_from_registry.is_empty() {
+        bail!(
+            "seam-registry-check: critical-seam pair(s) absent from seam_registry.yaml: {}.",
+            missing_from_registry
+                .iter()
+                .map(|(s, g)| format!("{s} -> {g}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    let extra_in_registry: Vec<(&str, &str)> =
+        registry_ref.difference(&mirror_ref).copied().collect();
+    if !extra_in_registry.is_empty() {
+        bail!(
+            "seam-registry-check: seam_registry.yaml pair(s) not backed by CRITICAL_SEAM_MUTANT_GLOBS: {}.",
+            extra_in_registry
+                .iter()
+                .map(|(s, g)| format!("{s} -> {g}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    Ok(())
+}
+
+/// List production `.rs` files matched by no manifest glob and not under any
+/// derived production root. Any non-empty result is a hard failure: production
+/// code must be explicitly classified (manifest glob or derived L1 root).
+pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Result<Vec<String>> {
+    let root_rels = production_root_rels(repo_root)?;
+    let mut unleveled: Vec<String> = production_rel_paths(repo_root)?
+        .into_iter()
+        .filter(|rel| {
+            !entry_matches_path(entries, rel) && !matches_derived_production_root(&root_rels, rel)
+        })
         .collect();
     unleveled.sort();
     unleveled.dedup();
-    unleveled
+    Ok(unleveled)
 }
 
-/// Loads the manifest, runs the lockstep gate, and prints an advisory line for
-/// unleveled production files. Called from `structural::run`.
+/// Production files with no manifest glob that resolve via derived L1 roots.
+pub(crate) fn derived_l1_files(
+    repo_root: &Path,
+    entries: &[AssuranceEntry],
+) -> Result<Vec<String>> {
+    let root_rels = production_root_rels(repo_root)?;
+    let mut derived: Vec<String> = production_rel_paths(repo_root)?
+        .into_iter()
+        .filter(|rel| {
+            !entry_matches_path(entries, rel) && matches_derived_production_root(&root_rels, rel)
+        })
+        .collect();
+    derived.sort();
+    derived.dedup();
+    Ok(derived)
+}
+
+/// Count production files matched by at least one manifest glob.
+pub(crate) fn declared_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Result<usize> {
+    Ok(production_rel_paths(repo_root)?
+        .into_iter()
+        .filter(|rel| entry_matches_path(entries, rel))
+        .count())
+}
+
+/// Loads the manifest, runs the lockstep gate, and fails closed on unleveled
+/// production files. Called from `structural::run`.
 pub(crate) fn check(repo_root: &Path) -> Result<()> {
     let entries = load_manifest(repo_root)?;
     check_seam_lockstep(&entries)?;
+    let seam_registry = load_seam_registry(repo_root)?;
+    check_seam_registry_lockstep(&seam_registry)?;
 
-    let unleveled = unleveled_files(repo_root, &entries);
-    if unleveled.is_empty() {
-        println!("assurance-level-check: ok (every production file resolves to a declared AL)");
-    } else {
-        println!(
-            "assurance-level-check: ok ({} unleveled production file(s) default to {} — advisory):",
+    let unleveled = unleveled_files(repo_root, &entries)?;
+    if !unleveled.is_empty() {
+        bail!(
+            "assurance-level-check: {} production file(s) match no manifest glob and no derived \
+             production root — add an explicit glob or fix the production-root derivation:\n{}",
             unleveled.len(),
-            DEFAULT_LEVEL.as_str()
+            unleveled
+                .iter()
+                .map(|rel| format!("  - {rel}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
-        for rel in &unleveled {
-            println!("  - {rel} [{}]", resolve_level(&entries, rel).as_str());
-        }
     }
+
+    let declared = declared_files(repo_root, &entries)?;
+    let derived = derived_l1_files(repo_root, &entries)?;
+    outln!(
+        "assurance-level-check: ok ({} declared, {} derived {}, 0 unleveled)",
+        declared,
+        derived.len(),
+        DEFAULT_LEVEL.as_str()
+    );
     Ok(())
 }
 
@@ -393,9 +579,49 @@ mod tests {
 
     // GREEN: the committed manifest passes the lockstep against the live mirror.
     #[test]
+    fn derived_production_root_matches_src_files() {
+        let root_rels = vec!["crates/syncbat/src".to_owned()];
+        assert!(matches_derived_production_root(
+            &root_rels,
+            "crates/syncbat/src/subscription_runtime/event_stream.rs"
+        ));
+        assert!(!matches_derived_production_root(
+            &root_rels,
+            "crates/syncbat/tests/runtime.rs"
+        ));
+    }
+
+    #[test]
     fn committed_manifest_passes_seam_lockstep() {
         let entries = load_manifest(&repo()).expect("load assurance manifest");
         check_seam_lockstep(&entries).expect("committed manifest must pass the seam lockstep");
+    }
+
+    #[test]
+    fn committed_seam_registry_passes_lockstep() {
+        let registry = load_seam_registry(&repo()).expect("load seam registry");
+        check_seam_registry_lockstep(&registry)
+            .expect("committed seam_registry.yaml must pass lockstep");
+    }
+
+    #[test]
+    fn missing_seam_registry_glob_fails_lockstep() {
+        let registry = load_seam_registry(&repo()).expect("load seam registry");
+        let trimmed: Vec<SeamRegistryEntry> = registry
+            .into_iter()
+            .map(|mut entry| {
+                if entry.slug == "writer-commit" {
+                    entry.globs.retain(|glob| !glob.contains("control"));
+                }
+                entry
+            })
+            .collect();
+        let err = check_seam_registry_lockstep(&trimmed)
+            .expect_err("dropping a seam glob must fail seam registry lockstep");
+        assert!(
+            err.to_string().contains("writer-commit"),
+            "error must name the dropped seam, got: {err}"
+        );
     }
 
     #[test]

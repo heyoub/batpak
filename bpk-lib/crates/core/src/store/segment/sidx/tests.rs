@@ -1,6 +1,45 @@
 use super::*;
+use proptest::prelude::*;
 use std::io::Cursor;
 use tempfile::NamedTempFile;
+
+prop_compose! {
+    fn arb_sidx_entry()(
+        event_id in any::<u128>(),
+        entity_idx in any::<u32>(),
+        scope_idx in any::<u32>(),
+        kind in any::<u16>(),
+        wall_ms in any::<u64>(),
+        clock in any::<u32>(),
+        dag_lane in any::<u32>(),
+        dag_depth in any::<u32>(),
+        prev_hash in any::<[u8; 32]>(),
+        event_hash in any::<[u8; 32]>(),
+        frame_offset in any::<u64>(),
+        frame_length in any::<u32>(),
+        global_sequence in any::<u64>(),
+        correlation_id in any::<u128>(),
+        causation_id in any::<u128>(),
+    ) -> SidxEntry {
+        SidxEntry {
+            event_id,
+            entity_idx,
+            scope_idx,
+            kind,
+            wall_ms,
+            clock,
+            dag_lane,
+            dag_depth,
+            prev_hash,
+            event_hash,
+            frame_offset,
+            frame_length,
+            global_sequence,
+            correlation_id,
+            causation_id,
+        }
+    }
+}
 
 /// Construct a minimal [`SidxEntry`] with deterministic field values.
 /// `entity_idx` and `scope_idx` are left at 0; `record()` will overwrite them.
@@ -57,6 +96,16 @@ fn encode_decode_round_trip() {
     original.encode_into(&mut buf);
     let decoded = SidxEntry::decode_from(&buf, 1).expect("decode must succeed");
     assert_eq!(original, decoded, "round-trip must be lossless");
+}
+
+proptest! {
+    #[test]
+    fn encode_decode_round_trip_property(original in arb_sidx_entry()) {
+        let mut buf = [0u8; ENTRY_SIZE];
+        original.encode_into(&mut buf);
+        let decoded = SidxEntry::decode_from(&buf, 1).expect("decode generated SIDX entry");
+        prop_assert_eq!(decoded, original);
+    }
 }
 
 #[test]
@@ -253,9 +302,9 @@ fn raw_to_kind_counted_tracks_reserved_fallbacks() {
 #[test]
 fn intern_deduplicates_strings() {
     let mut collector = SidxEntryCollector::new();
-    let i0 = collector.intern("entity:1");
-    let i1 = collector.intern("scope:default");
-    let i2 = collector.intern("entity:1");
+    let i0 = collector.intern("entity:1").expect("intern entity");
+    let i1 = collector.intern("scope:default").expect("intern scope");
+    let i2 = collector.intern("entity:1").expect("intern entity again");
     assert_eq!(i0, i2, "same string must return the same index");
     assert_ne!(i0, i1, "different strings must get different indices");
     assert_eq!(
@@ -278,8 +327,12 @@ fn footer_round_trip() {
     cursor.seek(SeekFrom::End(0)).expect("seek to end");
 
     let mut collector = SidxEntryCollector::new();
-    collector.record(sample_entry(1), "user:1", "profile");
-    collector.record(sample_entry(2), "user:2", "profile");
+    collector
+        .record(sample_entry(1), "user:1", "profile")
+        .expect("intern test strings");
+    collector
+        .record(sample_entry(2), "user:2", "profile")
+        .expect("intern test strings");
 
     collector
         .write_footer(&mut cursor, /* segment_id = */ 0)
@@ -386,7 +439,9 @@ fn shared_string_table_is_compact() {
     let mut collector = SidxEntryCollector::new();
     // Three events in the same entity + scope -> string table should have exactly 2 entries.
     for n in 0u8..3 {
-        collector.record(sample_entry(n), "order:999", "payments");
+        collector
+            .record(sample_entry(n), "order:999", "payments")
+            .expect("intern test strings");
     }
     assert_eq!(
         collector.strings().len(),
@@ -470,8 +525,12 @@ fn read_footer_returns_none_on_crc_mismatch() {
     cursor.seek(SeekFrom::End(0)).expect("seek to end");
 
     let mut collector = SidxEntryCollector::new();
-    collector.record(sample_entry(1), "user:1", "profile");
-    collector.record(sample_entry(2), "user:2", "profile");
+    collector
+        .record(sample_entry(1), "user:1", "profile")
+        .expect("intern test strings");
+    collector
+        .record(sample_entry(2), "user:2", "profile")
+        .expect("intern test strings");
     collector
         .write_footer(&mut cursor, /* segment_id = */ 0)
         .expect("write_footer must succeed");

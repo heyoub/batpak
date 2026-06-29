@@ -1,0 +1,60 @@
+# cargo-deny configuration for batpak (workspace root: bpk-lib/deny.toml).
+# Run locally from bpk-lib with: cargo deny check
+
+[graph]
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+# Deliberately narrow but practical for the Rust storage ecosystem. Additions
+# should be reviewed when a dependency needs a new license family.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Intra-workspace path dev-dependencies on publish=false helper crates
+# (e.g. batpak-testkit) carry no version: a version makes `cargo package` look
+# for them on crates.io, where they do not exist. allow-wildcard-paths permits
+# the implicit `*` requirement for PATH deps only, so the wildcard ban still
+# bites every real registry dependency.
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = [
+    # dashmap 6.1 pins hashbrown 0.14; build-time yaml_serde pulls indexmap →
+    # hashbrown 0.16. Remove when a stable dashmap release aligns on hashbrown 0.16
+    # (or another single-version resolution path exists).
+    { crate = "hashbrown@0.14.5", reason = "transitive dashmap 6.1 pin vs indexmap/yaml_serde build graph on hashbrown 0.16.1" },
+]
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

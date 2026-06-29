@@ -1,7 +1,6 @@
 //! PROVES: INV-NETBAT-LINE-PROTOCOL-STABLE, INV-NETBAT-BOUNDARY-THIN
 //! CATCHES: request/response grammar drift, limit bypasses, and runtime-boundary ownership leaks.
 //! SEEDED: in-memory streams and fixed syncbat handlers.
-#![allow(clippy::panic)]
 
 use netbat as nb;
 use std::io::{self, Cursor, Read, Write};
@@ -209,16 +208,14 @@ fn encodes_request_with_stable_versioned_line_protocol() {
 
 #[test]
 fn rejects_unsupported_line_protocol_version() {
-    let err = match nb::decode_line(
+    let err = nb::decode_line(
         &fixture_bytes(
             "request_unsupported_protocol",
             REQUEST_UNSUPPORTED_PROTOCOL_HEX,
         ),
         &nb::Limits::default(),
-    ) {
-        Ok(_) => panic!("expected unsupported protocol version"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected unsupported protocol version");
 
     assert_eq!(
         err,
@@ -230,21 +227,15 @@ fn rejects_unsupported_line_protocol_version() {
 
 #[test]
 fn rejects_versioned_frame_with_missing_fields() {
-    let missing_verb = match nb::decode_line(
+    let missing_verb = nb::decode_line(
         &fixture_bytes("request_missing_verb", REQUEST_MISSING_VERB_HEX),
         &nb::Limits::default(),
-    ) {
-        Ok(_) => panic!("expected missing verb"),
-        Err(error) => error,
-    };
-    let missing_operation = match nb::decode_line(b"NETBAT/1 CALL\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected missing operation"),
-        Err(error) => error,
-    };
-    let missing_input = match nb::decode_line(b"NETBAT/1 CALL ping\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected missing input"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected missing verb");
+    let missing_operation = nb::decode_line(b"NETBAT/1 CALL\n", &nb::Limits::default())
+        .expect_err("expected missing operation");
+    let missing_input = nb::decode_line(b"NETBAT/1 CALL ping\n", &nb::Limits::default())
+        .expect_err("expected missing input");
 
     assert_eq!(
         missing_verb,
@@ -294,27 +285,20 @@ fn dispatch_revalidates_public_request_frames() {
         .with_max_operation_name_bytes(3)
         .with_max_input_bytes(1);
 
-    let name_err = match nb::dispatch_frame(
+    let name_err = nb::dispatch_frame(
         &mut core,
         nb::RequestFrame::new("ping", Vec::<u8>::new()),
         &limits,
-    ) {
-        Ok(_) => panic!("expected operation limit failure"),
-        Err(error) => error,
-    };
-    let input_err =
-        match nb::dispatch_frame(&mut core, nb::RequestFrame::new("ok", vec![0, 1]), &limits) {
-            Ok(_) => panic!("expected input limit failure"),
-            Err(error) => error,
-        };
-    let grammar_err = match nb::dispatch_frame(
+    )
+    .expect_err("expected operation limit failure");
+    let input_err = nb::dispatch_frame(&mut core, nb::RequestFrame::new("ok", vec![0, 1]), &limits)
+        .expect_err("expected input limit failure");
+    let grammar_err = nb::dispatch_frame(
         &mut core,
         nb::RequestFrame::new("bad/name", Vec::<u8>::new()),
         &nb::Limits::default(),
-    ) {
-        Ok(_) => panic!("expected operation grammar failure"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected operation grammar failure");
 
     assert_eq!(name_err, nb::NetbatError::OperationNameTooLong { max: 3 });
     assert_eq!(input_err, nb::NetbatError::InputTooLarge { max: 1 });
@@ -345,10 +329,8 @@ fn unknown_operation_maps_to_stable_error_response() {
     let mut core = core_with_ping();
     let mut stream = Cursor::new(b"CALL missing 00\n".to_vec());
 
-    let err = match nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()) {
-        Ok(_) => panic!("expected unknown operation"),
-        Err(error) => error,
-    };
+    let err = nb::serve_stream(&mut stream, &mut core, &nb::Limits::default())
+        .expect_err("expected unknown operation");
 
     assert!(matches!(
         err,
@@ -369,10 +351,8 @@ fn handler_failure_maps_without_losing_class_or_message() {
         REQUEST_DECODE_INPUT_HEX,
     ));
 
-    let err = match nb::serve_stream(&mut stream, &mut core, &nb::Limits::default()) {
-        Ok(_) => panic!("expected handler failure"),
-        Err(error) => error,
-    };
+    let err = nb::serve_stream(&mut stream, &mut core, &nb::Limits::default())
+        .expect_err("expected handler failure");
 
     assert!(matches!(
         err,
@@ -389,13 +369,11 @@ fn handler_failure_maps_without_losing_class_or_message() {
 fn rejects_line_too_long() {
     let limits = nb::Limits::default().with_max_line_bytes(4);
 
-    let err = match nb::decode_line(
+    let err = nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
         &limits,
-    ) {
-        Ok(_) => panic!("expected line limit failure"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected line limit failure");
 
     assert_eq!(err, nb::NetbatError::LineTooLong { max: 4 });
 }
@@ -404,13 +382,11 @@ fn rejects_line_too_long() {
 fn rejects_operation_name_too_long() {
     let limits = nb::Limits::default().with_max_operation_name_bytes(3);
 
-    let err = match nb::decode_line(
+    let err = nb::decode_line(
         &fixture_bytes("request_decode_input", REQUEST_DECODE_INPUT_HEX),
         &limits,
-    ) {
-        Ok(_) => panic!("expected operation limit failure"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected operation limit failure");
 
     assert_eq!(err, nb::NetbatError::OperationNameTooLong { max: 3 });
 }
@@ -419,27 +395,21 @@ fn rejects_operation_name_too_long() {
 fn rejects_input_body_too_large() {
     let limits = nb::Limits::default().with_max_input_bytes(1);
 
-    let err = match nb::decode_line(
+    let err = nb::decode_line(
         &fixture_bytes("request_input_too_large", REQUEST_INPUT_TOO_LARGE_HEX),
         &limits,
-    ) {
-        Ok(_) => panic!("expected input limit failure"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected input limit failure");
 
     assert_eq!(err, nb::NetbatError::InputTooLarge { max: 1 });
 }
 
 #[test]
 fn rejects_malformed_hex_and_token_count() {
-    let hex_err = match nb::decode_line(b"CALL ping nope\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected malformed hex"),
-        Err(error) => error,
-    };
-    let token_err = match nb::decode_line(b"CALL ping 00 extra\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected malformed token count"),
-        Err(error) => error,
-    };
+    let hex_err = nb::decode_line(b"CALL ping nope\n", &nb::Limits::default())
+        .expect_err("expected malformed hex");
+    let token_err = nb::decode_line(b"CALL ping 00 extra\n", &nb::Limits::default())
+        .expect_err("expected malformed token count");
 
     assert_eq!(
         hex_err,
@@ -457,26 +427,16 @@ fn rejects_malformed_hex_and_token_count() {
 
 #[test]
 fn rejects_odd_hex_unsupported_verb_missing_fields_and_whitespace_operation() {
-    let odd = match nb::decode_line(b"CALL ping 0\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected odd hex rejection"),
-        Err(error) => error,
-    };
-    let verb = match nb::decode_line(b"POST ping 00\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected unsupported verb rejection"),
-        Err(error) => error,
-    };
-    let missing = match nb::decode_line(b"CALL ping\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected missing input rejection"),
-        Err(error) => error,
-    };
-    let whitespace = match nb::decode_line(b"CALL ping\tname 00\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected whitespace operation rejection"),
-        Err(error) => error,
-    };
-    let dot_segment = match nb::decode_line(b"CALL ping..name 00\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected dot-segment operation rejection"),
-        Err(error) => error,
-    };
+    let odd = nb::decode_line(b"CALL ping 0\n", &nb::Limits::default())
+        .expect_err("expected odd hex rejection");
+    let verb = nb::decode_line(b"POST ping 00\n", &nb::Limits::default())
+        .expect_err("expected unsupported verb rejection");
+    let missing = nb::decode_line(b"CALL ping\n", &nb::Limits::default())
+        .expect_err("expected missing input rejection");
+    let whitespace = nb::decode_line(b"CALL ping\tname 00\n", &nb::Limits::default())
+        .expect_err("expected whitespace operation rejection");
+    let dot_segment = nb::decode_line(b"CALL ping..name 00\n", &nb::Limits::default())
+        .expect_err("expected dot-segment operation rejection");
 
     assert_eq!(
         odd,
@@ -512,17 +472,13 @@ fn rejects_odd_hex_unsupported_verb_missing_fields_and_whitespace_operation() {
 
 #[test]
 fn rejects_empty_line_and_non_utf8_operation() {
-    let empty = match nb::decode_line(
+    let empty = nb::decode_line(
         &fixture_bytes("request_empty_line", REQUEST_EMPTY_LINE_HEX),
         &nb::Limits::default(),
-    ) {
-        Ok(_) => panic!("expected empty-line rejection"),
-        Err(error) => error,
-    };
-    let non_utf8 = match nb::decode_line(b"CALL \xff 00\n", &nb::Limits::default()) {
-        Ok(_) => panic!("expected non-utf8 operation rejection"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected empty-line rejection");
+    let non_utf8 = nb::decode_line(b"CALL \xff 00\n", &nb::Limits::default())
+        .expect_err("expected non-utf8 operation rejection");
 
     assert_eq!(
         empty,
@@ -562,14 +518,10 @@ fn serve_stream_writes_stable_error_for_line_read_failures() {
     ));
     let mut empty = Cursor::new(Vec::new());
 
-    let long_err = match nb::serve_stream(&mut too_long, &mut core, &limits) {
-        Ok(_) => panic!("expected line-too-long failure"),
-        Err(error) => error,
-    };
-    let empty_err = match nb::serve_stream(&mut empty, &mut core, &nb::Limits::default()) {
-        Ok(_) => panic!("expected empty stream failure"),
-        Err(error) => error,
-    };
+    let long_err = nb::serve_stream(&mut too_long, &mut core, &limits)
+        .expect_err("expected line-too-long failure");
+    let empty_err = nb::serve_stream(&mut empty, &mut core, &nb::Limits::default())
+        .expect_err("expected empty stream failure");
 
     assert_eq!(long_err, nb::NetbatError::LineTooLong { max: 4 });
     assert_eq!(empty_err, nb::NetbatError::EmptyStream);
@@ -632,14 +584,12 @@ fn output_limit_fails_closed_after_dispatch() {
     let mut core = builder.build().expect("core builds");
     let limits = nb::Limits::default().with_max_output_bytes(1);
 
-    let err = match nb::dispatch_frame(
+    let err = nb::dispatch_frame(
         &mut core,
         nb::RequestFrame::new("ping", b"hi".to_vec()),
         &limits,
-    ) {
-        Ok(_) => panic!("expected output limit failure"),
-        Err(error) => error,
-    };
+    )
+    .expect_err("expected output limit failure");
 
     assert_eq!(err, nb::NetbatError::OutputTooLarge { max: 1 });
     assert_eq!(count.get(), 1);

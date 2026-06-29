@@ -15,7 +15,7 @@ use crate::store::Store;
 /// across the whole index. This linear-scan shape is deliberate and
 /// bounded; cycle detection lives in the caller (`ancestry::mod`) via
 /// [`super::collect_ancestors`].
-pub(crate) fn walk_ancestors_by_hash<State>(
+pub(crate) fn walk_ancestors_by_hash<State: crate::store::StoreState>(
     store: &Store<State>,
     event_id: u128,
     limit: usize,

@@ -1,24 +1,44 @@
 //! Synchronous runtime composition root.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
+use crate::admission::{AdmissionDecision, AdmissionGuard};
+use crate::effect::{
+    EventAppendHandle, EventReadHandle, HostControlHandle, OperationEffectRow,
+    ProjectionReadHandle, ReceiptEmitHandle,
+};
+use crate::effect_backend::EffectBackend;
 use crate::error::{ReceiptSinkHandlerCause, RuntimeError};
-use crate::receipt::{ReceiptHashPolicy, ReceiptOutcome, RecordedReceipt};
+use crate::operation_status::{OperationStatusFactV1, OperationStatusLifecycle};
+use crate::operation_status_sink::OperationStatusSink;
+use crate::receipt::{ReceiptHashPolicy, ReceiptMetadata, ReceiptOutcome, RecordedReceipt};
 use crate::{handler, operation, receipt};
+
+type HandlerResult = handler::HandlerResult;
 
 type BoxedHandler = Box<dyn handler::Handler + 'static>;
 type BoxedReceiptSink = Box<dyn receipt::ReceiptSink + 'static>;
+type BoxedStatusSink = Arc<dyn OperationStatusSink + Send + Sync>;
+type BoxedAdmissionGuard = Box<dyn AdmissionGuard + 'static>;
+type BoxedEffectBackend = Box<dyn EffectBackend + 'static>;
 
 /// Composition root for a sync-first operation runtime.
 ///
-/// `Core` owns the operation descriptors, the matching handler table, and the
-/// optional receipt sink shared with each invocation context. It performs only
-/// synchronous dispatch; handlers run on the caller's thread.
+/// `Core` owns the operation descriptors, the matching handler table, an
+/// optional pre-handler admission guard, and the optional receipt sink shared
+/// with each invocation context. It performs only synchronous dispatch;
+/// handlers run on the caller's thread.
 pub struct Core {
     pub(crate) descriptors: BTreeMap<String, operation::OperationDescriptor>,
     pub(crate) handlers: BTreeMap<String, BoxedHandler>,
+    pub(crate) admission_guard: Option<BoxedAdmissionGuard>,
     pub(crate) receipt_sink: Option<BoxedReceiptSink>,
+    pub(crate) status_sink: Option<BoxedStatusSink>,
     pub(crate) receipt_hash_policy: ReceiptHashPolicy,
+    /// Runtime-owned capability backend that performs declared effects (event
+    /// appends) so observation through `Ctx` is authoritative.
+    pub(crate) effect_backend: Option<BoxedEffectBackend>,
 }
 
 impl Core {
@@ -92,20 +112,140 @@ impl Core {
         ),
     )]
     pub fn checkout(&mut self, checkout: Checkout) -> Result<CheckoutResult, RuntimeError> {
-        let name = checkout.descriptor.name();
-        let descriptor = self.descriptors.get(name).cloned().ok_or_else(|| {
-            tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
-            RuntimeError::unknown_operation(name)
-        })?;
-        let handler = self.handlers.get_mut(name).ok_or_else(|| {
-            tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
-            RuntimeError::missing_handler(name)
-        })?;
-        let input = checkout.input;
-        let handler_result = {
-            let mut ctx = Ctx::new(&descriptor);
-            handler.handle(&input, &mut ctx)
+        let descriptor = {
+            let name = checkout.descriptor.name();
+            self.descriptors.get(name).cloned().ok_or_else(|| {
+                tracing::warn!(operation = %name, outcome = "unknown_operation", "checkout rejected");
+                RuntimeError::unknown_operation(name)
+            })?
         };
+        let name = descriptor.name();
+        let input = checkout.input;
+        let status_sink = self.status_sink.clone();
+        let receipt_hash_policy = self.receipt_hash_policy.clone();
+
+        // One borrowed context spans the optional guard and the handler, so a
+        // guard may stamp receipt metadata (e.g. correlation identity) that
+        // survives into the handler's eventual receipt.
+        let mut ctx = Ctx::new(&descriptor, self.effect_backend.as_deref_mut());
+
+        // Pre-handler admission: a guard may DENY before the handler runs. This
+        // is the only place `Core` dispatch emits `ReceiptOutcome::Denied`.
+        if let Some(guard) = self.admission_guard.as_deref() {
+            if let AdmissionDecision::Deny { code, message } =
+                guard.admit(&descriptor, &input, &mut ctx)
+            {
+                let metadata = ctx.into_metadata();
+                tracing::warn!(
+                    operation = %name,
+                    code = %code,
+                    message = %message,
+                    outcome = "denied",
+                    "checkout denied by admission guard",
+                );
+                let outcome = ReceiptOutcome::denied(code.clone(), message.clone());
+                record_runtime_status(RuntimeStatusRecord {
+                    status_sink: status_sink.as_deref(),
+                    receipt_hash_policy: &receipt_hash_policy,
+                    descriptor: &descriptor,
+                    lifecycle: OperationStatusLifecycle::Denied,
+                    input: &input,
+                    output: None,
+                    code: Some(code.clone()),
+                    message: Some(message.clone()),
+                    handler_cause: None,
+                })?;
+                self.record_runtime_receipt(&descriptor, &input, None, outcome, None, metadata)?;
+                tracing::Span::current().record("outcome", "denied");
+                return Err(RuntimeError::denied(name, code, message));
+            }
+        }
+
+        record_runtime_status(RuntimeStatusRecord {
+            status_sink: status_sink.as_deref(),
+            receipt_hash_policy: &receipt_hash_policy,
+            descriptor: &descriptor,
+            lifecycle: OperationStatusLifecycle::Started,
+            input: &input,
+            output: None,
+            code: None,
+            message: None,
+            handler_cause: None,
+        })?;
+
+        let Some(handler) = self.handlers.get_mut(name) else {
+            tracing::error!(operation = %name, outcome = "missing_handler", "checkout rejected");
+            record_runtime_status(RuntimeStatusRecord {
+                status_sink: status_sink.as_deref(),
+                receipt_hash_policy: &receipt_hash_policy,
+                descriptor: &descriptor,
+                lifecycle: OperationStatusLifecycle::Failed,
+                input: &input,
+                output: None,
+                code: Some("missing_handler".to_owned()),
+                message: Some("operation descriptor has no registered handler".to_owned()),
+                handler_cause: None,
+            })?;
+            return Err(RuntimeError::missing_handler(name));
+        };
+        let handler_result = handler.handle(&input, &mut ctx);
+        let observed_effects = ctx.observed_effects().clone();
+        let metadata = ctx.into_metadata();
+
+        self.finish_handler_phase(HandlerPhase {
+            name,
+            descriptor: &descriptor,
+            input: &input,
+            handler_result,
+            observed_effects: &observed_effects,
+            metadata,
+            status_sink: &status_sink,
+            receipt_hash_policy: &receipt_hash_policy,
+        })
+    }
+
+    fn finish_handler_phase(
+        &self,
+        phase: HandlerPhase<'_>,
+    ) -> Result<CheckoutResult, RuntimeError> {
+        let HandlerPhase {
+            name,
+            descriptor,
+            input,
+            handler_result,
+            observed_effects,
+            metadata,
+            status_sink,
+            receipt_hash_policy,
+        } = phase;
+        if let Some(violation) = observed_effects.first_violation_against(descriptor.effect_row()) {
+            tracing::warn!(
+                operation = %name,
+                code = %violation.code(),
+                message = %violation.message(),
+                outcome = "effect_denied",
+                "checkout denied by observed effect row",
+            );
+            let outcome = ReceiptOutcome::denied(violation.code(), violation.message());
+            record_runtime_status(RuntimeStatusRecord {
+                status_sink: status_sink.as_deref(),
+                receipt_hash_policy,
+                descriptor,
+                lifecycle: OperationStatusLifecycle::Denied,
+                input,
+                output: None,
+                code: Some(violation.code().to_owned()),
+                message: Some(violation.message().to_owned()),
+                handler_cause: None,
+            })?;
+            self.record_runtime_receipt(descriptor, input, None, outcome, None, metadata)?;
+            tracing::Span::current().record("outcome", "effect_denied");
+            return Err(RuntimeError::denied(
+                name,
+                violation.code(),
+                violation.message(),
+            ));
+        }
 
         let output = match handler_result {
             Ok(output) => output,
@@ -119,29 +259,53 @@ impl Core {
                     outcome = "handler_failed",
                     "checkout failed in handler",
                 );
+                record_runtime_status(RuntimeStatusRecord {
+                    status_sink: status_sink.as_deref(),
+                    receipt_hash_policy,
+                    descriptor,
+                    lifecycle: OperationStatusLifecycle::Failed,
+                    input,
+                    output: None,
+                    code: Some(cause.code().to_owned()),
+                    message: Some(cause.message().to_owned()),
+                    handler_cause: Some(cause.clone()),
+                })?;
                 self.record_runtime_receipt(
-                    &descriptor,
-                    &input,
+                    descriptor,
+                    input,
                     None,
                     outcome,
                     Some(cause.clone()),
+                    metadata,
                 )?;
                 return Err(RuntimeError::handler(name, cause.code(), cause.message()));
             }
         };
         let recorded_receipt = self.record_runtime_receipt(
-            &descriptor,
-            &input,
+            descriptor,
+            input,
             Some(output.as_slice()),
             ReceiptOutcome::Completed,
             None,
+            metadata,
         )?;
+        record_runtime_status(RuntimeStatusRecord {
+            status_sink: status_sink.as_deref(),
+            receipt_hash_policy,
+            descriptor,
+            lifecycle: OperationStatusLifecycle::Completed,
+            input,
+            output: Some(output.as_slice()),
+            code: None,
+            message: None,
+            handler_cause: None,
+        })?;
         let span = tracing::Span::current();
         span.record("output_bytes", output.len());
         span.record("outcome", "completed");
 
         Ok(CheckoutResult {
-            descriptor,
+            descriptor: descriptor.clone(),
             output,
             recorded_receipt,
         })
@@ -154,6 +318,7 @@ impl Core {
         output: Option<&[u8]>,
         outcome: ReceiptOutcome,
         handler_cause: Option<ReceiptSinkHandlerCause>,
+        metadata: ReceiptMetadata,
     ) -> Result<Option<RecordedReceipt>, RuntimeError> {
         let Some(sink) = self.receipt_sink.as_deref() else {
             return Ok(None);
@@ -168,6 +333,11 @@ impl Core {
                 envelope = envelope.with_output_hash(hash);
             }
         }
+        // Drain handler/guard-attached metadata into the receipt drawers. The
+        // runtime still owns the envelope; the handler only contributed opaque
+        // bytes via its `Ctx`.
+        envelope.signed_extensions.extend(metadata.signed);
+        envelope.local_extensions.extend(metadata.local);
 
         sink.record_receipt(&envelope).map(Some).map_err(|error| {
             let message = error.to_string();
@@ -178,6 +348,71 @@ impl Core {
             }
         })
     }
+}
+
+struct HandlerPhase<'a> {
+    name: &'a str,
+    descriptor: &'a operation::OperationDescriptor,
+    input: &'a [u8],
+    handler_result: HandlerResult,
+    observed_effects: &'a OperationEffectRow,
+    metadata: ReceiptMetadata,
+    status_sink: &'a Option<BoxedStatusSink>,
+    receipt_hash_policy: &'a ReceiptHashPolicy,
+}
+
+struct RuntimeStatusRecord<'a> {
+    status_sink: Option<&'a (dyn OperationStatusSink + Send + Sync)>,
+    receipt_hash_policy: &'a ReceiptHashPolicy,
+    descriptor: &'a operation::OperationDescriptor,
+    lifecycle: OperationStatusLifecycle,
+    input: &'a [u8],
+    output: Option<&'a [u8]>,
+    code: Option<String>,
+    message: Option<String>,
+    handler_cause: Option<ReceiptSinkHandlerCause>,
+}
+
+fn record_runtime_status(record: RuntimeStatusRecord<'_>) -> Result<(), RuntimeError> {
+    let RuntimeStatusRecord {
+        status_sink,
+        receipt_hash_policy,
+        descriptor,
+        lifecycle,
+        input,
+        output,
+        code,
+        message,
+        handler_cause,
+    } = record;
+    let Some(sink) = status_sink else {
+        return Ok(());
+    };
+
+    let fact = if lifecycle == OperationStatusLifecycle::Started {
+        OperationStatusFactV1::started(descriptor.name(), descriptor.receipt_kind())
+    } else {
+        let input_hash = receipt_hash_policy.hash(input);
+        let output_hash = output.and_then(|bytes| receipt_hash_policy.hash(bytes));
+        OperationStatusFactV1::terminal(
+            descriptor.name(),
+            lifecycle,
+            descriptor.receipt_kind(),
+            code,
+            message,
+            input_hash,
+            output_hash,
+        )
+    };
+
+    sink.record_fact(&fact).map_err(|error| {
+        let message = error.to_string();
+        if let Some(cause) = handler_cause {
+            RuntimeError::status_sink_after_handler_failure(descriptor.name(), message, cause)
+        } else {
+            RuntimeError::status_sink(descriptor.name(), message)
+        }
+    })
 }
 
 /// Unresolved checkout request passed to a runtime.
@@ -257,20 +492,102 @@ impl Checkout {
     }
 }
 
-/// Minimal borrowed invocation context passed to handlers.
+/// Minimal borrowed invocation context passed to handlers (and the admission
+/// guard).
+///
+/// Beyond the descriptor, a handler or guard may attach opaque receipt metadata
+/// to the current invocation; the runtime drains it into the recorded receipt.
+/// The handler never owns the receipt envelope — it only contributes bytes.
 pub struct Ctx<'a> {
     descriptor: &'a operation::OperationDescriptor,
+    metadata: ReceiptMetadata,
+    observed_effects: OperationEffectRow,
+    effect_backend: Option<&'a mut (dyn EffectBackend + 'static)>,
 }
 
 impl<'a> Ctx<'a> {
-    pub(crate) fn new(descriptor: &'a operation::OperationDescriptor) -> Self {
-        Self { descriptor }
+    pub(crate) fn new(
+        descriptor: &'a operation::OperationDescriptor,
+        effect_backend: Option<&'a mut (dyn EffectBackend + 'static)>,
+    ) -> Self {
+        Self {
+            descriptor,
+            metadata: ReceiptMetadata::default(),
+            observed_effects: OperationEffectRow::empty(),
+            effect_backend,
+        }
     }
 
     /// Descriptor for the operation currently being invoked.
     #[must_use]
     pub fn descriptor(&self) -> &'a operation::OperationDescriptor {
         self.descriptor
+    }
+
+    /// Attach one entry to the SIGNED receipt drawer of this invocation. The
+    /// store sink copies signed entries into batpak receipt extensions, so this
+    /// is where correlation/attempt identity belongs.
+    pub fn attach_signed_extension(&mut self, key: impl Into<String>, value: impl Into<Vec<u8>>) {
+        self.metadata.signed.insert(key.into(), value.into());
+    }
+
+    /// Attach one entry to the LOCAL receipt drawer of this invocation. Local
+    /// entries stay in the receipt envelope body and are not promoted to batpak
+    /// receipt extensions.
+    pub fn attach_local_extension(&mut self, key: impl Into<String>, value: impl Into<Vec<u8>>) {
+        self.metadata.local.insert(key.into(), value.into());
+    }
+
+    /// Borrow an event-read capability handle for this invocation.
+    pub fn event_read_handle(&mut self) -> EventReadHandle<'_> {
+        EventReadHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Borrow an event-append capability handle for this invocation. This is the
+    /// only path to the runtime's event log; the handle performs the append and
+    /// records it so the observed row is authoritative.
+    pub fn event_append_handle(&mut self) -> EventAppendHandle<'_> {
+        EventAppendHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Borrow a projection-read capability handle for this invocation.
+    pub fn projection_read_handle(&mut self) -> ProjectionReadHandle<'_> {
+        ProjectionReadHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Borrow a receipt-emission capability handle for this invocation.
+    pub fn receipt_emit_handle(&mut self) -> ReceiptEmitHandle<'_> {
+        ReceiptEmitHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Borrow a host-control capability handle for this invocation.
+    pub fn host_control_handle(&mut self) -> HostControlHandle<'_> {
+        HostControlHandle::new(
+            &mut self.observed_effects,
+            self.effect_backend.as_deref_mut(),
+        )
+    }
+
+    /// Effects observed so far through this invocation context.
+    #[must_use]
+    pub fn observed_effects(&self) -> &OperationEffectRow {
+        &self.observed_effects
+    }
+
+    pub(crate) fn into_metadata(self) -> ReceiptMetadata {
+        self.metadata
     }
 }
 
@@ -304,6 +621,26 @@ impl CheckoutResult {
     #[must_use]
     pub fn into_output(self) -> operation::OperationOutput {
         self.output
+    }
+}
+
+/// Factory for opening independent [`Core`] instances.
+///
+/// Concurrent netbat TCP listeners call this once per accepted connection
+/// because [`Core`] dispatch is `&mut` and handlers are not required to be
+/// `Send`. Implementors must be [`Send`] so the accept loop can share the
+/// factory across worker threads behind a mutex.
+pub trait CoreFactory: Send {
+    /// Open a fresh core for one connection or invocation scope.
+    fn open_core(&mut self) -> Core;
+}
+
+impl<F> CoreFactory for F
+where
+    F: FnMut() -> Core + Send,
+{
+    fn open_core(&mut self) -> Core {
+        self()
     }
 }
 

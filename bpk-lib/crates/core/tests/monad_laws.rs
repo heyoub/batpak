@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; proptest assertions in tests/monad_laws.rs match on the happy-case arm and use a wildcard fallback to report counterexamples without enumerating every failure variant.
-#![allow(clippy::wildcard_enum_match_arm)]
 //! Proptest verification of Outcome<T> monad laws.
 //! Left identity, right identity, associativity, and Batch distribution.
 //!
@@ -11,9 +9,8 @@
 //! bound on join_all (Phase 1.4) — proptest generates Batch(vec![Ok(x)]) cases
 //! that exercise the .map() path requiring Clone.
 
-mod support;
+use batpak_testkit::prelude::*;
 use proptest::prelude::*;
-use support::prelude::*;
 #[path = "common/proptest.rs"]
 mod proptest_support;
 
@@ -124,13 +121,13 @@ proptest! {
         outcomes.push(Outcome::Err(err.clone()));
         outcomes.push(Outcome::Ok(42)); // should never be reached
         let result = batpak::outcome::join_all(outcomes);
-        match result {
-            Outcome::Err(e) => prop_assert_eq!(e.message, "test error",
-                "JOIN_ALL SHORT-CIRCUIT: join_all should propagate the Err message unchanged.\n\
-                 Investigate: src/outcome/combine.rs join_all.\n\
-                 Common causes: error message overwritten or not forwarded from Err variant.\n\
-                 Run: cargo test --test monad_laws join_all_first_err_wins"),
-            other => prop_assert!(false, "Expected Err, got {:?}", other),
-        }
+        prop_assert!(
+            matches!(&result, Outcome::Err(e) if e.message == "test error"),
+            "JOIN_ALL SHORT-CIRCUIT: join_all should propagate the Err message unchanged, got {:?}.\n\
+             Investigate: src/outcome/combine.rs join_all.\n\
+             Common causes: error message overwritten or not forwarded from Err variant.\n\
+             Run: cargo test --test monad_laws join_all_first_err_wins",
+            result
+        );
     }
 }

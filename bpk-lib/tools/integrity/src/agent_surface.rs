@@ -62,7 +62,7 @@ struct AgentTask {
 
 pub(crate) fn run(repo_root: &Path) -> Result<()> {
     check(repo_root)?;
-    println!("agent-surface-check: ok");
+    outln!("agent-surface-check: ok");
     Ok(())
 }
 

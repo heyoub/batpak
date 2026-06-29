@@ -23,6 +23,14 @@ pub(crate) enum StoreFileKind {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ForkStrategy {
+    ShareIfPossible,
+    DeepCopyAlways,
+    CacheRegenerable,
+    Exclude,
+}
+
 impl StoreFileKind {
     pub(crate) fn from_path(path: &Path) -> Self {
         if path.extension().is_some_and(|ext| ext == SEGMENT_EXTENSION) {
@@ -93,5 +101,63 @@ impl StoreFileKind {
                 | Self::PendingCompactionMarker
                 | Self::CompactSource
         )
+    }
+
+    pub(crate) fn fork_strategy(&self, active_segment_id: u64) -> ForkStrategy {
+        match self {
+            Self::Segment(segment_id) if segment_id.as_u64() < active_segment_id => {
+                ForkStrategy::ShareIfPossible
+            }
+            Self::Segment(segment_id) if segment_id.as_u64() == active_segment_id => {
+                ForkStrategy::DeepCopyAlways
+            }
+            Self::VisibilityRanges | Self::IdempotencyStore | Self::PendingCompactionMarker => {
+                ForkStrategy::DeepCopyAlways
+            }
+            Self::Checkpoint | Self::MmapIndex => ForkStrategy::CacheRegenerable,
+            Self::Segment(_)
+            | Self::MalformedSegment(_)
+            | Self::CompactSource
+            | Self::CursorDirectory
+            | Self::Other => ForkStrategy::Exclude,
+        }
+    }
+
+    pub(crate) fn should_clear_from_fork_destination(&self) -> bool {
+        matches!(
+            self,
+            Self::Segment(_)
+                | Self::MalformedSegment(_)
+                | Self::VisibilityRanges
+                | Self::Checkpoint
+                | Self::MmapIndex
+                | Self::IdempotencyStore
+                | Self::PendingCompactionMarker
+                | Self::CompactSource
+                | Self::CursorDirectory
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StoreFileKind;
+    use crate::store::segment::SegmentId;
+
+    #[test]
+    fn should_clear_from_fork_destination_discriminates_store_artifacts_from_other() {
+        // PROPERTY: the fork pre-clear pass must wipe store-shaped artifacts left
+        // in a destination but leave foreign files (`Other`) untouched. A blanket
+        // `-> true` would also clear caller files, so assert BOTH polarities.
+        // Kills `should_clear_from_fork_destination -> bool with true`.
+        assert!(
+            !StoreFileKind::Other.should_clear_from_fork_destination(),
+            "a foreign (Other) file must NOT be cleared from a fork destination"
+        );
+        let segment_id = SegmentId::from_stem("0").expect("base-10 stem parses");
+        assert!(
+            StoreFileKind::Segment(segment_id).should_clear_from_fork_destination(),
+            "a store segment MUST be cleared from a fork destination before copy"
+        );
     }
 }

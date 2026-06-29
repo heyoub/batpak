@@ -9,7 +9,7 @@ pub(crate) fn staged_diff() -> Result<()> {
     let root = project_root()?;
     let entries = staged_entries(&root)?;
     if entries.is_empty() {
-        println!("staged-diff: ok; no staged files");
+        outln!("staged-diff: ok; no staged files");
         return Ok(());
     }
 
@@ -28,17 +28,17 @@ pub(crate) fn staged_diff() -> Result<()> {
     }
 
     for (status, count) in counts {
-        println!("staged-diff: {status}: {count}");
+        outln!("staged-diff: {status}: {count}");
     }
 
     if !violations.is_empty() {
         for violation in &violations {
-            eprintln!("staged-diff: forbidden staged path: {violation}");
+            errln!("staged-diff: forbidden staged path: {violation}");
         }
         bail!("staged-diff found {} issue(s)", violations.len());
     }
 
-    println!("staged-diff: ok; {} staged file(s)", entries.len());
+    outln!("staged-diff: ok; {} staged file(s)", entries.len());
     Ok(())
 }
 

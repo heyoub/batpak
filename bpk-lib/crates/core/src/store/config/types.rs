@@ -6,8 +6,30 @@ use std::sync::Arc;
 /// User-supplied hook fired after a successful store open completes.
 pub type OpenReportObserver = Arc<dyn Fn(&OpenIndexReport) + Send + Sync>;
 
+/// How the writer pipeline is driven.
+///
+/// `Threaded` is the production default: a dedicated OS (or sim) thread owns the
+/// writer state and pulls commands off the channel. `Cooperative` runs the
+/// writer inline on the calling thread — there is NO writer thread; the command
+/// queue is pumped whenever a reply is awaited. Cooperative drive is a
+/// deterministic-simulation primitive, kept `pub(crate)` (not public API).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum WriterMode {
+    /// Production: the writer runs on a spawned thread.
+    #[default]
+    Threaded,
+    /// Single-threaded: the writer is driven inline by pumping the queue.
+    ///
+    /// Only constructible under `dangerous-test-hooks` (via
+    /// `StoreConfig::with_writer_mode` / `Store::open_cooperative`): cooperative
+    /// drive is a deterministic-simulation primitive, not a production path.
+    #[cfg(feature = "dangerous-test-hooks")]
+    Cooperative,
+}
+
 /// Sync strategy for segment fsync.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub enum SyncMode {
     /// sync_all: syncs data + metadata (safest, slower)
     #[default]
@@ -28,13 +50,6 @@ pub struct IndexTopology {
     entity_groups: bool,
     /// Enable the AoSoA64 tiled overlay for replay/scanning hot loops.
     tiles64: bool,
-    /// Enable the experimental AoSoA64Simd mixed-kind tiled overlay.
-    ///
-    /// Unlike `tiles64` (kind-homogeneous tiles + tile-skip), `tiles64_simd`
-    /// uses mixed-kind tiles with an inline `[u16; 64]` kinds array designed
-    /// for auto-vectorizable comparison. These two overlays are mutually
-    /// exclusive in practice — enable one or the other, not both.
-    tiles64_simd: bool,
 }
 
 impl IndexTopology {
@@ -44,7 +59,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: false,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -54,7 +68,6 @@ impl IndexTopology {
             soa: true,
             entity_groups: false,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -64,7 +77,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: true,
             tiles64: false,
-            tiles64_simd: false,
         }
     }
 
@@ -74,18 +86,6 @@ impl IndexTopology {
             soa: false,
             entity_groups: false,
             tiles64: true,
-            tiles64_simd: false,
-        }
-    }
-
-    /// Base AoS maps plus the experimental AoSoA64Simd overlay (mixed-kind, inline
-    /// kinds array, auto-vectorizable scan). Benchmarked head-to-head against `tiled`.
-    pub fn tiled_simd() -> Self {
-        Self {
-            soa: false,
-            entity_groups: false,
-            tiles64: false,
-            tiles64_simd: true,
         }
     }
 
@@ -95,7 +95,6 @@ impl IndexTopology {
             soa: true,
             entity_groups: true,
             tiles64: true,
-            tiles64_simd: false,
         }
     }
 
@@ -117,12 +116,6 @@ impl IndexTopology {
         self
     }
 
-    /// Enable or disable the experimental AoSoA64Simd overlay.
-    pub fn with_tiles64_simd(mut self, enabled: bool) -> Self {
-        self.tiles64_simd = enabled;
-        self
-    }
-
     pub(crate) fn soa_enabled(&self) -> bool {
         self.soa
     }
@@ -133,10 +126,6 @@ impl IndexTopology {
 
     pub(crate) fn tiles64_enabled(&self) -> bool {
         self.tiles64
-    }
-
-    pub(crate) fn tiles64_simd_enabled(&self) -> bool {
-        self.tiles64_simd
     }
 }
 

@@ -1,10 +1,10 @@
 //! PROVES: INV-SYNCBAT-DISPATCH-RECEIPTS
 //! CATCHES: receipt-envelope persistence drift between syncbat receipts and batpak append receipts.
 //! SEEDED: tempfile-backed batpak stores and fixed operation descriptors.
-#![allow(clippy::panic)]
 
 use std::sync::Arc;
 
+use batpak::id::EntityIdType;
 use batpak::prelude::*;
 use batpak::store::{AppendOptions, ExtensionKey, Store, StoreConfig};
 use syncbat::{
@@ -52,11 +52,11 @@ fn syncbat_key(field: &str) -> ExtensionKey {
 }
 
 fn close_store(store: Arc<Store>) {
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("expected test to release all Store references before close"),
-    };
-    store.close().expect("close store");
+    Store::sync(store.as_ref()).expect("sync store before close");
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("expected test to release all Store references before close");
+    drop(store);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn store_receipt_sink_persists_envelope_and_signed_extensions() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(fields.event_id));
+    assert_eq!(hits[0].event_id().as_u128(), u128::from(fields.event_id));
     assert_eq!(hits[0].global_sequence(), fields.sequence);
     assert_eq!(hits[0].hash_chain().event_hash, fields.content_hash);
     assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
@@ -164,7 +164,7 @@ fn core_with_store_receipt_sink_banks_success_receipt_once() {
 
     let hits = store.query(&Region::entity("syncbat:receipt"));
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(fields.event_id));
+    assert_eq!(hits[0].event_id().as_u128(), u128::from(fields.event_id));
     assert_eq!(hits[0].receipt_extensions(), &fields.extensions);
 
     drop(core);

@@ -1,9 +1,11 @@
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
+
+use syncbat::CoreFactory;
 
 use super::error::NetbatError;
 use super::frame::{decode_line, dispatch_frame, encode_response, ResponseFrame};
@@ -212,52 +214,61 @@ where
     response
 }
 
-/// Serve a blocking TCP listener sequentially until shutdown or limits stop it.
+/// Serve a blocking TCP listener until shutdown or limits stop it.
 ///
 /// The listener is switched to nonblocking mode so [`ShutdownHandle`] can stop
 /// the accept loop without opening a synthetic connection. Each accepted stream
 /// is switched back to blocking mode before reads: on Windows (and most
 /// non-Linux platforms) accepted sockets inherit the listener's nonblocking
 /// flag, which would otherwise surface `WouldBlock` from `read_line` instead of
-/// waiting for request bytes. Each connection is served on the caller's thread;
-/// `netbat` does not spawn worker threads and does not require syncbat handlers
-/// to be `Send`.
+/// waiting for request bytes.
 ///
 /// # Concurrency
-/// The accept loop is single-threaded and sequential: each connection is fully
-/// served (up to `max_requests_per_connection`, bounded by `timeouts`) before
-/// the next is accepted. A slow client therefore head-of-line-blocks others for
-/// its timeout window, and `max_connections` is a lifetime accept budget, not a
-/// concurrency limit. Concurrent acceptance is deferred (0.8.3 audit C2): it
-/// needs a `Core`-factory API because `Core` is `&mut`/non-`Send`.
+/// The accept loop stays on the caller's thread and spawns one worker thread
+/// per accepted connection. Each worker opens a fresh [`syncbat::Core`] from
+/// `core_factory` because `Core` dispatch is `&mut` and handlers are not
+/// required to be `Send`. Connection stats are merged through a bounded flume
+/// lane after workers join, so a slow client cannot head-of-line-block accept
+/// or service of other clients. `max_connections` remains a lifetime accept
+/// budget, not an in-flight concurrency cap.
 ///
 /// # Errors
-/// Returns [`NetbatError`] when listener configuration, accept, timeout
-/// configuration, or response writes fail. Per-request decode/runtime errors
-/// are counted in [`TcpServeStats::failed_requests`] after their error response
-/// is written.
+/// Returns [`NetbatError`] when listener configuration, accept, worker spawn,
+/// timeout configuration, or response writes fail. Per-request decode/runtime
+/// errors are counted in [`TcpServeStats::failed_requests`] after their error
+/// response is written.
 #[tracing::instrument(name = "netbat.serve_tcp_listener", skip_all, fields(
     addr = %listener.local_addr().map(|a| a.to_string()).unwrap_or_default(),
     max_connections = config.max_connections,
 ))]
-pub fn serve_tcp_listener(
+pub fn serve_tcp_listener<F>(
     listener: TcpListener,
-    core: &mut syncbat::Core,
+    core_factory: F,
     config: &TcpServerConfig,
     shutdown: &ShutdownHandle,
-) -> Result<TcpServeStats, NetbatError> {
+) -> Result<TcpServeStats, NetbatError>
+where
+    F: CoreFactory + Send + 'static,
+{
     listener.set_nonblocking(true)?;
     let mut stats = TcpServeStats::default();
+    let (stats_tx, stats_rx) = flume::bounded(config.max_connections.max(1));
+    let factory = Arc::new(Mutex::new(core_factory));
+    let mut workers: Vec<JoinHandle<()>> = Vec::new();
     tracing::info!("accept loop started");
 
     while !shutdown.is_shutdown() && stats.accepted_connections < config.max_connections {
+        drain_connection_stats(&mut stats, &stats_rx);
         match listener.accept() {
             Ok((stream, addr)) => {
                 stats.accepted_connections += 1;
                 tracing::debug!(peer = %addr, "connection accepted");
                 stream.set_nonblocking(false)?;
                 apply_timeouts(&stream, config.timeouts)?;
-                serve_tcp_connection(stream, core, config, &mut stats)?;
+                let config = *config;
+                let stats_tx = stats_tx.clone();
+                let factory = Arc::clone(&factory);
+                workers.push(spawn_connection_worker(stream, config, stats_tx, factory)?);
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(config.idle_sleep);
@@ -266,6 +277,13 @@ pub fn serve_tcp_listener(
             Err(error) => return Err(error.into()),
         }
     }
+
+    for worker in workers {
+        worker.join().map_err(|_| NetbatError::Io {
+            kind: io::ErrorKind::Other,
+        })?;
+    }
+    drain_connection_stats(&mut stats, &stats_rx);
 
     stats.shutdown_requested = shutdown.is_shutdown();
     tracing::info!(
@@ -277,6 +295,45 @@ pub fn serve_tcp_listener(
     );
     drop(listener);
     Ok(stats)
+}
+
+fn spawn_connection_worker<F>(
+    stream: TcpStream,
+    config: TcpServerConfig,
+    stats_tx: flume::Sender<TcpServeStats>,
+    factory: Arc<Mutex<F>>,
+) -> Result<JoinHandle<()>, NetbatError>
+where
+    F: CoreFactory + Send + 'static,
+{
+    thread::Builder::new()
+        .name("netbat-tcp-conn".to_owned())
+        .spawn(move || {
+            let mut core = match factory.lock() {
+                Ok(mut factory) => factory.open_core(),
+                Err(_) => return,
+            };
+            let mut conn_stats = TcpServeStats::default();
+            if serve_tcp_connection(stream, &mut core, &config, &mut conn_stats).is_ok() {
+                let _ = stats_tx.send(conn_stats);
+            }
+        })
+        .map_err(NetbatError::from)
+}
+
+fn drain_connection_stats(total: &mut TcpServeStats, stats_rx: &flume::Receiver<TcpServeStats>) {
+    while let Ok(partial) = stats_rx.try_recv() {
+        merge_tcp_serve_stats(total, partial);
+    }
+}
+
+fn merge_tcp_serve_stats(total: &mut TcpServeStats, partial: TcpServeStats) {
+    total.served_requests += partial.served_requests;
+    total.failed_requests += partial.failed_requests;
+    total.malformed_requests += partial.malformed_requests;
+    total.limit_failures += partial.limit_failures;
+    total.runtime_failures += partial.runtime_failures;
+    total.connection_io_failures += partial.connection_io_failures;
 }
 
 fn serve_tcp_connection(
@@ -340,13 +397,16 @@ fn serve_connection_loop<S: Read + Write>(
     Ok(())
 }
 
-fn apply_timeouts(stream: &TcpStream, timeouts: IoTimeouts) -> Result<(), NetbatError> {
+pub(crate) fn apply_timeouts(stream: &TcpStream, timeouts: IoTimeouts) -> Result<(), NetbatError> {
     stream.set_read_timeout(timeouts.read)?;
     stream.set_write_timeout(timeouts.write)?;
     Ok(())
 }
 
-fn read_line<R: Read>(reader: &mut R, max_line_bytes: usize) -> Result<Vec<u8>, NetbatError> {
+pub(crate) fn read_line<R: Read>(
+    reader: &mut R,
+    max_line_bytes: usize,
+) -> Result<Vec<u8>, NetbatError> {
     let mut line = Vec::new();
     let mut byte = [0_u8; 1];
 
@@ -380,6 +440,11 @@ fn record_request_failure(stats: &mut TcpServeStats, error: &NetbatError) {
         NetbatError::MalformedRequest { .. } | NetbatError::UnsupportedProtocolVersion { .. } => {
             stats.malformed_requests += 1;
         }
+        NetbatError::MalformedStreamFrame { .. } => stats.malformed_requests += 1,
+        NetbatError::SubscriptionIdTooLong { .. }
+        | NetbatError::CursorTooLarge { .. }
+        | NetbatError::StreamPayloadTooLarge { .. }
+        | NetbatError::StreamMessageTooLarge { .. } => stats.limit_failures += 1,
         NetbatError::Runtime(_) => stats.runtime_failures += 1,
         NetbatError::Io { .. } | NetbatError::EmptyStream => {}
     }

@@ -1,0 +1,68 @@
+# model_bindings.yaml — bind 02_MODEL.md narrative concepts to REAL exported symbols
+# (D5). 02_MODEL.md is narrative ontology; this file pins each named concept and each
+# Beginner-Store-Path step to an actual entry in the sealed public surface
+# (traceability/public_api/batpak.txt), so the model cannot describe a symbol that
+# has been renamed or removed (the exact docs-currency rot, e.g. the deleted
+# `refbat` row). Enforced by `tools/integrity/src/model_bindings.rs::check`, wired
+# into traceability-check.
+#
+# Per binding:
+#   concept:    short label for the report
+#   doc_phrase: a substring that MUST appear verbatim in 02_MODEL.md (so the binding
+#               cannot drift away from a concept the doc actually names)
+#   symbol:     a substring that MUST appear in public_api/batpak.txt (the sealed
+#               exported surface), proving the named symbol really is exported
+#   kind:       `type` (an engineering-name object) or `method` (a store-path step)
+
+bindings:
+  # --- Engineering Names (02_MODEL.md "Engineering Names" + "Family Stack"). ---
+  - concept: Store
+    doc_phrase: "`batpak::Store`"
+    symbol: "pub struct batpak::store::Store"
+    kind: type
+  - concept: Coordinate
+    doc_phrase: "- `Coordinate`"
+    symbol: "pub struct batpak::coordinate::Coordinate"
+    kind: type
+  - concept: Event
+    doc_phrase: "- `Event`"
+    symbol: "pub struct batpak::event::Event<P>"
+    kind: type
+  - concept: Receipt
+    doc_phrase: "- `Receipt`"
+    symbol: "pub struct batpak::guard::receipt::Receipt<T>"
+    kind: type
+  - concept: Gate
+    doc_phrase: "- `Gate`"
+    symbol: "pub trait batpak::guard::Gate<Ctx>"
+    kind: type
+
+  # --- Beginner Store Path (02_MODEL.md "Beginner Store Path" code block). ---
+  - concept: Store::open
+    doc_phrase: "Store::open"
+    symbol: "pub fn batpak::store::Store<batpak::store::Open>::open("
+    kind: method
+  - concept: append_typed
+    doc_phrase: "append_typed"
+    symbol: "pub fn batpak::store::Store<batpak::store::Open>::append_typed"
+    kind: method
+  - concept: query_entries_after
+    doc_phrase: "query_entries_after"
+    symbol: "pub fn batpak::store::Store<State>::query_entries_after("
+    kind: method
+  - concept: get
+    doc_phrase: "-> get"
+    symbol: "pub fn batpak::store::Store<State>::get("
+    kind: method
+  - concept: walk_ancestors
+    doc_phrase: "walk_ancestors"
+    symbol: "pub fn batpak::store::Store<State>::walk_ancestors("
+    kind: method
+  - concept: project
+    doc_phrase: "project / project_if_changed"
+    symbol: "pub fn batpak::store::Store<State>::project<T>("
+    kind: method
+  - concept: project_if_changed
+    doc_phrase: "project_if_changed"
+    symbol: "pub fn batpak::store::Store<State>::project_if_changed<T>("
+    kind: method

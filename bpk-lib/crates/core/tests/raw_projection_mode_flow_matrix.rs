@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection flow-matrix tests in tests/raw_projection_mode_flow_matrix.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: flow-matrix and maybe-stale cache replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -14,18 +12,15 @@
 
 use std::sync::Arc;
 
-mod support;
 use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/raw_projection_mode.rs"]
-mod rpm_support;
+use batpak_testkit::raw_projection_mode as rpm_support;
 use rpm_support::{CounterDelta, KIND};
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
+use batpak_testkit::bounded_blocking;
 use bounded_blocking::blocking;
 
 const NOISE_KIND: EventKind = EventKind::custom(0xF, 0x32);
@@ -42,6 +37,8 @@ struct ValueCounter {
 
 impl EventSourced for ValueCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-flow-value-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -64,6 +61,10 @@ impl EventSourced for ValueCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 impl MatrixCounterState for ValueCounter {
@@ -80,6 +81,8 @@ struct RawCounter {
 
 impl EventSourced for RawCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-flow-raw-counter");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -101,6 +104,10 @@ impl EventSourced for RawCounter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -130,7 +137,7 @@ fn seeded_store() -> (TempDir, Arc<Store>) {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -155,7 +162,7 @@ fn cached_seeded_store() -> (TempDir, Arc<Store>) {
     );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -184,7 +191,7 @@ macro_rules! observe_projection_flow_matrix_case {
             Arc::clone(&store).watch_projection::<$ty>("entity:raw-proj", Freshness::Consistent);
         let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-        store
+        let _ = store
             .append(
                 &coord,
                 case.append_kind,
@@ -195,7 +202,9 @@ macro_rules! observe_projection_flow_matrix_case {
             )
             .expect("append matrix event");
 
-        let (watched_generation, watched_state) = blocking("raw-projection-watch-recv", move || watcher.recv()).expect("watch projection recv");
+        let (watched_generation, watched_state) =
+            blocking("raw-projection-watch-recv", move || watcher.recv())
+                .expect("watch projection recv");
         let watched_state = watched_state.expect("watch projection state");
         let changed = store
             .project_if_changed::<$ty>(
@@ -254,13 +263,9 @@ macro_rules! observe_projection_flow_matrix_case {
              state changes from generation-only changes.",
             case.label
         );
-        let store = match Arc::try_unwrap(store) {
-            Ok(store) => store,
-            Err(_) => panic!(
-                "PROPERTY: projection flow matrix cell '{}' should release all Arc clones before close",
-                case.label
-            ),
-        };
+        let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+            "PROPERTY: projection flow matrix cell should release all Arc clones before close",
+        );
         store.close().expect("close matrix store");
 
         ProjectionFlowObservation {
@@ -329,7 +334,7 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
     );
 
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -413,9 +418,8 @@ fn projection_flow_maybe_stale_keeps_replay_lanes_equivalent() {
         "PROPERTY: raw and value replay lanes must agree on the strict replay branch."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: maybe-stale matrix must release all Arc clones before close"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: maybe-stale matrix must release all Arc clones before close");
     store.close().expect("close maybe stale matrix store");
 }

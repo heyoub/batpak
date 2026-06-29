@@ -1,6 +1,7 @@
-// justifies: INV-BUILD-FAIL-FAST; build.rs consolidates panic through the `fail` helper below, see build.rs and traceability/invariants.yaml
-#![allow(clippy::panic)]
-
+// INV-BUILD-FAIL-FAST: build.rs consolidates every invariant violation through
+// the `fail` helper below, which returns an error string that `?`-propagates to
+// `main`; cargo treats a `main() -> Result` Err as a build failure. See
+// traceability/invariants.yaml.
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
@@ -20,15 +21,24 @@ mod shared_checks {
         env!("CARGO_MANIFEST_DIR"),
         "/build_support/build_receipts.rs"
     ));
+    // The SHARED no-async-runtime dep-graph scanner (D10). The same source is
+    // compiled into the `batpak-integrity` binary, so the build.rs sentinel and
+    // the authoritative gate share ONE verdict, not two divergent greps. It runs
+    // `cargo metadata` and walks the RESOLVED production graph.
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/build_support/no_runtime_scanner.rs"
+    ));
 }
 
 /// Single documented failure path for build.rs. Every invariant violation
-/// routes through here so the panic surface is consolidated and auditable.
-/// Emits a cargo-parseable warning on stdout, then panics so Cargo stops the
-/// build without relying on `process::exit`.
-fn fail(msg: &str) -> ! {
+/// routes through here so the failure surface is consolidated and auditable.
+/// Emits a cargo-parseable warning on stdout, then RETURNS the error string;
+/// call sites `return Err(fail(..))` (or `?`-propagate) so the error reaches
+/// `main`, whose `Err` makes Cargo stop the build without any `panic!`.
+fn fail(msg: &str) -> String {
     println!("cargo:warning=build.rs: {msg}");
-    panic!("build.rs invariant failed: {msg}")
+    format!("build.rs invariant failed: {msg}")
 }
 
 /// Mirror of a `traceability/typed_waivers.yaml` entry, build-time view. The
@@ -47,16 +57,36 @@ struct TypedWaiverEntry {
 
 // build.rs runs before every cargo build/check/test. Cannot be skipped.
 // It enforces live runtime invariants at build time so agents get English
-// errors instead of cryptic compiler failures. See README.md, MODEL.md,
-// INVARIANTS.md, and CONFORMANCE.md for the current truth hierarchy.
-fn main() {
+// errors instead of cryptic compiler failures. See README.md, 02_MODEL.md,
+// 03_INVARIANTS.md, and 12_CONFORMANCE.md for the current truth hierarchy.
+fn main() -> Result<(), String> {
+    // Register the intentionally-undeclared impossible-feature guard cfgs so
+    // rustc's `unexpected_cfgs` lint recognizes them as known-but-disabled
+    // features instead of warning on the `#[cfg(feature = "...")]` tripwires in
+    // src/lib.rs, src/store/mod.rs, and src/store/write/writer.rs. These three
+    // feature names are deliberately absent from Cargo.toml: each guards a
+    // `compile_error!` that fires only if someone adds the feature, enforcing
+    // INV-STORE-SYNC-ONLY (async-store), blake3-only hashing (sha256), and the
+    // Once/Bounded-only restart policy (exponential-backoff, ADR-0006).
+    // Registering them here lets every guard compile warning-free without any
+    // `#[allow(unexpected_cfgs)]`.
+    for feature in ["async-store", "sha256", "exponential-backoff"] {
+        println!("cargo::rustc-check-cfg=cfg(feature, values(\"{feature}\"))");
+    }
+    // `batpak_stable_docs` is a plain `--cfg` flag (NOT a Cargo feature) set when
+    // building local stable-toolchain docs to avoid the nightly-only `doc_cfg`
+    // attribute (see the `#![cfg_attr(all(docsrs, not(batpak_stable_docs)), ...)]`
+    // in src/lib.rs and the `#[cfg_attr(..., doc(cfg(...)))]` doc badges). Register
+    // it so the cfg-name references compile warning-free without an allow.
+    println!("cargo::rustc-check-cfg=cfg(batpak_stable_docs)");
+
     let repo_invariants_available = repo_invariant_surface_available();
 
     emit_rerun_lines(repo_invariants_available);
 
-    check_no_tokio_in_deps();
-    check_no_banned_patterns();
-    check_store_config_field_usage();
+    check_no_tokio_in_deps()?;
+    check_no_banned_patterns()?;
+    check_store_config_field_usage()?;
     // The three surface-dependent lints are the vacuous-pass risk: in a packaged
     // crate the repo invariant surface is absent. Rather than skip them
     // silently, `run_surface_lint` emits a `cargo:warning=` AND writes an
@@ -69,11 +99,12 @@ fn main() {
         check_no_dead_code_silencers,
     );
     shared_checks::run_surface_lint(avail, "allow-justifications", check_allow_justifications);
-    check_no_stubs_in_src();
-    check_store_surface_honesty();
-    check_no_fixed_temp_patterns();
+    check_no_stubs_in_src()?;
+    check_store_surface_honesty()?;
+    check_no_fixed_temp_patterns()?;
     shared_checks::run_surface_lint(avail, "pub-items-have-tests", check_pub_items_have_tests);
-    check_platform_profile_env();
+    check_platform_profile_env()?;
+    Ok(())
 }
 
 /// Emit ONE `cargo:rerun-if-changed` per `.rs` file the lints actually read
@@ -218,51 +249,55 @@ struct BuildPlatformProfileBody<'a> {
     admission: &'a BuildPlatformAdmissionProfile,
 }
 
-fn check_platform_profile_env() {
+fn check_platform_profile_env() -> Result<(), String> {
     let Ok(path) = std::env::var("BATPAK_PLATFORM_PROFILE") else {
-        return;
+        return Ok(());
     };
     println!("cargo:rerun-if-changed={path}");
-    let bytes = fs::read(&path).unwrap_or_else(|error| {
+    let bytes = fs::read(&path).map_err(|error| {
         fail(&format!(
             "cannot read BATPAK_PLATFORM_PROFILE={path}: {error}"
         ))
-    });
-    let profile: BuildPlatformProfile = serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+    })?;
+    let profile: BuildPlatformProfile = serde_json::from_slice(&bytes).map_err(|error| {
         fail(&format!(
             "cannot decode BATPAK_PLATFORM_PROFILE={path}: {error}"
         ))
-    });
+    })?;
     if profile.schema_version != 1 {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} has schema_version {}; expected 1",
             profile.schema_version
-        ));
+        )));
     }
-    validate_build_platform_profile_semantics(&profile, &path);
+    validate_build_platform_profile_semantics(&profile, &path)?;
     let body = BuildPlatformProfileBody {
         schema_version: profile.schema_version,
         host: &profile.host,
         store_path: &profile.store_path,
         admission: &profile.admission,
     };
-    let body_bytes = serde_json::to_vec(&body).unwrap_or_else(|error| {
+    let body_bytes = serde_json::to_vec(&body).map_err(|error| {
         fail(&format!(
             "cannot canonicalize BATPAK_PLATFORM_PROFILE={path}: {error}"
         ))
-    });
+    })?;
     let computed = crc32fast::hash(&body_bytes);
     if computed != profile.fingerprint_crc32 {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} fingerprint_crc32 {} does not match computed {}",
             profile.fingerprint_crc32, computed
-        ));
+        )));
     }
     println!("cargo:rustc-env=BATPAK_PLATFORM_PROFILE_PATH={path}");
     println!("cargo:rustc-env=BATPAK_PLATFORM_PROFILE_FINGERPRINT_CRC32={computed}");
+    Ok(())
 }
 
-fn validate_build_platform_profile_semantics(profile: &BuildPlatformProfile, path: &str) {
+fn validate_build_platform_profile_semantics(
+    profile: &BuildPlatformProfile,
+    path: &str,
+) -> Result<(), String> {
     let expected_store_lock = match profile.store_path.lock_leaf_symlink_protection {
         BuildLockLeafSymlinkProtection::AtomicNoFollow => {
             BuildStoreLockAdmissionSummary::AtomicNoFollow
@@ -275,12 +310,12 @@ fn validate_build_platform_profile_semantics(profile: &BuildPlatformProfile, pat
         | BuildLockLeafSymlinkProtection::ProbeFailed => BuildStoreLockAdmissionSummary::Rejected,
     };
     if profile.admission.store_lock != expected_store_lock {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} has inconsistent store_lock admission {:?}; expected {:?} from lock evidence {:?}",
             profile.admission.store_lock,
             expected_store_lock,
             profile.store_path.lock_leaf_symlink_protection
-        ));
+        )));
     }
 
     let expected_parent_dir_sync = match profile.store_path.parent_dir_sync {
@@ -291,40 +326,47 @@ fn validate_build_platform_profile_semantics(profile: &BuildPlatformProfile, pat
         }
     };
     if profile.admission.parent_dir_sync != expected_parent_dir_sync {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} has inconsistent parent_dir_sync admission {:?}; expected {:?} from parent-dir evidence {:?}",
             profile.admission.parent_dir_sync,
             expected_parent_dir_sync,
             profile.store_path.parent_dir_sync
-        ));
+        )));
     }
 
-    validate_build_path_mmap_consistency(path, "mmap_index", profile);
-    validate_build_path_mmap_consistency(path, "sealed_segment_mmap", profile);
+    validate_build_path_mmap_consistency(path, "mmap_index", profile)?;
+    validate_build_path_mmap_consistency(path, "sealed_segment_mmap", profile)?;
     validate_build_mmap_admission(
         path,
         "mmap_index",
         &profile.store_path.mmap_index,
         &profile.admission.mmap_index,
-    );
+    )?;
     validate_build_mmap_admission(
         path,
         "sealed_segment_mmap",
         &profile.store_path.sealed_segment_mmap,
         &profile.admission.sealed_segment_mmap,
-    );
+    )?;
+    Ok(())
 }
 
-fn validate_build_path_mmap_consistency(path: &str, field: &str, profile: &BuildPlatformProfile) {
+fn validate_build_path_mmap_consistency(
+    path: &str,
+    field: &str,
+    profile: &BuildPlatformProfile,
+) -> Result<(), String> {
     let evidence = match field {
         "mmap_index" => &profile.store_path.mmap_index,
         "sealed_segment_mmap" => &profile.store_path.sealed_segment_mmap,
-        _ => fail(&format!(
-            "internal build profile validation bug: unknown mmap field {field}"
-        )),
+        _ => {
+            return Err(fail(&format!(
+                "internal build profile validation bug: unknown mmap field {field}"
+            )))
+        }
     };
     let required = match profile.store_path.path_status {
-        BuildStorePathStatusEvidence::ObservedDirectory => return,
+        BuildStorePathStatusEvidence::ObservedDirectory => return Ok(()),
         BuildStorePathStatusEvidence::ObservedUnsupportedNotDirectory => {
             BuildMmapEvidence::ObservedUnsupported
         }
@@ -332,11 +374,12 @@ fn validate_build_path_mmap_consistency(path: &str, field: &str, profile: &Build
         BuildStorePathStatusEvidence::ProbeFailed { .. } => BuildMmapEvidence::ProbeFailed,
     };
     if evidence != &required {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} has inconsistent {field} evidence {evidence:?}; expected {required:?} from path_status {:?}",
             profile.store_path.path_status
-        ));
+        )));
     }
+    Ok(())
 }
 
 fn validate_build_mmap_admission(
@@ -344,7 +387,7 @@ fn validate_build_mmap_admission(
     field: &str,
     evidence: &BuildMmapEvidence,
     admission: &BuildMmapAdmissionSummary,
-) {
+) -> Result<(), String> {
     let expected = match evidence {
         BuildMmapEvidence::FileBacked => BuildMmapAdmissionSummary::FileBacked,
         BuildMmapEvidence::Unknown
@@ -352,17 +395,18 @@ fn validate_build_mmap_admission(
         | BuildMmapEvidence::ProbeFailed => BuildMmapAdmissionSummary::Rejected,
     };
     if admission != &expected {
-        fail(&format!(
+        return Err(fail(&format!(
             "BATPAK_PLATFORM_PROFILE={path} has inconsistent {field} admission {admission:?}; expected {expected:?} from mmap evidence {evidence:?}"
-        ));
+        )));
     }
+    Ok(())
 }
 
 /// Audit Loop Layer 2 enforcement: no stub markers in production src/.
 /// todo!() and unimplemented!() are already denied by clippy, but this
 /// catches patterns clippy misses: hardcoded placeholder strings, empty
 /// function bodies returning defaults, etc.
-fn check_no_stubs_in_src() {
+fn check_no_stubs_in_src() -> Result<(), String> {
     let stub_patterns = [
         (
             "\"placeholder\"",
@@ -384,22 +428,30 @@ fn check_no_stubs_in_src() {
             let lower = line.to_lowercase();
             for (pattern, msg) in &stub_patterns {
                 if lower.contains(pattern) {
-                    panic!(
+                    return Err(fail(&format!(
                         "STUB DETECTED in {path_str}:{}: {msg}\n\
                          Line: {line}\n\
                          LAW-001: No fake success responses. FM-009: No polite downgrades.",
                         line_no + 1
-                    );
+                    )));
                 }
             }
         }
-    });
+        Ok(())
+    })
 }
 
 fn check_no_dead_code_silencers() -> shared_checks::LintCounts {
+    // `run_surface_lint` fixes the `fn() -> LintCounts` signature, so the error
+    // cannot `?`-propagate to `main`; the fallible body lives in an inner fn and
+    // a violation aborts the build at the single `.expect` boundary below.
+    check_no_dead_code_silencers_inner().expect("dead_code silencer surface lint")
+}
+
+fn check_no_dead_code_silencers_inner() -> Result<shared_checks::LintCounts, String> {
     let repo_root = repo_root();
-    let allowlisted = shared_checks::load_dead_code_silencer_allowlist(&repo_root)
-        .unwrap_or_else(|err| fail(&err));
+    let allowlisted =
+        shared_checks::load_dead_code_silencer_allowlist(&repo_root).map_err(|err| fail(&err))?;
     let mut counts = shared_checks::LintCounts {
         files_examined: 0,
         assertions_run: 0,
@@ -415,13 +467,12 @@ fn check_no_dead_code_silencers() -> shared_checks::LintCounts {
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        let sites =
-            shared_checks::collect_dead_code_silencer_sites(contents).unwrap_or_else(|err| {
-                fail(&format!(
-                    "cannot parse {} while checking dead_code silencers: {err}",
-                    rel
-                ))
-            });
+        let sites = shared_checks::collect_dead_code_silencer_sites(contents).map_err(|err| {
+            fail(&format!(
+                "cannot parse {} while checking dead_code silencers: {err}",
+                rel
+            ))
+        })?;
         for site in sites {
             // Each candidate silencer site is an additional assertion.
             counts.assertions_run += 1;
@@ -429,28 +480,34 @@ fn check_no_dead_code_silencers() -> shared_checks::LintCounts {
             if allowlisted.contains(&allowlist_site) {
                 continue;
             }
-            fail(&format!(
-                    "dead_code silencers are not tolerated in this repo: {rel}:{}:{}\n\
-                     Found `{}`.\n\
+            return Err(fail(&format!(
+                    "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                     Found `{}` in {rel}:{}:{}.\n\
+                     The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.\n\
                      If code is test-only, use #[cfg(test)]. If it is unused, delete it.\n\
-                     If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.\n\
-                     If this is the rare legitimate exception, add `{allowlist_site}` to traceability/dead_code_silencer_allowlist.yaml with `reason` and `adr`.",
+                     If it is shared infrastructure, restructure it so the compiler sees the real ownership surface.",
+                    site.rendered,
                     site.line,
                     site.column,
-                    site.rendered,
-                ));
+                )));
         }
-    });
-    counts
+        Ok(())
+    })?;
+    Ok(counts)
 }
 
-/// INV-ALLOW-IS-DESIGN enforcement: every #[allow(...)] in runtime or
-/// toolchain Rust code must carry a structured `// justifies:` comment with
-/// >= 5 words AND >= 1 resolvable anchor (INV-id, ADR-NNNN, or repo path).
+/// INV-ALLOW-IS-DESIGN enforcement (zero-allow doctrine): the repo permits NO
+/// `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attribute. This is a HARD
+/// BAN — clippy/rustc findings are FIXED, never silenced. Routes through the same
+/// AST-based detector as the dead-code gate, so raw-string fixtures are excluded
+/// and multi-line/cfg_attr-wrapped attributes are caught.
 fn check_allow_justifications() -> shared_checks::LintCounts {
-    let repo_root = repo_root();
-    let known_invariants =
-        shared_checks::load_known_invariants(&repo_root).unwrap_or_else(|err| fail(&err));
+    // `run_surface_lint` fixes the `fn() -> LintCounts` signature; the fallible
+    // body lives in the inner fn and a violation aborts at this single boundary.
+    check_allow_justifications_inner().expect("allow-justification surface lint")
+}
+
+fn check_allow_justifications_inner() -> Result<shared_checks::LintCounts, String> {
     let mut counts = shared_checks::LintCounts {
         files_examined: 0,
         assertions_run: 0,
@@ -459,65 +516,75 @@ fn check_allow_justifications() -> shared_checks::LintCounts {
     walk_allow_checked_rs_files(&mut |path, contents| {
         counts.files_examined += 1;
         counts.inputs.insert(path.to_path_buf());
+        // One "no allow/expect attribute" assertion per file scanned.
+        counts.assertions_run += 1;
         let path_str = repo_relative_display(path);
-        let lines: Vec<&str> = contents.lines().collect();
-        for (line_no, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("#![allow(") || trimmed.starts_with("#[allow(") {
-                // Each `#[allow]`/`#![allow]` site is one justification assertion.
-                counts.assertions_run += 1;
-                let has_justification =
-                    shared_checks::line_carries_justification(line, &repo_root, &known_invariants)
-                        || (line_no > 0
-                            && lines
-                                .get(line_no - 1)
-                                .map(|prev| {
-                                    shared_checks::line_carries_justification(
-                                        prev,
-                                        &repo_root,
-                                        &known_invariants,
-                                    )
-                                })
-                                .unwrap_or(false));
-                if !has_justification {
-                    fail(&format!(
-                        "ROGUE SILENCE in {path_str}:{}: `{trimmed}`\n\
-                         Every #[allow(...)] must carry a `// justifies: <>=5 words + >=1 resolvable anchor>`\n\
-                         comment on the same or preceding line. Anchors: INV-<NAME> from\n\
-                         traceability/invariants.yaml, ADR-NNNN from root ADR files, or a concrete repo path\n\
-                         (src/..., tests/..., examples/..., crates/macros/..., crates/macros-support/...,\n\
-                         benches/..., tools/..., build.rs). See INV-ALLOW-IS-DESIGN.",
-                        line_no + 1
-                    ));
-                }
-            }
+        let sites = shared_checks::collect_dead_code_silencer_sites(contents).map_err(|err| {
+            fail(&format!(
+                "cannot parse {path_str} while checking the zero-allow policy: {err}"
+            ))
+        })?;
+        if let Some(site) = sites.into_iter().next() {
+            // Each found allow/expect site is an additional assertion.
+            counts.assertions_run += 1;
+            return Err(fail(&format!(
+                "zero-allow policy (INV-ALLOW-IS-DESIGN): remove the #[allow]; fix the lint instead — see the INV.\n\
+                 Found `{}` in {path_str}:{}:{}.\n\
+                 The repo permits NO #[allow(...)]/#![allow(...)]/#[expect(...)] attributes.",
+                site.rendered,
+                site.line,
+                site.column,
+            )));
         }
-    });
-    counts
+        Ok(())
+    })?;
+    Ok(counts)
 }
 
-fn check_no_tokio_in_deps() {
-    //Invariant 1: tokio must not appear in [dependencies].
-    //Only [dev-dependencies] is allowed.
-    let cargo = fs::read_to_string("Cargo.toml").expect("read Cargo.toml");
-
-    //Strategy: find the [dependencies] section, take text until the next
-    //section header (line starting with [), check for "tokio".
-    //This is deliberately simple string matching — no toml parser dep.
-    if let Some(deps_section) = cargo.split("[dependencies]").nth(1) {
-        let deps_only = deps_section.split("\n[").next().unwrap_or("");
-        if deps_only.contains("tokio") {
-            panic!(
-                "INVARIANT 1 VIOLATED: tokio found in [dependencies].\n\
-                 tokio belongs in [dev-dependencies] only.\n\
-                 The library is runtime-agnostic. Fan-out uses Vec<flume::Sender>.\n\
-                 See: INVARIANTS.md."
-            );
-        }
+/// INV-STORE-SYNC-ONLY / Invariant 1 — the EARLY FAIL-CLOSED sentinel (D10).
+///
+/// Replaces the old `[dependencies]` STRING grep (which saw only a literal
+/// `tokio` in core's own manifest) with the SHARED resolved-dep-graph scanner.
+/// It runs `cargo metadata`, walks the PRODUCTION subgraph of every runtime
+/// crate, and FAILS THE BUILD (returns `Err`, which `?`-propagates to `main`'s
+/// `Result` — Cargo stops; this is NOT a downgradable `cargo:warning`) when an
+/// async runtime (tokio/async-std/smol/async-executor) is reachable, including
+/// renamed, optional, target-specific, workspace-inherited, or TRANSITIVE forms
+/// the grep could never catch. flume is runtime-neutral and never flagged.
+///
+/// `fail(..)` is called for its auditable `cargo:warning` SIDE EFFECT only; the
+/// returned `Err` is what stops the build. If `cargo metadata` itself cannot be
+/// resolved (e.g. a packaged crate with no workspace), the scan FAILS CLOSED
+/// with the error rather than passing silently.
+fn check_no_tokio_in_deps() -> Result<(), String> {
+    let manifest_dir = core_root();
+    let hits = shared_checks::scan_workspace_for_runtimes(
+        &manifest_dir,
+        shared_checks::RUNTIME_CRATE_ROOTS,
+    )
+    .map_err(|err| {
+        fail(&format!(
+            "INVARIANT 1 (no async runtime) could not be proven: {err}.\n\
+             The resolved-dep-graph scan must succeed; refusing to pass vacuously."
+        ))
+    })?;
+    if let Some(hit) = hits.first() {
+        return Err(fail(&format!(
+            "INVARIANT 1 VIOLATED: async runtime `{}` is in the PRODUCTION dependency graph.\n\
+             Pulled via: {}.\n\
+             The library is runtime-agnostic. Fan-out uses Vec<flume::Sender>; flume is a\n\
+             runtime-NEUTRAL channel library and is allowed. Remove tokio/async-std/smol/\n\
+             async-executor (including renamed/optional/target-specific/transitive forms),\n\
+             or move the async integration into a downstream adapter crate.\n\
+             See: 03_INVARIANTS.md, ADR-0001, INV-STORE-SYNC-ONLY.",
+            hit.package,
+            hit.pull_path.join(" -> "),
+        )));
     }
+    Ok(())
 }
 
-fn check_no_banned_patterns() {
+fn check_no_banned_patterns() -> Result<(), String> {
     //Walk src/**/*.rs, read each file, check for patterns that violate
     //invariants or red flags.
     walk_rs_files(Path::new("src"), &mut |path, contents| {
@@ -527,35 +594,35 @@ fn check_no_banned_patterns() {
         //All serialization goes through MessagePack.
         for banned in ["transmute", "mem::read", "pointer_cast"] {
             if contents.contains(banned) {
-                panic!(
+                return Err(fail(&format!(
                     "RED FLAG VIOLATED in {path_str}: found `{banned}`.\n\
                      repr(C) is for field ordering, not a wire format.\n\
                      All serialization goes through rmp-serde. Always.\n\
-                     See: INVARIANTS.md."
-                );
+                     See: 03_INVARIANTS.md."
+                )));
             }
         }
 
         //Invariant 2: no async fn in store module.
         //Store API is sync. Async lives in flume channels.
         if path_str.contains("store") && contents.contains("async fn") {
-            panic!(
+            return Err(fail(&format!(
                 "INVARIANT 2 VIOLATED in {path_str}: found `async fn`.\n\
                  Store API is sync. Async callers use spawn_blocking()\n\
                  or flume's recv_async(). See: store/subscription.rs.\n\
-                 See: INVARIANTS.md."
-            );
+                 See: 03_INVARIANTS.md."
+            )));
         }
 
         // Post-mortem Bug 7: std::thread::spawn() panics on failure.
         // All thread creation must use Builder::new().spawn() for fallible error handling.
         if contents.contains("std::thread::spawn(") {
-            panic!(
+            return Err(fail(&format!(
                 "BANNED PATTERN in {path_str}: `std::thread::spawn()` found.\n\
                  Use `std::thread::Builder::new().name(...).spawn()` instead.\n\
                  `thread::spawn` panics on failure; `Builder::spawn` returns Result.\n\
                  See: Bug 7 post-mortem (react_loop panic)."
-            );
+            )));
         }
 
         // Post-mortem Bug 9: bare .sync() bypasses sync_mode config.
@@ -573,14 +640,14 @@ fn check_no_banned_patterns() {
                     && !trimmed.contains("self.sync()")
                     && !trimmed.contains("force_sync()")
                 {
-                    panic!(
+                    return Err(fail(&format!(
                         "BANNED PATTERN in {path_str}:{}: bare `.sync()` call.\n\
                          Use `.sync_with_mode(&config.sync.mode)` instead.\n\
                          Bare .sync() hardcodes SyncAll, ignoring the user's config.\n\
                          See: Bug 9 post-mortem (segment rotation bypassed sync.mode).\n\
                          Line: {trimmed}",
                         line_no + 1
-                    );
+                    )));
                 }
             }
         }
@@ -624,13 +691,13 @@ fn check_no_banned_patterns() {
 
             for noun in ["trajectory"] {
                 if inv3_declaration_has_word(&lower, noun) {
-                    panic!(
+                    return Err(fail(&format!(
                         "INVARIANT 3 VIOLATED in {path_str}: \
                          product concept `{noun}` in declaration:\n  {trimmed}\n\
                          Library vocabulary: coordinate, entity, event, outcome, \
                          gate, region, transition.\n\
-                         See: INVARIANTS.md."
-                    );
+                         See: 03_INVARIANTS.md."
+                    )));
                 }
             }
 
@@ -643,73 +710,76 @@ fn check_no_banned_patterns() {
                     || artifact_decl_ok_in_lib
                     || artifact_decl_ok_in_prelude)
                 {
-                    panic!(
+                    return Err(fail(&format!(
                         "INVARIANT 3 VIOLATED in {path_str}: \
                          product concept `artifact` in declaration:\n  {trimmed}\n\
                          Lane-A exception: definitions only in `{INV3_ARTIFACT_ALLOWED_PATH}`; \
                          crate wiring may use `pub mod artifact;` in `src/lib.rs` and \
                          `pub use crate::artifact::{{...}}` in `src/prelude.rs`.\n\
-                         See: INVARIANTS.md."
-                    );
+                         See: 03_INVARIANTS.md."
+                    )));
                 }
             }
         }
-    });
+        Ok(())
+    })
 }
 
-fn check_store_surface_honesty() {
+fn check_store_surface_honesty() -> Result<(), String> {
     let store_mod =
         fs::read_to_string("src/store/mod.rs").expect("read src/store/mod.rs for surface check");
     if store_mod.contains("pub fn subscribe(") {
-        panic!(
+        return Err(fail(
             "PUBLIC API HONESTY VIOLATION: src/store/mod.rs still exports `pub fn subscribe(`.\n\
              The lossy broadcast API must be named `subscribe_lossy` so callers cannot\n\
-             confuse it with guaranteed delivery."
-        );
+             confuse it with guaranteed delivery.",
+        ));
     }
     if store_mod.contains("pub fn cursor(") {
-        panic!(
+        return Err(fail(
             "PUBLIC API HONESTY VIOLATION: src/store/mod.rs still exports `pub fn cursor(`.\n\
-             The guaranteed replay API must be named `cursor_guaranteed`."
-        );
+             The guaranteed replay API must be named `cursor_guaranteed`.",
+        ));
     }
     if store_mod.contains("Freshness::BestEffort") || store_mod.contains("BestEffort") {
-        panic!(
+        return Err(fail(
             "PUBLIC API HONESTY VIOLATION: stale `Freshness::BestEffort` reference in src/store/mod.rs.\n\
-             Use `Freshness::MaybeStale {{ max_stale_ms }}`."
-        );
+             Use `Freshness::MaybeStale { max_stale_ms }`.",
+        ));
     }
 
     walk_rs_files(Path::new("src/store"), &mut |path, contents| {
         let path_str = repo_relative_display(path);
         if contents.contains("test-support") {
-            panic!(
+            return Err(fail(&format!(
                 "FEATURE HONESTY VIOLATION in {path_str}: stale `test-support` reference.\n\
                  The explicit risk-bearing feature name is `dangerous-test-hooks`."
-            );
+            )));
         }
-    });
+        Ok(())
+    })
 }
 
-fn check_no_fixed_temp_patterns() {
+fn check_no_fixed_temp_patterns() -> Result<(), String> {
     walk_rs_files(Path::new("src/store"), &mut |path, contents| {
         let path_str = repo_relative_display(path);
         if contents.contains("index.ckpt.tmp") || contents.contains(".tmp_{pid}_{n}") {
-            panic!(
+            return Err(fail(&format!(
                 "TEMP FILE HARDENING VIOLATION in {path_str}: fixed temp-file pattern found.\n\
                  Use same-directory `tempfile::NamedTempFile` instead of predictable names."
-            );
+            )));
         }
         if contents.contains("create(true)") && contents.contains("truncate(true)") {
-            panic!(
+            return Err(fail(&format!(
                 "TEMP FILE HARDENING VIOLATION in {path_str}: `create(true)` + `truncate(true)` found.\n\
                  This is the symlink-clobber shape the release hardening pass bans in src/store."
-            );
+            )));
         }
-    });
+        Ok(())
+    })
 }
 
-fn check_store_config_field_usage() {
+fn check_store_config_field_usage() -> Result<(), String> {
     // Invariant: every pub field in StoreConfig must be read somewhere in src/.
     // This catches "config field defined but never wired up" bugs like the
     // historical writer.stack_size and sync.mode regressions.
@@ -721,7 +791,7 @@ fn check_store_config_field_usage() {
         .expect("parse src/store/config.rs for config field usage check");
     let fields = store_config_public_fields(&config_ast);
     if fields.is_empty() {
-        return;
+        return Ok(());
     }
 
     let mut used_fields = BTreeSet::new();
@@ -731,30 +801,32 @@ fn check_store_config_field_usage() {
             .replace('\\', "/")
             .ends_with("src/store/config.rs")
         {
-            return;
+            return Ok(());
         }
-        let file = syn::parse_file(contents).unwrap_or_else(|err| {
+        let file = syn::parse_file(contents).map_err(|err| {
             fail(&format!(
                 "CONFIG FIELD USAGE CHECK PARSE FAILURE in {}: {err}",
                 path.display()
             ))
-        });
+        })?;
         let mut collector = StoreConfigFieldAccessCollector::new(&fields);
         collector.visit_file(&file);
         used_fields.extend(collector.found_fields);
-    });
+        Ok(())
+    })?;
 
     for field in &fields {
         if !used_fields.contains(field) {
-            panic!(
+            return Err(fail(&format!(
                 "STORE CONFIG FIELD UNUSED: `{field}` is defined in StoreConfig but never \
                  accessed in any parsed src/ file outside src/store/config.rs.\n\
                  Every config field must be wired to actual behavior.\n\
                  Either use the field or remove it from StoreConfig.\n\
                  See: the historical writer.stack_size / sync.mode bugs that slipped through review."
-            );
+            )));
         }
     }
+    Ok(())
 }
 
 fn store_config_public_fields(file: &syn::File) -> BTreeSet<String> {
@@ -810,13 +882,20 @@ impl Visit<'_> for StoreConfigFieldAccessCollector<'_> {
 /// `tools/integrity/src/typed_waivers.rs`. LAW-003 (No Orphan Infrastructure),
 /// FM-007 (Island Syndrome).
 fn check_pub_items_have_tests() -> shared_checks::LintCounts {
+    // `run_surface_lint` fixes the `fn() -> LintCounts` signature; the fallible
+    // body lives in the inner fn and a violation aborts at this single boundary.
+    check_pub_items_have_tests_inner().expect("pub-items-have-tests surface lint")
+}
+
+fn check_pub_items_have_tests_inner() -> Result<shared_checks::LintCounts, String> {
     // After the P0-2 triage this set is empty: every public item is named
     // directly in a test file, so the walk below proves coverage with zero
     // waivers. A typed `pub-item` waiver target is skipped here.
-    let allowed_names: BTreeSet<String> = load_pub_item_waiver_targets();
+    let allowed_names: BTreeSet<String> = load_pub_item_waiver_targets()?;
 
     // Parse every test file once.
-    let test_files: Vec<(std::path::PathBuf, syn::File)> = collect_rs_file_asts(Path::new("tests"));
+    let test_files: Vec<(std::path::PathBuf, syn::File)> =
+        collect_rs_file_asts(Path::new("tests"))?;
 
     let mut counts = shared_checks::LintCounts {
         files_examined: 0,
@@ -832,17 +911,17 @@ fn check_pub_items_have_tests() -> shared_checks::LintCounts {
     // parsed tests.
     walk_rs_files(Path::new("src"), &mut |path, contents| {
         if path.ends_with("prelude.rs") {
-            return;
+            return Ok(());
         }
         counts.files_examined += 1;
         counts.inputs.insert(path.to_path_buf());
         let path_str = repo_relative_display(path);
-        let file = syn::parse_file(contents).unwrap_or_else(|err| {
+        let file = syn::parse_file(contents).map_err(|err| {
             fail(&format!(
                 "PUB ITEM REFERENCE CHECK PARSE FAILURE in {path_str}: {err}\n\
                  This detector is syntax-aware by design; fix the source or the parser input."
             ))
-        });
+        })?;
         for name in shared_checks::public_item_names(&file) {
             if allowed_names.contains(&name) {
                 continue;
@@ -854,51 +933,52 @@ fn check_pub_items_have_tests() -> shared_checks::LintCounts {
                 .any(|(_, ast)| shared_checks::ast_references_name(ast, &name));
             if !witnessed {
                 let (line, _col) = item_line_in_file(contents, &name);
-                fail(&format!(
+                return Err(fail(&format!(
                     "pub item `{name}` declared at {path_str}:{line} has no test reference (checked {n} test files via AST); either add a real test use, hide the item via `#[doc(hidden)]`, or — only if it genuinely cannot be directly test-named — add a typed `pub-item` waiver in traceability/typed_waivers.yaml.",
                     n = test_files.len(),
-                ));
+                )));
             }
         }
-    });
-    counts
+        Ok(())
+    })?;
+    Ok(counts)
 }
 
-fn collect_rs_file_asts(dir: &Path) -> Vec<(std::path::PathBuf, syn::File)> {
+fn collect_rs_file_asts(dir: &Path) -> Result<Vec<(std::path::PathBuf, syn::File)>, String> {
     let mut out = Vec::new();
-    let entries = fs::read_dir(dir).unwrap_or_else(|err| {
+    let entries = fs::read_dir(dir).map_err(|err| {
         fail(&format!(
             "cannot read {} while collecting test witness ASTs: {err}",
             dir.display()
         ))
-    });
+    })?;
     for entry in entries {
-        let entry = entry.unwrap_or_else(|err| {
+        let entry = entry.map_err(|err| {
             fail(&format!(
                 "cannot walk {} while collecting test witness ASTs: {err}",
                 dir.display()
             ))
-        });
+        })?;
         let path = entry.path();
         if path.is_dir() {
-            out.extend(collect_rs_file_asts(&path));
+            out.extend(collect_rs_file_asts(&path)?);
         } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
-            let contents = fs::read_to_string(&path).unwrap_or_else(|err| {
+            let contents = fs::read_to_string(&path).map_err(|err| {
                 fail(&format!(
                     "cannot read {} while collecting test witness ASTs: {err}",
                     path.display()
                 ))
-            });
-            let file = syn::parse_file(&contents).unwrap_or_else(|err| {
+            })?;
+            let file = syn::parse_file(&contents).map_err(|err| {
                 fail(&format!(
                     "cannot parse {} while collecting test witness ASTs: {err}",
                     path.display()
                 ))
-            });
+            })?;
             out.push((path, file));
         }
     }
-    out
+    Ok(out)
 }
 
 fn item_line_in_file(contents: &str, name: &str) -> (usize, usize) {
@@ -914,24 +994,27 @@ fn item_line_in_file(contents: &str, name: &str) -> (usize, usize) {
 /// missing file means zero waivers (the desired end state). Full schema
 /// validation is the integrity gate's job (`typed_waivers::check`); build.rs only
 /// reads `target` for `kind: pub-item` so it can skip those names.
-fn load_pub_item_waiver_targets() -> BTreeSet<String> {
+fn load_pub_item_waiver_targets() -> Result<BTreeSet<String>, String> {
     let repo_root = repo_root();
     let path = repo_root.join("traceability/typed_waivers.yaml");
     let contents = match fs::read_to_string(&path) {
         Ok(c) => c,
-        Err(_) => return BTreeSet::new(),
+        Err(_) => return Ok(BTreeSet::new()),
     };
     let entries: Vec<TypedWaiverEntry> = yaml_serde::from_str(&contents)
-        .unwrap_or_else(|err| fail(&format!("failed to parse {}: {err}", path.display())));
-    entries
+        .map_err(|err| fail(&format!("failed to parse {}: {err}", path.display())))?;
+    Ok(entries
         .into_iter()
         .filter(|entry| entry.kind == "pub-item")
         .map(|entry| entry.target)
         .filter(|target| !target.trim().is_empty())
-        .collect()
+        .collect())
 }
 
-fn walk_rs_files(dir: &Path, check: &mut dyn FnMut(&Path, &str)) {
+fn walk_rs_files(
+    dir: &Path,
+    check: &mut dyn FnMut(&Path, &str) -> Result<(), String>,
+) -> Result<(), String> {
     //Recursive directory walk. Only reads .rs files.
     //Uses std::fs only — no external deps allowed in build scripts
     //unless declared in [build-dependencies].
@@ -939,17 +1022,20 @@ fn walk_rs_files(dir: &Path, check: &mut dyn FnMut(&Path, &str)) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                walk_rs_files(&path, check);
+                walk_rs_files(&path, check)?;
             } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
                 if let Ok(contents) = fs::read_to_string(&path) {
-                    check(&path, &contents);
+                    check(&path, &contents)?;
                 }
             }
         }
     }
+    Ok(())
 }
 
-fn walk_allow_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
+fn walk_allow_checked_rs_files(
+    check: &mut dyn FnMut(&Path, &str) -> Result<(), String>,
+) -> Result<(), String> {
     let core_root = core_root();
     let repo_root = repo_root();
     let roots = [
@@ -961,22 +1047,25 @@ fn walk_allow_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
     for root in &roots {
         if root.is_file() {
             if let Ok(contents) = fs::read_to_string(root) {
-                check(root, &contents);
+                check(root, &contents)?;
             }
         } else {
-            walk_rs_files(root, check);
+            walk_rs_files(root, check)?;
         }
     }
+    Ok(())
 }
 
-fn walk_dead_code_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
+fn walk_dead_code_checked_rs_files(
+    check: &mut dyn FnMut(&Path, &str) -> Result<(), String>,
+) -> Result<(), String> {
     let core_root = core_root();
     let repo_root = repo_root();
     let roots = [
         core_root.join("build.rs"),
         core_root.join("src"),
         core_root.join("tests"),
-        core_root.join("examples"),
+        repo_root.join("crates/batpak-examples"),
         core_root.join("benches"),
         repo_root.join("tools/xtask/src"),
         repo_root.join("tools/integrity/src"),
@@ -986,10 +1075,11 @@ fn walk_dead_code_checked_rs_files(check: &mut dyn FnMut(&Path, &str)) {
     for root in &roots {
         if root.is_file() {
             if let Ok(contents) = fs::read_to_string(root) {
-                check(root, &contents);
+                check(root, &contents)?;
             }
         } else {
-            walk_rs_files(root, check);
+            walk_rs_files(root, check)?;
         }
     }
+    Ok(())
 }

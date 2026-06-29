@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; DecodeTyped lane tests in tests/decode_typed_seam.rs treat decode failures as test failures; unwrap and panic are the assertion style throughout, and the catch-all match arms panic on any unexpected TypedDecodeError variant (including future ones such as FutureVersion) which is the intended assertion.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::wildcard_enum_match_arm)]
 //! Per-lane behavioural tests for the `DecodeTyped` seam (Dispatch Chapter T1).
 //!
 //! Both replay lanes (`Event<serde_json::Value>` and `Event<Vec<u8>>`) must
@@ -83,39 +81,44 @@ mod json_lane {
         let event = json_event(Alpha::KIND, serde_json::json!({ "label": "not a number" }));
         let result: Result<Option<Alpha>, TypedDecodeError> = event.route_typed();
         let err = result.expect_err("kind matched but decode should fail");
-        match err {
-            TypedDecodeError::DecodeFailure { kind, source } => {
-                assert_eq!(kind, Alpha::KIND);
-                assert!(matches!(source, DecodeSource::Json(_)));
-            }
-            other => panic!("expected DecodeFailure, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::DecodeFailure { kind, ref source }
+                    if kind == Alpha::KIND && matches!(source, DecodeSource::Json(_))
+            ),
+            "expected DecodeFailure for Alpha::KIND on the JSON lane, got {err:?}"
+        );
     }
 
     #[test]
     fn decode_typed_kind_mismatch_returns_kind_mismatch_err() {
         let event = json_event(Beta::KIND, serde_json::json!({ "label": "x" }));
         let result: Result<Alpha, TypedDecodeError> = event.decode_typed();
-        match result {
-            Err(TypedDecodeError::KindMismatch { expected, got }) => {
-                assert_eq!(expected, Alpha::KIND);
-                assert_eq!(got, Beta::KIND);
-            }
-            other => panic!("expected KindMismatch, got {other:?}"),
-        }
+        let err = result.expect_err("kind mismatch must surface an error");
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::KindMismatch { expected, got }
+                    if expected == Alpha::KIND && got == Beta::KIND
+            ),
+            "expected KindMismatch expected=Alpha got=Beta, got {err:?}"
+        );
     }
 
     #[test]
     fn decode_typed_decode_failure_returns_decode_failure_err() {
         let event = json_event(Alpha::KIND, serde_json::json!({ "wrong": true }));
         let result: Result<Alpha, TypedDecodeError> = event.decode_typed();
-        match result {
-            Err(TypedDecodeError::DecodeFailure { kind, source }) => {
-                assert_eq!(kind, Alpha::KIND);
-                assert!(matches!(source, DecodeSource::Json(_)));
-            }
-            other => panic!("expected DecodeFailure, got {other:?}"),
-        }
+        let err = result.expect_err("malformed payload must surface an error");
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::DecodeFailure { kind, ref source }
+                    if kind == Alpha::KIND && matches!(source, DecodeSource::Json(_))
+            ),
+            "expected DecodeFailure for Alpha::KIND on the JSON lane, got {err:?}"
+        );
     }
 }
 
@@ -150,13 +153,14 @@ mod msgpack_lane {
         let event = msgpack_event(Alpha::KIND, bytes);
         let result: Result<Option<Alpha>, TypedDecodeError> = event.route_typed();
         let err = result.expect_err("kind matched but decode should fail");
-        match err {
-            TypedDecodeError::DecodeFailure { kind, source } => {
-                assert_eq!(kind, Alpha::KIND);
-                assert!(matches!(source, DecodeSource::Msgpack(_)));
-            }
-            other => panic!("expected DecodeFailure, got {other:?}"),
-        }
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::DecodeFailure { kind, ref source }
+                    if kind == Alpha::KIND && matches!(source, DecodeSource::Msgpack(_))
+            ),
+            "expected DecodeFailure for Alpha::KIND on the msgpack lane, got {err:?}"
+        );
     }
 
     #[test]
@@ -164,25 +168,29 @@ mod msgpack_lane {
         let bytes = rmp_serde::to_vec_named(&Beta { label: "x".into() }).expect("encode");
         let event = msgpack_event(Beta::KIND, bytes);
         let result: Result<Alpha, TypedDecodeError> = event.decode_typed();
-        match result {
-            Err(TypedDecodeError::KindMismatch { expected, got }) => {
-                assert_eq!(expected, Alpha::KIND);
-                assert_eq!(got, Beta::KIND);
-            }
-            other => panic!("expected KindMismatch, got {other:?}"),
-        }
+        let err = result.expect_err("kind mismatch must surface an error");
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::KindMismatch { expected, got }
+                    if expected == Alpha::KIND && got == Beta::KIND
+            ),
+            "expected KindMismatch expected=Alpha got=Beta, got {err:?}"
+        );
     }
 
     #[test]
     fn decode_typed_decode_failure_returns_decode_failure_err() {
         let event = msgpack_event(Alpha::KIND, b"not-valid-msgpack".to_vec());
         let result: Result<Alpha, TypedDecodeError> = event.decode_typed();
-        match result {
-            Err(TypedDecodeError::DecodeFailure { kind, source }) => {
-                assert_eq!(kind, Alpha::KIND);
-                assert!(matches!(source, DecodeSource::Msgpack(_)));
-            }
-            other => panic!("expected DecodeFailure, got {other:?}"),
-        }
+        let err = result.expect_err("invalid msgpack must surface an error");
+        assert!(
+            matches!(
+                err,
+                TypedDecodeError::DecodeFailure { kind, ref source }
+                    if kind == Alpha::KIND && matches!(source, DecodeSource::Msgpack(_))
+            ),
+            "expected DecodeFailure for Alpha::KIND on the msgpack lane, got {err:?}"
+        );
     }
 }

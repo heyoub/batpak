@@ -1,6 +1,6 @@
 [package]
 name = "netbat"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,8 @@ categories = ["network-programming"]
 default = []
 
 [dependencies]
-syncbat = { path = "../syncbat", version = "0.8.2" }
+syncbat = { path = "../syncbat", version = "0.8.3" }
+flume = "0.12"
 # Tracing spans around the accept loop, per-connection serve, and
 # dispatch are emitted from the wire layer. Subscribers come from
 # the binary.

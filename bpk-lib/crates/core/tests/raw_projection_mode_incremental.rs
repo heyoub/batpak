@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection incremental tests in tests/raw_projection_mode_incremental.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: incremental-apply replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -13,14 +11,12 @@
 
 use std::sync::Arc;
 
-mod support;
 use batpak::store::{Freshness, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/raw_projection_mode.rs"]
-mod rpm_support;
+use batpak_testkit::raw_projection_mode as rpm_support;
 use rpm_support::{CounterDelta, KIND};
 
 trait MatrixCounterState {
@@ -35,6 +31,8 @@ struct ValueIncrementalCounter {
 
 impl EventSourced for ValueIncrementalCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-incremental-value-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -62,6 +60,10 @@ impl EventSourced for ValueIncrementalCounter {
     fn supports_incremental_apply() -> bool {
         true
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 impl MatrixCounterState for ValueIncrementalCounter {
@@ -78,6 +80,8 @@ struct RawIncrementalCounter {
 
 impl EventSourced for RawIncrementalCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-incremental-raw-counter");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -105,6 +109,10 @@ impl EventSourced for RawIncrementalCounter {
     fn supports_incremental_apply() -> bool {
         true
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 impl MatrixCounterState for RawIncrementalCounter {
@@ -124,7 +132,7 @@ fn cached_seeded_store_for(entity: &str) -> (TempDir, Arc<Store>) {
     );
     let coord = Coordinate::new(entity, "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -159,7 +167,7 @@ fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
 
     let coord =
         Coordinate::new("entity:raw-proj-incremental-group-local", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -196,12 +204,9 @@ fn projection_flow_incremental_group_local_keeps_lanes_equivalent() {
         "PROPERTY: group-local incremental replay must stay equivalent across raw and value lanes."
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental group-local test should release all Arc clones before close"
-        ),
-    };
+    let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+        "PROPERTY: incremental group-local test should release all Arc clones before close",
+    );
     store.close().expect("close");
 }
 
@@ -226,12 +231,9 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
         .expect("baseline raw state");
     assert_eq!(baseline_value.summary(), baseline_raw.summary());
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental external-cache seed test should release all Arc clones before close"
-        ),
-    };
+    let store = Arc::try_unwrap(store).map_err(|_| ()).expect(
+        "PROPERTY: incremental external-cache seed test should release all Arc clones before close",
+    );
     store.close().expect("close seeded store");
 
     let config = StoreConfig::new(data_path)
@@ -242,7 +244,7 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
     );
     let coord =
         Coordinate::new("entity:raw-proj-incremental-external", "scope:test").expect("coord");
-    reopened
+    let _ = reopened
         .append(
             &coord,
             KIND,
@@ -279,11 +281,8 @@ fn projection_flow_incremental_external_cache_keeps_lanes_equivalent() {
         "PROPERTY: external-cache incremental replay must stay equivalent across raw and value lanes."
     );
 
-    let reopened = match Arc::try_unwrap(reopened) {
-        Ok(store) => store,
-        Err(_) => panic!(
-            "PROPERTY: incremental external-cache test should release all Arc clones before close"
-        ),
-    };
+    let reopened = Arc::try_unwrap(reopened).map_err(|_| ()).expect(
+        "PROPERTY: incremental external-cache test should release all Arc clones before close",
+    );
     reopened.close().expect("close reopened");
 }

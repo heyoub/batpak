@@ -58,7 +58,7 @@ pub(crate) fn msrv_check() -> Result<()> {
                 for arg in feature_args {
                     cmd.arg(arg);
                 }
-                println!(
+                outln!(
                     "xtask msrv-check: cargo {toolchain} check -p {package} {}",
                     feature_args.join(" ")
                 );
@@ -68,7 +68,7 @@ pub(crate) fn msrv_check() -> Result<()> {
             }
         }
     }
-    println!("xtask msrv-check: all publish crates compile under their declared rust-version");
+    outln!("xtask msrv-check: all publish crates compile under their declared rust-version");
     Ok(())
 }
 

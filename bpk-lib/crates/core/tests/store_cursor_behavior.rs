@@ -1,13 +1,11 @@
 //! Advanced Store cursor delivery integration tests.
 
-mod support;
 use batpak::store::Store;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -15,7 +13,7 @@ fn test_store() -> (TempDir, Store) {
 
 fn append_cursor_json_events(store: &Store, coord: &Coordinate, kind: EventKind, count: usize) {
     for i in 0..count {
-        store
+        let _ = store
             .append(coord, kind, &serde_json::json!({ "i": i }))
             .expect("append");
     }
@@ -42,7 +40,7 @@ fn cursor_polls_events_in_order() {
 
     let large_payload = "x".repeat(2_048);
     for i in 0..5 {
-        store
+        let _ = store
             .append(
                 &coord,
                 kind,
@@ -222,7 +220,7 @@ fn cursor_sees_events_appended_after_creation() {
 
     // Append events AFTER cursor creation
     for i in 0..3 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -261,7 +259,8 @@ fn cursor_ordered_delivery_under_load() {
                 .name(format!("store-advanced-cursor-load-{t}"))
                 .spawn(move || {
                     for i in 0..25 {
-                        s.append(&c, kind, &serde_json::json!({"t": t, "i": i}))
+                        let _ = s
+                            .append(&c, kind, &serde_json::json!({"t": t, "i": i}))
                             .expect("append");
                     }
                 })
@@ -306,8 +305,8 @@ fn cursor_repoll_after_eof_sees_new_events() {
     let region = Region::entity("cursor:repoll");
 
     // Append 2 events, consume them
-    store.append(&coord, kind, &"e1").expect("append");
-    store.append(&coord, kind, &"e2").expect("append");
+    let _ = store.append(&coord, kind, &"e1").expect("append");
+    let _ = store.append(&coord, kind, &"e2").expect("append");
 
     let mut cursor = store.cursor_guaranteed(&region);
     assert!(cursor.poll().is_some(), "first poll");
@@ -315,7 +314,7 @@ fn cursor_repoll_after_eof_sees_new_events() {
     assert!(cursor.poll().is_none(), "should be exhausted");
 
     // Append a new event AFTER cursor reached EOF
-    store.append(&coord, kind, &"e3").expect("append new");
+    let _ = store.append(&coord, kind, &"e3").expect("append new");
 
     // Re-poll should see the new event
     let entry = cursor.poll();
@@ -337,7 +336,7 @@ fn cursor_position_persists_no_duplicates() {
 
     // Append 5 events
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord, kind, &format!("event_{i}"))
             .expect("append");
     }

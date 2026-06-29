@@ -45,7 +45,6 @@ const FORBIDDEN_PUBLIC_SUBSTRINGS: &[&str] = &[
     "portkind",
     "mcp",
     "a2a",
-    "pcp",
     "capsule",
     "websocket",
     "sandbox",
@@ -78,7 +77,7 @@ pub fn run(repo_root: &Path) -> Result<()> {
         }
     }
 
-    println!("evidence-audit: ok");
+    outln!("evidence-audit: ok");
     Ok(())
 }
 

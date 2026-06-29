@@ -1,52 +1,71 @@
 //! Integrity tool - executable invariants for the batpak repo.
 //!
-//! # `// justifies:` comment convention
+//! # Zero-allow doctrine (INV-ALLOW-IS-DESIGN)
 //!
-//! Every `#[allow(...)]` in the repo's runtime, tool, and build-script
-//! surfaces must carry a `// justifies: ...` comment either on the same line
-//! or on the line immediately preceding the attribute. The comment body must:
+//! The repo contains ZERO `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]`
+//! attributes. Clippy and rustc findings are FIXED, never silenced. The
+//! `structural-check` gate fails on any allow/expect attribute found in tracked
+//! source (an AST-based detector, so raw-string fixtures are not attributes and
+//! are correctly excluded). This tool lints itself; the gate has blocking
+//! authority and is RED-fixture-proven.
 //!
-//! 1. Start with the literal prefix `justifies:` (after an optional `//` and
-//!    whitespace).
-//! 2. Contain at least five whitespace-separated words after the prefix,
-//!    naming the design decision that makes the silencer safe.
-//! 3. Cite at least one resolvable anchor - an `INV-<NAME>` from
-//!    `traceability/invariants.yaml`, an `ADR-NNNN` whose file exists as a
-//!    root ADR file, or a concrete in-repo path (`src/...`, `tests/...`,
-//!    `examples/...`, `crates/macros/...`, `crates/macros-support/...`,
-//!    `build.rs`) whose file exists. Multiple anchors are fine; at least one
-//!    must resolve.
-//!
-//! Narrative prose without that structure counts as silence, not design.
-//! INV-ALLOW-IS-DESIGN is the meta-invariant. This tool lints itself; every
-//! justification below is load-bearing and is checked by
-//! `structural::check_allow_justifications` on every run.
 //! dead_code silencers are not tolerated in this repo; test-only code uses
 //! `cfg(test)`, unused code is deleted, and shared helpers get restructured.
-// justifies: INV-ALLOW-IS-DESIGN; batpak-integrity is a repository command-line tool and its check subcommands intentionally report human and CI status messages from tools/integrity/src/main.rs.
-#![allow(clippy::print_stdout, clippy::print_stderr)]
+//!
+//! The `crate::anchors` module resolves `INV-<NAME>`/`ADR-NNNN`/repo-path
+//! anchors for traceability checks (invariant_bridge, typed_waivers) — a
+//! separate concern from lint suppression.
+
+#[macro_use]
+mod cli_out;
 
 mod agent_doctor;
 mod agent_surface;
+mod anchors;
 mod architecture_ir;
 mod architecture_lints;
 mod assurance;
+mod capability_snapshot;
+mod chaos_contract;
+mod ci_container_contract;
 mod ci_parity;
+mod complexity;
+mod dangerous_hooks_contract;
+mod docs_catalog;
 mod doctor;
+mod dst_corpus;
 mod evidence_audit;
+mod fitness_functions;
 mod gate_registry;
+mod glob_coverage;
 mod harness_lints;
 mod invariant_bridge;
+mod literal_regex_contract;
 mod meta_gate;
+mod model_bindings;
+mod mutation_debt;
+mod mutation_exclusion_registry;
+mod no_runtime_gate;
+mod overclaim;
+mod perf_gates_contract;
+mod platform_qualification_matrix;
 mod public_surface;
 mod receipts;
+mod release_status;
+mod repo_ir;
 mod repo_surface;
 mod rust_ast;
+mod scope_exclusion_contract;
 mod source_cache;
 mod store_pub_fn_coverage;
+mod store_sync_gate;
 mod structural;
+mod test_assertions;
 mod traceability;
+mod triangulation;
 mod typed_waivers;
+mod unsafe_ledger;
+mod wallclock;
 
 #[path = "../../shared/shared_checks.rs"]
 mod shared_checks;
@@ -74,9 +93,15 @@ enum CommandKind {
     /// (vacuous-pass) receipt; `SKIPPED_PACKAGED` receipts may carry zero counts.
     GauntletReceiptsPresent,
     /// Enforce the DO-178B tool-qualification law: no gate may have blocking
-    /// authority without naming an existing red-fixture test. Reports any
-    /// blocking gate that lacks a red fixture (a finding, not a failure path).
+    /// authority without naming an existing, anti-vacuous red-fixture test.
+    /// Reports any blocking gate that lacks a qualified red fixture.
     GateRegistryCheck,
+    /// Print the registry's `ProductionFlip` red-fixture test references (one per
+    /// line, `<file>::<test_fn>`). The `gauntlet-red-fixtures-bite` CI lane
+    /// consumes this list, rebuilds with `--cfg gauntlet_red_fixture`, and asserts
+    /// each test FAILS — proving the gates actually red in automation, not just in
+    /// source. This is the registry as the single source of truth for the lane.
+    ProductionFlipFixtures,
     /// Agent-safety meta-gate (P1-4): classify a `base..HEAD` diff and FAIL if it
     /// WEAKENS the assurance machinery without the required human approval. The
     /// pure classifier lives in `meta_gate.rs`; this subcommand is the
@@ -99,6 +124,29 @@ enum CommandKind {
         #[arg(long)]
         commits_file: Option<std::path::PathBuf>,
     },
+    /// Triangulation harness (GAUNTLET-TRIANGULATION): cross-check independent
+    /// oracles over non-type repo facts; a disagreement is a hard finding. The
+    /// wired fact is workspace crate-graph acyclicity (cargo-metadata + Tarjan
+    /// vs. manifest-scan). Also folded into `structural-check`.
+    TriangulationCheck,
+    /// Over-claim detector (GAUNTLET-OVERCLAIM): triangulate gate/doc/name
+    /// claims against delivered witnesses and assertion-bearing tests. Also
+    /// folded into `structural-check`.
+    OverclaimCheck,
+    /// Release terminal-status ledger: validate `traceability/releases/*.yaml`
+    /// schema and witness references. With `--strict`, fail when any
+    /// `terminal_required` row is still `INCOMPLETE` or a waiver is expired.
+    ReleaseStatusCheck {
+        /// Release version to check (e.g. `0.9.0`). Default: all release files.
+        #[arg(long)]
+        target: Option<String>,
+        /// Require exactly one `active: true` release target (strict release mode).
+        #[arg(long)]
+        active: bool,
+        /// Enforce terminal completeness for required rows.
+        #[arg(long)]
+        strict: bool,
+    },
     /// Static checks for evidence report bodies and public export vocabulary.
     EvidenceAudit,
     /// Validate the machine-readable agent intent/API/test surface map.
@@ -112,6 +160,38 @@ enum CommandKind {
         #[arg(long)]
         check: bool,
     },
+    /// GAUNTLET-DOCS-CURRENCY: regenerate (or `--check`) the auto-generated INV
+    /// catalog block in `03_INVARIANTS.md` from `traceability/invariants.yaml`, and
+    /// enforce the per-INV `witness_test` strong-tier citation gate. `--check`
+    /// fails on drift instead of rewriting; it is folded into `structural-check`.
+    DocsCatalog {
+        #[arg(long)]
+        check: bool,
+    },
+    /// GAUNT-CAPSNAP: regenerate (or `--check`) the anti-nerf capability FLOOR in
+    /// `traceability/capability_snapshot.yaml` — an exact mirror of each backend's
+    /// `support_matrix()` best-case table plus the witnessed-invariant set.
+    /// `--check` fails on drift instead of rewriting; folded into `structural-check`.
+    CapabilitySnapshot {
+        #[arg(long)]
+        check: bool,
+    },
+    /// Platform qualification matrix: regenerate (or `--check`) the committed
+    /// `traceability/platform_qualification_matrix.yaml` mirror. Folded into
+    /// `structural-check`.
+    PlatformQualificationMatrix {
+        #[arg(long)]
+        check: bool,
+    },
+    /// GAUNTLET-REPO-IR (Phase 3, item 6): emit the minimal queryable repo-IR as
+    /// JSON. ONE column-store binding AL assignments + gate ownership + waiver
+    /// ownership + public-surface map + mutation-seam map + docs traceability,
+    /// over which fitness functions fold (banana-split-fused: one traversal, N
+    /// checks). `--out` writes to a file; default prints to stdout.
+    RepoIr {
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -122,7 +202,7 @@ fn main() -> Result<()> {
         CommandKind::StructuralCheck => structural::run(),
         CommandKind::GauntletReceiptsPresent => {
             let validated = receipts::check_present(gate_registry::RECEIPT_REQUIRED_GATES)?;
-            println!(
+            outln!(
                 "gauntlet-receipts-present: ok ({} non-vacuous receipt(s) validated)",
                 validated.len()
             );
@@ -134,18 +214,56 @@ fn main() -> Result<()> {
             gate_registry::report(&repo_root);
             Ok(())
         }
+        CommandKind::ProductionFlipFixtures => {
+            for reference in gate_registry::production_flip_fixtures() {
+                outln!("{reference}");
+            }
+            Ok(())
+        }
         CommandKind::MetaGateCheck {
             diff_file,
             labels,
             pr_author,
             commits_file,
         } => run_meta_gate(diff_file, labels, pr_author, commits_file),
+        CommandKind::TriangulationCheck => triangulation::check(&repo_surface::repo_root()?),
+        CommandKind::OverclaimCheck => {
+            let repo_root = repo_surface::repo_root()?;
+            overclaim::check(&repo_root).map(|_| ())
+        }
+        CommandKind::ReleaseStatusCheck {
+            target,
+            active,
+            strict,
+        } => {
+            let repo_root = repo_surface::repo_root()?;
+            let opts = release_status::ReleaseCheckOptions {
+                strict,
+                target,
+                active_only: active,
+            };
+            release_status::check(&repo_root, &opts).map(|work| {
+                outln!(
+                    "release-status: ok ({} file(s), {} assertion(s))",
+                    work.files_examined,
+                    work.assertions_run
+                );
+            })
+        }
         CommandKind::EvidenceAudit => evidence_audit::run(&repo_surface::repo_root()?),
         CommandKind::AgentSurfaceCheck => agent_surface::run(&repo_surface::repo_root()?),
         CommandKind::AgentDoctor => agent_doctor::run(&repo_surface::repo_root()?),
         CommandKind::ArchitectureIr { out, check } => {
             architecture_ir::run(&repo_surface::repo_root()?, out, check)
         }
+        CommandKind::DocsCatalog { check } => docs_catalog::run(&repo_surface::repo_root()?, check),
+        CommandKind::CapabilitySnapshot { check } => {
+            capability_snapshot::run(&repo_surface::repo_root()?, check)
+        }
+        CommandKind::PlatformQualificationMatrix { check } => {
+            platform_qualification_matrix::run(&repo_surface::repo_root()?, check)
+        }
+        CommandKind::RepoIr { out } => repo_ir::run(&repo_surface::repo_root()?, out),
     }
 }
 
@@ -187,17 +305,15 @@ fn run_meta_gate(
     let repo_root = repo_surface::repo_root()?;
     let l4_entries = meta_gate::load_l4_entries(&repo_root);
     meta_gate::evaluate(&diff, &l4_entries, &ctx)?;
-    println!("meta-gate: ok (no unapproved weakening detected)");
+    outln!("meta-gate: ok (no unapproved weakening detected)");
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::anchors::{extract_anchors, JustifiesAnchor};
     use crate::ci_parity::{dockerfile_tool_pins, workflow_list_values};
-    use crate::shared_checks::{
-        extract_anchors, justification_body, line_carries_justification, load_known_invariants,
-        public_item_names, JustifiesAnchor,
-    };
+    use crate::shared_checks::public_item_names;
     use crate::traceability::validate_observation_evidence;
     use std::path::Path;
 
@@ -215,7 +331,7 @@ mod tests {
             }
         "#;
 
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; setup panics signal fixture breakage, see tools/integrity/src/main.rs
+        // expect: a parse failure on this static fixture is fixture breakage, not a real input error.
         let file = syn::parse_file(source).expect("parse source");
         let names = public_item_names(&file);
 
@@ -236,7 +352,7 @@ matrix:
     - "--all-features"
 "#;
 
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; setup panics signal fixture breakage in tools/integrity/src/main.rs
+        // expect: a parse failure on this static fixture is fixture breakage, not a real input error.
         let values = workflow_list_values(workflow, "features").expect("parse values");
         assert_eq!(
             values,
@@ -272,6 +388,12 @@ RUN cargo install --locked cargo-mutants@27.0.0
             .expect("crate lives under tools/integrity - two parents is the repo root")
             .to_path_buf();
 
+        // References a real harness function: the 0.8.3 harness split moved
+        // append_with_visible_gate_returns_after_publish into
+        // crates/core/tests/durable_frontier_waits_append_gate.rs. Keeping this
+        // fixture pinned to the live path means a future move that breaks the
+        // observation-evidence link is caught by the (now workspace-gated)
+        // integrity tests rather than silently rotting.
         assert!(validate_observation_evidence(
             &repo_root,
             "OBS-TEST",
@@ -289,23 +411,6 @@ RUN cargo install --locked cargo-mutants@27.0.0
             err.to_string().contains("no Rust function"),
             "wrong error: {err:#}"
         );
-    }
-
-    #[test]
-    fn justification_body_returns_prose_after_prefix() {
-        assert_eq!(
-            justification_body("// justifies: INV-FOO; narrow cast bounds checked above here"),
-            Some("INV-FOO; narrow cast bounds checked above here".to_string()),
-        );
-        assert_eq!(
-            justification_body("    let _ = 1; // justifies: INV-BAR; inline anchored rationale"),
-            Some("INV-BAR; inline anchored rationale".to_string()),
-        );
-        assert_eq!(
-            justification_body("// this is not a justifies comment"),
-            None
-        );
-        assert_eq!(justification_body("let x = 1;"), None);
     }
 
     #[test]
@@ -329,44 +434,5 @@ RUN cargo install --locked cargo-mutants@27.0.0
             "bare words must not produce anchors; got {:?}",
             anchors
         );
-    }
-
-    #[test]
-    fn line_carries_justification_requires_body_plus_anchor() {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("crate lives under tools/integrity - two parents is the repo root")
-            .to_path_buf();
-        // justifies: INV-TEST-PANIC-AS-ASSERTION; test-only setup failure is the assertion signal in tools/integrity/src/main.rs
-        let known = load_known_invariants(&repo_root).expect("load catalog");
-
-        // good - real invariant anchor, prose is long enough
-        assert!(line_carries_justification(
-            "// justifies: INV-MACRO-BOUNDED-CAST; narrowing cast bounds checked in crates/macros/src/lib.rs",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - prose but no resolvable anchor
-        assert!(!line_carries_justification(
-            "// justifies: this is a narrative justification with no catalog anchor or path",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - INV-id that is not in the catalog
-        assert!(!line_carries_justification(
-            "// justifies: INV-NOT-A-REAL-INVARIANT-IDENTIFIER-HERE covers this site",
-            &repo_root,
-            &known,
-        ));
-
-        // bad - too short (< 5 words) even with an anchor
-        assert!(!line_carries_justification(
-            "// justifies: INV-MACRO-BOUNDED-CAST ok",
-            &repo_root,
-            &known,
-        ));
     }
 }

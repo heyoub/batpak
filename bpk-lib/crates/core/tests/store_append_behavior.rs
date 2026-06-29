@@ -1,18 +1,13 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store append and append-option integration tests.
+//!
+//! Catalog citation: INV-PAYLOAD-VERSION-NONZERO is witnessed here by
+//! `typed_append_rejects_manual_payload_version_zero` (a typed-append seam that
+//! refuses a hand-forged PAYLOAD_VERSION = 0 legacy sentinel).
 
-mod support;
 use batpak::store::{Store, StoreConfig, StoreError, StoreStats};
 use batpak::typestate::Transition;
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
 // Test-local EventPayload used by the apply_transition test. FREEZE-7 removed
@@ -26,8 +21,7 @@ struct PublishedDoc {
     to: String,
 }
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -98,10 +92,10 @@ fn cas_fails_on_wrong_sequence() {
     let coord = Coordinate::new("entity:cas-fail", "scope:test").expect("valid coord");
     let kind = EventKind::custom(0xF, 1);
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("first");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 2}))
         .expect("second");
 
@@ -111,14 +105,11 @@ fn cas_fails_on_wrong_sequence() {
         ..Default::default()
     };
     let result = store.append_with_options(&coord, kind, &serde_json::json!({"x": 3}), opts);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
-             Investigate: src/store/mod.rs append_with_options CAS check.\
-             Common causes: sequence comparison uses wrong field, CAS check skipped under lock."
-        ),
-        Err(err) => err,
-    };
+    let err = result.map(|_| ()).expect_err(
+        "PROPERTY: append_with_options must return Err when expected_sequence is stale (CAS failure).\
+         Investigate: src/store/mod.rs append_with_options CAS check.\
+         Common causes: sequence comparison uses wrong field, CAS check skipped under lock.",
+    );
     assert!(
         matches!(err, StoreError::SequenceMismatch { .. }),
         "PROPERTY: CAS failure must surface as StoreError::SequenceMismatch, got {err:?}"
@@ -329,8 +320,8 @@ fn typed_append_rejects_manual_payload_version_zero() {
     // A hand-written EventPayload impl forging the reserved legacy sentinel.
     // The derive macro forbids this at compile time, but a manual impl can do
     // it; the typed-append seam must reject it at runtime so a real typed frame
-    // can never be stamped indistinguishable from a legacy untyped frame.
-    // justifies: INV-PAYLOAD-VERSION-NONZERO
+    // can never be stamped indistinguishable from a legacy untyped frame
+    // (PROVES INV-PAYLOAD-VERSION-NONZERO).
     #[derive(Serialize, Deserialize)]
     struct ForgedLegacy {
         n: u64,
@@ -343,10 +334,10 @@ fn typed_append_rejects_manual_payload_version_zero() {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
     let coord = Coordinate::new("entity:forged-version", "scope:test").expect("coord");
-    let err = match store.append_typed(&coord, &ForgedLegacy { n: 7 }) {
-        Ok(_) => panic!("PROPERTY: typed append with PAYLOAD_VERSION 0 must be rejected"),
-        Err(e) => e,
-    };
+    let err = store
+        .append_typed(&coord, &ForgedLegacy { n: 7 })
+        .map(|_| ())
+        .expect_err("PROPERTY: typed append with PAYLOAD_VERSION 0 must be rejected");
     assert!(
         matches!(err, StoreError::InvalidPayloadVersion { kind }
             if kind == ForgedLegacy::KIND.as_raw_u16()),

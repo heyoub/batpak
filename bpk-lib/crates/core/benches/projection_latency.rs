@@ -1,6 +1,3 @@
-// justifies: benches/projection_latency.rs uses panic only in benchmark-only reopen helpers to fail fast on violated lock-release assumptions proved in tests/store_locking.rs.
-#![allow(clippy::panic)]
-
 //! Projection replay and cache benchmarks with explicit cold/hot lanes.
 
 use batpak::prelude::*;
@@ -17,6 +14,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-projection-latency-counter");
 
     fn apply_event(&mut self, _event: &Event<serde_json::Value>) {
         self.count += 1;
@@ -37,6 +36,10 @@ impl EventSourced for Counter {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
@@ -46,6 +49,8 @@ struct CounterRaw {
 
 impl EventSourced for CounterRaw {
     type Input = batpak::prelude::RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("bench-projection-latency-counter-raw");
 
     fn apply_event(&mut self, _event: &Event<Vec<u8>>) {
         self.count += 1;
@@ -66,6 +71,10 @@ impl EventSourced for CounterRaw {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 fn populate_projection_fixture(store: &Store, entity: &str, events: u64) {
@@ -73,7 +82,7 @@ fn populate_projection_fixture(store: &Store, entity: &str, events: u64) {
     let kind = EventKind::custom(0xF, 1);
     let payload = serde_json::json!({"x": 1});
     for _ in 0..events {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 }
 
@@ -83,16 +92,18 @@ where
 {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match open() {
-            Ok(value) => return value,
-            Err(err @ StoreError::StoreLocked { .. }) => {
-                if Instant::now() >= deadline {
-                    panic!("{label}: lock did not clear before deadline: {err:?}");
-                }
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(err) => panic!("{label}: unexpected reopen failure: {err:?}"),
+        let result = open();
+        if matches!(result, Err(StoreError::StoreLocked { .. })) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+            continue;
         }
+        let context = match &result {
+            Err(StoreError::StoreLocked { .. }) => {
+                format!("{label}: lock did not clear before deadline")
+            }
+            _ => format!("{label}: unexpected reopen failure"),
+        };
+        return result.expect(&context);
     }
 }
 

@@ -210,7 +210,7 @@ impl std::fmt::Display for ChainWalkReportError {
 
 impl std::error::Error for ChainWalkReportError {}
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Build a deterministic structural chain-walk evidence report.
     ///
     /// This operation validates continuity and hash linkage over stored entries.

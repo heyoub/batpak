@@ -27,24 +27,16 @@
     - ART-NETBAT-TESTS
     - ART-NETBAT-WIRE-GOLDENS
     - ART-ADR-NETBAT-CONTRACT
-- id: FLOW-HBAT-EVENT-QUERY
+- id: FLOW-REFBAT-EVENT-QUERY
   summary: event.query accepts bounded domain-neutral filters, validates kind and coordinate axes, pages visible Store index entries in global_sequence order through Store::query_entries_after, and returns metadata-only summaries; callers fetch full payloads with event.get and decode domain envelopes above batpak.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
-- id: FLOW-HBAT-EVIDENCE-OPS
+- id: FLOW-REFBAT-EVIDENCE-OPS
   summary: evidence.* ops adapt Store evidence reports to NETBAT/1 with canonical report_hex + body_hash identity and bounded Region selectors.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-EVIDENCE-REPORTS
-    - ART-BPK-TS-MANIFEST
-    - ART-BPK-TS-CODEGEN
 - id: FLOW-APPEND-OPTIONS
   summary: Append with CAS/idempotency/correlation options, receipt extensions, and optional lane/depth position hints enforces guards before commit while leaving HLC wall/counter and sequence under writer control; committed extension bytes are copied into append and denial receipts before signing, persisted in .fbat frame metadata, and reconstructed for idempotency replay after cold start.
   artifacts:
@@ -53,7 +45,7 @@
     - ART-DAG-POSITION-HINT-TESTS
     - ART-ADR-POSITION-HINTS
 - id: FLOW-RECEIPT-EXTENSION-CARGO
-  summary: Unknown receipt extensions are substrate cargo. batpak preserves extension bytes byte-for-byte when returning, signing, replaying, or reconstructing the same committed receipt; current checkpoint and mmap artifacts carry those maps directly, older artifacts hydrate from .fbat frames, pcp.* keys are handled exactly like application keys, and semantic interpretation is left to extension-aware code outside batpak-core.
+  summary: Unknown receipt extensions are substrate cargo. batpak preserves extension bytes byte-for-byte when returning, signing, replaying, or reconstructing the same committed receipt; current checkpoint and mmap artifacts carry those maps directly, older artifacts hydrate from .fbat frames, external profile keys are handled exactly like application keys, and semantic interpretation is left to extension-aware code outside batpak-core.
   artifacts:
     - ART-STORE-APPEND
     - ART-STORE-SEGMENT
@@ -235,5 +227,4 @@
   artifacts:
     - ART-DX-PRODUCT-DOCTRINE-AUDIT
     - ART-DX-DOCS
-    - ART-HBAT-SOURCE
     - ART-STORE-QUERY-TRAVERSAL

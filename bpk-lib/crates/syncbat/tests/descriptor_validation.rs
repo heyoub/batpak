@@ -1,17 +1,21 @@
 //! PROVES: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC
 //! CATCHES: invalid operation names and schema/receipt references before catalog or runtime insertion.
 //! SEEDED: fixed descriptor-token tables.
-#![allow(clippy::panic)]
 
-use syncbat::{Core, EffectClass, HandlerResult, Module, OperationDescriptor, Register};
+use syncbat::{
+    Core, EffectClass, HandlerResult, Module, OperationDescriptor, OperationEffectRow, Register,
+};
 
-const VALID: OperationDescriptor = OperationDescriptor::new(
-    "repo.patch",
-    EffectClass::Persist,
-    "schema.repo.patch.input.v1",
-    "schema.repo.patch.output.v1",
-    "receipt.repo.patch.v1",
-);
+fn valid_descriptor() -> OperationDescriptor {
+    OperationDescriptor::new(
+        "repo.patch",
+        EffectClass::Persist,
+        "schema.repo.patch.input.v1",
+        "schema.repo.patch.output.v1",
+        "receipt.repo.patch.v1",
+    )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.repo.patch.v1"))
+}
 
 fn descriptor_with_name(name: &'static str) -> OperationDescriptor {
     OperationDescriptor::new(
@@ -45,7 +49,8 @@ fn descriptor_validation_accepts_stable_ascii_tokens() {
         "schema.repo.patch-v1_test.input",
         "schema.repo.patch-v1_test.output",
         "receipt.repo.patch-v1_test",
-    );
+    )
+    .with_effect_row(OperationEffectRow::new().appends_event("event.repo.patch-v1_test"));
 
     descriptor.validate().expect("descriptor is valid");
     Register::from_operations([descriptor]).expect("register accepts descriptor");
@@ -67,10 +72,12 @@ fn descriptor_validation_rejects_empty_overlong_and_path_like_names() {
     ];
 
     for descriptor in cases {
-        let err = match Register::from_operations([descriptor.clone()]) {
-            Ok(_) => panic!("expected descriptor rejection for {:?}", descriptor.name()),
-            Err(error) => error,
-        };
+        let err = Register::from_operations([descriptor.clone()])
+            .map(|_| ())
+            .expect_err(&format!(
+                "expected descriptor rejection for {:?}",
+                descriptor.name()
+            ));
         assert!(
             matches!(
                 err,
@@ -97,10 +104,9 @@ fn descriptor_validation_rejects_bad_schema_and_receipt_refs() {
     ];
 
     for descriptor in cases {
-        let err = match descriptor.validate() {
-            Ok(()) => panic!("expected descriptor rejection"),
-            Err(error) => error,
-        };
+        let err = descriptor
+            .validate()
+            .expect_err("expected descriptor rejection");
         assert!(!err.field.is_empty());
         assert!(!err.message.is_empty());
     }
@@ -116,10 +122,9 @@ fn module_validation_rejects_invalid_module_names() {
         "bad.",
         "bad..module",
     ] {
-        let err = match Module::from_operations(name, [VALID]) {
-            Ok(_) => panic!("expected module rejection for {name:?}"),
-            Err(error) => error,
-        };
+        let err = Module::from_operations(name, [valid_descriptor()])
+            .map(|_| ())
+            .expect_err(&format!("expected module rejection for {name:?}"));
 
         assert!(
             matches!(
@@ -135,19 +140,19 @@ fn module_validation_rejects_invalid_module_names() {
 fn builder_rejects_invalid_descriptor_and_handler_names() {
     let invalid_descriptor = descriptor_with_name("bad/name");
     let mut builder = Core::builder();
-    let err = match builder.register_operation(invalid_descriptor) {
-        Ok(_) => panic!("expected invalid operation"),
-        Err(error) => error,
-    };
+    let err = builder
+        .register_operation(invalid_descriptor)
+        .map(|_| ())
+        .expect_err("expected invalid operation");
     assert!(matches!(err, syncbat::BuildError::InvalidOperation { .. }));
 
     let mut builder = Core::builder();
-    let err = match builder.register_handler(
-        "bad/name",
-        |_input: &[u8], _cx: &mut syncbat::Ctx<'_>| -> HandlerResult { Ok(Vec::new()) },
-    ) {
-        Ok(_) => panic!("expected invalid handler"),
-        Err(error) => error,
-    };
+    let err = builder
+        .register_handler(
+            "bad/name",
+            |_input: &[u8], _cx: &mut syncbat::Ctx<'_>| -> HandlerResult { Ok(Vec::new()) },
+        )
+        .map(|_| ())
+        .expect_err("expected invalid handler");
     assert!(matches!(err, syncbat::BuildError::InvalidHandler { .. }));
 }

@@ -18,62 +18,62 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
         title: "README",
     },
     RootDoc {
-        source_path: "FACTORY.md",
+        source_path: "01_FACTORY.md",
         output_name: "FACTORY.html",
         title: "Factory",
     },
     RootDoc {
-        source_path: "MODEL.md",
+        source_path: "02_MODEL.md",
         output_name: "MODEL.html",
         title: "Model",
     },
     RootDoc {
-        source_path: "INVARIANTS.md",
+        source_path: "03_INVARIANTS.md",
         output_name: "INVARIANTS.html",
         title: "Invariants",
     },
     RootDoc {
-        source_path: "BATTERIES.md",
+        source_path: "04_BATTERIES.md",
         output_name: "BATTERIES.html",
         title: "Batteries",
     },
     RootDoc {
-        source_path: "TERMINALS.md",
+        source_path: "05_TERMINALS.md",
         output_name: "TERMINALS.html",
         title: "Terminals",
     },
     RootDoc {
-        source_path: "EVENTS.md",
+        source_path: "06_EVENTS.md",
         output_name: "EVENTS.html",
         title: "Events",
     },
     RootDoc {
-        source_path: "RECEIPTS.md",
+        source_path: "07_RECEIPTS.md",
         output_name: "RECEIPTS.html",
         title: "Receipts",
     },
     RootDoc {
-        source_path: "CIRCUITS.md",
+        source_path: "08_CIRCUITS.md",
         output_name: "CIRCUITS.html",
         title: "Circuits",
     },
     RootDoc {
-        source_path: "REPLAY.md",
+        source_path: "09_REPLAY.md",
         output_name: "REPLAY.html",
         title: "Replay",
     },
     RootDoc {
-        source_path: "PROJECTIONS.md",
+        source_path: "10_PROJECTIONS.md",
         output_name: "PROJECTIONS.html",
         title: "Projections",
     },
     RootDoc {
-        source_path: "INTEGRATION.md",
+        source_path: "11_INTEGRATION.md",
         output_name: "INTEGRATION.html",
         title: "Integration",
     },
     RootDoc {
-        source_path: "CONFORMANCE.md",
+        source_path: "12_CONFORMANCE.md",
         output_name: "CONFORMANCE.html",
         title: "Conformance",
     },
@@ -96,13 +96,19 @@ const ROOT_DOCS: &[RootDoc<'_>] = &[
 
 const REQUIRED_DOC_NAV: &[(&str, &str)] = &[
     ("README.md", "README.html"),
-    ("FACTORY.md", "FACTORY.html"),
-    ("MODEL.md", "MODEL.html"),
-    ("INVARIANTS.md", "INVARIANTS.html"),
-    ("CONFORMANCE.md", "CONFORMANCE.html"),
+    ("01_FACTORY.md", "FACTORY.html"),
+    ("02_MODEL.md", "MODEL.html"),
+    ("03_INVARIANTS.md", "INVARIANTS.html"),
+    ("12_CONFORMANCE.md", "CONFORMANCE.html"),
 ];
 
 pub(crate) fn docs(args: DocsArgs) -> Result<()> {
+    // GAUNTLET-DOCS-CURRENCY: regenerate the INV catalog VIEW in 03_INVARIANTS.md
+    // from traceability/invariants.yaml BEFORE rendering the site, so the HTML
+    // and the committed Markdown both reflect the current machine catalog. The
+    // matching `--check` mode runs inside `structural-check` (drift => fail).
+    crate::commands::integrity("docs-catalog", [])?;
+
     let target_dir = cargo_target_dir()?;
     let site_dir = target_dir.join("site");
     if site_dir.exists() {
@@ -318,7 +324,7 @@ mod tests {
     #[test]
     fn rewrite_root_doc_links_updates_canonical_docs() {
         let rewritten = rewrite_root_doc_links(
-            "[factory](FACTORY.md) [readme](README.md) [model](MODEL.md) [conformance](CONFORMANCE.md)",
+            "[factory](01_FACTORY.md) [readme](README.md) [model](02_MODEL.md) [conformance](12_CONFORMANCE.md)",
         );
         assert!(rewritten.contains("FACTORY.html"));
         assert!(rewritten.contains("README.html"));

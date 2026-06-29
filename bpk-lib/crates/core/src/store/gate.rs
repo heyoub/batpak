@@ -30,14 +30,33 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DurabilityGate {
     /// Watermark that must cross the appended event's HLC.
-    pub kind: WatermarkKind,
+    kind: WatermarkKind,
     /// Maximum time to wait for the watermark.
     ///
     /// `WaitTimeout` means the append committed but did not cross the
     /// requested watermark within `timeout`. The event is still in the log;
     /// query reflects it. Re-call `wait_for_<kind>` with a longer timeout if
     /// you need to re-acquire the guarantee.
-    pub timeout: Duration,
+    timeout: Duration,
+}
+
+impl DurabilityGate {
+    /// Construct a gate waiting up to `timeout` for `kind` to cross the append.
+    #[must_use]
+    pub const fn new(kind: WatermarkKind, timeout: Duration) -> Self {
+        Self { kind, timeout }
+    }
+
+    /// Watermark that must cross the appended event's HLC.
+    pub fn kind(&self) -> WatermarkKind {
+        self.kind
+    }
+
+    /// Maximum time to wait for the watermark.
+    #[must_use]
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
 }
 
 impl Store<Open> {
@@ -63,9 +82,12 @@ impl Store<Open> {
         let measurement = measure_gate_wait(
             || self.receipt_point(receipt),
             |target| match gate.kind {
+                WatermarkKind::Accepted => self.wait_for_accepted(target, gate.timeout),
+                WatermarkKind::Written => self.wait_for_written(target, gate.timeout),
                 WatermarkKind::Durable => self.wait_for_durable(target, gate.timeout),
                 WatermarkKind::Applied => self.wait_for_applied(target, gate.timeout),
                 WatermarkKind::Visible => self.wait_for_visible(target, gate.timeout),
+                WatermarkKind::Emitted => self.wait_for_emitted(target, gate.timeout),
             },
         )?;
         tracing::trace!(

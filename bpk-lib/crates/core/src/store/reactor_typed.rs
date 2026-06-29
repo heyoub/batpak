@@ -223,6 +223,7 @@ impl<E: std::error::Error + Send + Sync + 'static> std::error::Error for Reactor
 }
 
 /// Handle for a running typed reactor loop.
+#[must_use = "dropping a TypedReactorHandle leaks the background reactor loop; call stop()/join() to wind it down"]
 pub struct TypedReactorHandle<E: std::error::Error + Send + Sync + 'static> {
     inner: Box<dyn CanalHandle>,
     error_slot: Arc<Mutex<Option<ReactorError<E>>>>,
@@ -373,7 +374,7 @@ where
 
     for entry in entries {
         // Fetch the full event using the lane's specific reader.
-        let stored = match fetch(inner_store, crate::id::EventId::from(entry.event_id)) {
+        let stored = match fetch(inner_store, entry.event_id()) {
             Ok(s) => s,
             Err(e) => {
                 *slot_for_handler.lock() = Some(ReactorError::Store(e));
@@ -572,46 +573,53 @@ where
     let stop_for_thread = Arc::clone(&stop);
     let sub = store.subscribe_lossy(region);
 
-    let join = std::thread::Builder::new()
-        .name("batpak-reactor-lossy".into())
-        .spawn(move || {
-            while !stop_for_thread.load(Ordering::Acquire) {
-                let notif = match sub.filtered_receiver().recv_timeout(idle_sleep) {
-                    Ok(notif) => notif,
-                    Err(RecvTimeoutError::Timeout) => continue,
-                    Err(RecvTimeoutError::Disconnected) => break,
-                };
-                let stored =
-                    match fetch(&store_for_handler, crate::id::EventId::from(notif.event_id)) {
+    let join = store
+        .config
+        .spawner()
+        .spawn(
+            "batpak-reactor-lossy".to_string(),
+            None,
+            Box::new(move || {
+                while !stop_for_thread.load(Ordering::Acquire) {
+                    let notif = match sub.filtered_receiver().recv_timeout(idle_sleep) {
+                        Ok(notif) => notif,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    };
+                    let stored = match fetch(&store_for_handler, notif.event_id) {
                         Ok(stored) => stored,
                         Err(error) => {
                             *slot_for_handler.lock() = Some(ReactorError::Store(error));
                             break;
                         }
                     };
-                let mut batch = ReactionBatch::new();
-                match dispatcher.dispatch(&stored, &mut batch, None) {
-                    Ok(()) if !batch.is_empty() => {
-                        if let Err(error) =
-                            batch.flush(&store_for_handler, notif.correlation_id, notif.event_id)
-                        {
-                            *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                    let mut batch = ReactionBatch::new();
+                    match dispatcher.dispatch(&stored, &mut batch, None) {
+                        Ok(()) if !batch.is_empty() => {
+                            use crate::id::EntityIdType;
+                            if let Err(error) = batch.flush(
+                                &store_for_handler,
+                                notif.correlation_id,
+                                notif.event_id.as_u128(),
+                            ) {
+                                *slot_for_handler.lock() = Some(ReactorError::Store(error));
+                                break;
+                            }
+                        }
+                        Ok(()) => {}
+                        Err(ReactorStepError::User(error)) => {
+                            *slot_for_handler.lock() = Some(ReactorError::User(error));
+                            break;
+                        }
+                        Err(ReactorStepError::Decode(error)) => {
+                            *slot_for_handler.lock() = Some(ReactorError::Decode(error));
                             break;
                         }
                     }
-                    Ok(()) => {}
-                    Err(ReactorStepError::User(error)) => {
-                        *slot_for_handler.lock() = Some(ReactorError::User(error));
-                        break;
-                    }
-                    Err(ReactorStepError::Decode(error)) => {
-                        *slot_for_handler.lock() = Some(ReactorError::Decode(error));
-                        break;
-                    }
                 }
-            }
-        })
-        .map_err(StoreError::Io)?;
+            }),
+        )
+        .map_err(StoreError::from)?;
 
     Ok(SubscriptionWorkerHandle::new(stop, join, slot_for_store))
 }

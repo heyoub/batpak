@@ -1,4 +1,5 @@
 use super::IndexEntry;
+use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -11,6 +12,32 @@ pub(crate) struct EntityRun {
     pub(crate) len: u64,
     pub(crate) first_sequence: u64,
     pub(crate) last_sequence: u64,
+}
+
+impl EntityRun {
+    /// Convert this persisted `[start, start+len)` run into a `usize` slice
+    /// range, surfacing a typed corruption error rather than panicking.
+    ///
+    /// `start`/`len` are read back from a persisted [`RoutingSummary`]; on an
+    /// untrusted artifact they may not fit `usize` or may overflow on
+    /// `start + len`. Both conditions are corruption, so they map to a
+    /// [`StoreError::CorruptSegment`] (the logical routing artifact has no
+    /// segment id, so `0` is used) instead of an unchecked cast or index.
+    pub(crate) fn usize_range(&self) -> Result<std::ops::Range<usize>, StoreError> {
+        let start = usize::try_from(self.start).map_err(|_| {
+            StoreError::corrupt_segment_with_detail(0, "routing entity-run start exceeds usize")
+        })?;
+        let len = usize::try_from(self.len).map_err(|_| {
+            StoreError::corrupt_segment_with_detail(0, "routing entity-run len exceeds usize")
+        })?;
+        let end = start.checked_add(len).ok_or_else(|| {
+            StoreError::corrupt_segment_with_detail(
+                0,
+                "routing entity-run start+len overflows usize",
+            )
+        })?;
+        Ok(start..end)
+    }
 }
 
 /// One contiguous chunk of restore-time sequence-sorted entries.

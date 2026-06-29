@@ -1,10 +1,10 @@
 use crate::store::index::IndexEntry;
+use crate::store::platform::spawn::JobHandle;
 use crate::store::write::fanout::Notification;
 use crate::store::StoreError;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 /// One pulled canal batch without forcing one allocation for one-item canals.
@@ -29,17 +29,17 @@ impl<I> CanalBatch<I> {
 /// Minimal event reference yielded by a [`Canal`].
 pub trait CanalItem {
     /// Event id to fetch from the store replay lane.
-    fn event_id(&self) -> u128;
+    fn event_id(&self) -> crate::id::EventId;
 }
 
 impl CanalItem for IndexEntry {
-    fn event_id(&self) -> u128 {
+    fn event_id(&self) -> crate::id::EventId {
         self.event_id()
     }
 }
 
 impl CanalItem for Notification {
-    fn event_id(&self) -> u128 {
+    fn event_id(&self) -> crate::id::EventId {
         self.event_id
     }
 }
@@ -103,14 +103,14 @@ pub trait CanalHandle: Send {
 /// Handle for lossy subscription-backed workers.
 pub(crate) struct SubscriptionWorkerHandle {
     stop: Arc<AtomicBool>,
-    join: Option<JoinHandle<()>>,
+    join: Option<Box<dyn JobHandle>>,
     error_slot: Arc<Mutex<Option<StoreError>>>,
 }
 
 impl SubscriptionWorkerHandle {
     pub(crate) fn new(
         stop: Arc<AtomicBool>,
-        join: JoinHandle<()>,
+        join: Box<dyn JobHandle>,
         error_slot: Arc<Mutex<Option<StoreError>>>,
     ) -> Self {
         Self {

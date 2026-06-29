@@ -67,9 +67,6 @@
 - id: REQ-BIDIRECTIONAL-SUBSTRATE-LANE
   summary: Non-Rust terminals that can commit substrate events must also expose bounded, domain-neutral traversal so external replay can be reconstructed from substrate truth without sidecar authority.
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
@@ -96,9 +93,8 @@
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
 - id: REQ-DX-SUBSTRATE-PRODUCT-FIREWALL
-  summary: Product and agent-framework doctrine may guide naming and documentation, but BatPAK public surfaces must remain substrate-neutral and must not own Moonwalker, PCP-Core, workflow-builder, role-surface, or living-work-artifact semantics.
+  summary: Product and agent-framework doctrine may guide naming and documentation, but BatPAK public surfaces must remain substrate-neutral and must not own downstream product, agent-framework, workflow, or domain-specific semantics.
   artifacts:
     - ART-DX-PRODUCT-DOCTRINE-AUDIT
     - ART-DX-DOCS
-    - ART-HBAT-SOURCE
     - ART-STORE-QUERY-TRAVERSAL

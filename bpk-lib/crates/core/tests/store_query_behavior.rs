@@ -1,20 +1,10 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; advanced store tests rely on unwrap/panic as assertion style, spawn threads for concurrency probes, and narrow bounded test data into target types that the fixture guarantees fit.
-#![allow(
-    clippy::unwrap_used,
-    clippy::disallowed_methods,
-    clippy::cast_possible_truncation,
-    clippy::needless_borrows_for_generic_args,
-    clippy::panic
-)]
 //! Advanced Store config, lookup, and query integration tests.
 
-mod support;
 use batpak::store::{Store, StoreConfig, StoreDiagnostics, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -51,14 +41,13 @@ fn store_config_new_uses_sensible_defaults() {
 #[test]
 fn get_nonexistent_returns_not_found() {
     let (_dir, store) = test_store();
-    let result = store.get(batpak::id::EventId::from(0xDEADu128));
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound).\
-             Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup."
-        ),
-        Err(err) => err,
-    };
+    let err = store
+        .get(batpak::id::EventId::from(0xDEADu128))
+        .map(|_| ())
+        .expect_err(
+            "PROPERTY: get() of a nonexistent event_id must return Err(StoreError::NotFound). \
+             Investigate: src/store/mod.rs get, src/store/segment/scan.rs lookup.",
+        );
     assert!(
         matches!(err, StoreError::NotFound(_)),
         "PROPERTY: get() on a nonexistent event_id must surface as StoreError::NotFound, got {err:?}"
@@ -75,13 +64,14 @@ fn query_with_clock_range_filters_events() {
 
     // Append 10 events (clock 0..9)
     for i in 0..10 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
 
     // Query with clock_range [3, 7] — should get events with clock 3,4,5,6,7
-    let region = Region::entity("entity:clock").with_clock_range((3, 7));
+    let region = Region::entity("entity:clock")
+        .with_clock_range(ClockRange::new(3, 7).expect("valid clock range"));
     let results = store.query(&region);
 
     assert_eq!(
@@ -118,16 +108,17 @@ fn query_clock_range_with_scope_filter() {
     let coord_b = Coordinate::new("entity:b", "scope:shared").expect("valid coord");
 
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord_a, kind, &serde_json::json!({"i": i}))
             .expect("append a");
-        store
+        let _ = store
             .append(&coord_b, kind, &serde_json::json!({"i": i}))
             .expect("append b");
     }
 
     // entity:a with clock range [1,3]
-    let region = Region::entity("entity:a").with_clock_range((1, 3));
+    let region = Region::entity("entity:a")
+        .with_clock_range(ClockRange::new(1, 3).expect("valid clock range"));
     let results = store.query(&region);
     assert_eq!(
         results.len(),
@@ -154,18 +145,18 @@ fn query_by_fact_category() {
     // Category 0xB: type 1
     let kind_b1 = EventKind::custom(0xB, 1);
 
-    store
+    let _ = store
         .append(&coord, kind_a1, &serde_json::json!({"cat": "a"}))
         .expect("append");
-    store
+    let _ = store
         .append(&coord, kind_a2, &serde_json::json!({"cat": "a"}))
         .expect("append");
-    store
+    let _ = store
         .append(&coord, kind_b1, &serde_json::json!({"cat": "b"}))
         .expect("append");
 
     // Query by category 0xA — should get both kind_a1 and kind_a2
-    let region = Region::all().with_fact_category(0xA);
+    let region = Region::all().with_fact_category(EventCategory::new(0xA).expect("valid category"));
     let results = store.query(&region);
     assert_eq!(
         results.len(),
@@ -177,4 +168,32 @@ fn query_by_fact_category() {
     );
 
     store.close().expect("close");
+}
+
+/// PROVES: `ClockRange::new`/`EventCategory::new` validate their inputs and
+/// surface the typed `RegionFilterError` variants; valid values expose their
+/// accessors. CATCHES: a constructor that accepts an inverted range or an
+/// out-of-range category, or accessors that drop/swap the stored values.
+#[test]
+fn region_filter_constructors_validate_and_surface_typed_errors() {
+    let range = ClockRange::new(3, 7).expect("valid range");
+    assert_eq!((range.start(), range.end()), (3, 7));
+    assert_eq!(
+        ClockRange::new(7, 3),
+        Err(RegionFilterError::InvertedClockRange { start: 7, end: 3 }),
+        "inverted clock range must be rejected with the typed error"
+    );
+
+    let category = EventCategory::new(0xA).expect("valid category");
+    assert_eq!(category.get(), 0xA);
+    assert_eq!(
+        EventCategory::new(16),
+        Err(RegionFilterError::CategoryOutOfRange { category: 16 }),
+        "out-of-range category must be rejected with the typed error"
+    );
+    assert_eq!(
+        EventCategory::of_kind(EventKind::custom(0xC, 1)).get(),
+        0xC,
+        "of_kind must read the 4-bit category from the event kind"
+    );
 }

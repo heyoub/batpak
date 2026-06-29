@@ -20,13 +20,20 @@ mod error;
 )]
 pub mod fault;
 mod file_classification;
+mod fork_report;
 mod frontier_api;
 mod gate;
-mod hidden_ranges;
+// `pub(crate)` (was `mod`) so the feature-gated `crate::__fuzz` module can name
+// `hidden_ranges::{load_cancelled_ranges, VISIBILITY_RANGES_FILENAME}`. Crate-
+// internal only; no public API-surface change.
+pub(crate) mod hidden_ranges;
+mod import;
+mod import_api;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
 mod lifecycle;
 mod lifecycle_api;
+mod lifecycle_close;
 mod open;
 mod platform;
 /// Projection cache traits and built-in backends (NoCache, NativeCache).
@@ -44,6 +51,9 @@ mod runtime_contracts;
 /// On-disk segment format, frame encoding/decoding, and compaction helpers.
 pub mod segment;
 mod signing;
+/// Cooperative single-thread seeded simulation runtime (test hooks only).
+#[cfg(feature = "dangerous-test-hooks")]
+pub(crate) mod sim;
 mod snapshot_report;
 /// Runtime statistics and diagnostic snapshots.
 pub mod stats;
@@ -57,7 +67,7 @@ mod write_api;
 
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
-    CompactionConfig, CompactionStrategy, DenialReceipt, EncodedBytes, ExtensionKey,
+    CompactionConfig, CompactionStrategy, DenialReceipt, DenialRequest, EncodedBytes, ExtensionKey,
     ExtensionKeyError, ReceiptExtensionKey, ReceiptExtensionNamespace, ReceiptExtensionValue,
     RetentionPredicate, SigningDowngradeBody, SigningDowngradeReason, SigningExtensionNamespace,
     SIGNING_DOWNGRADE_SCHEMA_VERSION,
@@ -96,12 +106,32 @@ pub use error::{
 pub use fault::{
     CountdownAction, CountdownInjector, FaultInjector, InjectionPoint, ProbabilisticInjector,
 };
+pub use fork_report::{
+    decode_fork_evidence_wire, encode_fork_evidence_wire, fork_report_body_hash, CopyPreference,
+    ForkCopyStrategy, ForkEvidenceHash, ForkFinding, ForkOptions, ForkReport, ForkReportBody,
+    ForkStrategyCounts, FORK_EVIDENCE_REPORT_SCHEMA_VERSION,
+};
 pub use gate::DurabilityGate;
+pub use import::{
+    decode_import_provenance_wire, encode_import_provenance_wire, provenance,
+    provenance_from_extensions, ImportFilter, ImportOptions, ImportProvenance, ImportReport,
+    ImportSelector, SourceNamespace, IMPORT_PROVENANCE_SCHEMA_VERSION,
+};
+pub use index::IndexEntry;
+/// Test-only global-allocator shims. Re-exported so dedicated single-test
+/// binaries can install one as `#[global_allocator]`. Compiled out unless the
+/// `alloc-count` or `fault-alloc` feature is enabled.
+#[cfg(any(feature = "alloc-count", feature = "fault-alloc"))]
+pub use platform::alloc;
 pub use platform::clock::{Clock, SystemClock};
+pub use platform::spawn::{JobHandle, JobStatus, JoinError, Spawn, SpawnError, ThreadSpawn};
+pub use projection::flow::ReplayInput;
 pub use projection::watch::{CursorWatcherError, ProjectionWatcher, WatcherError};
 pub use projection::{
     CacheCapabilities, CacheMeta, Freshness, NativeCache, NoCache, ProjectionCache,
 };
+/// Three projection states returned by [`Store::project_fused3`].
+pub type ProjectionFusion3<First, Second, Third> = (Option<First>, Option<Second>, Option<Third>);
 pub use projection_run::{
     ProjectionEvidenceRegistry, ProjectionRunCacheStatus, ProjectionRunCheckpointRef,
     ProjectionRunEvidenceReport, ProjectionRunFinding, ProjectionRunFreshnessStatus,
@@ -120,6 +150,13 @@ pub use read_walk::{
 };
 pub use receipt_verification::{ReceiptVerification, ReceiptVerificationError};
 pub use signing::SigningKey;
+/// The canonical deterministic [`Clock`](crate::store::Clock) for simulators.
+///
+/// Exported only under `dangerous-test-hooks` (the same gate the rest of the
+/// simulation runtime lives behind) so downstream deterministic simulators
+/// construct one logical clock instead of re-implementing the trait.
+#[cfg(feature = "dangerous-test-hooks")]
+pub use sim::SimClock;
 pub use snapshot_report::{
     snapshot_report_body_hash, SnapshotEvidenceHash, SnapshotEvidenceReport, SnapshotFenceTokenRef,
     SnapshotFileKind, SnapshotFinding, SnapshotReportBody, SnapshotWatermarkRef,
@@ -127,10 +164,10 @@ pub use snapshot_report::{
 };
 pub use stats::{
     ActiveSegmentReadEvidence, ClockEvidence, FrontierView, HlcPoint, HostEvidenceSummary,
-    LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence, ParentDirSyncAdmissionSummary,
-    ParentDirSyncEvidence, PlatformAdmissionSummary, PlatformEvidenceSummary, StoreDiagnostics,
-    StoreLockAdmissionSummary, StorePathEvidenceSummary, StorePathStatusEvidence, StoreStats,
-    WatermarkKind, WriterPressure,
+    LaneFrontierView, LockLeafSymlinkProtection, MmapAdmissionSummary, MmapEvidence,
+    ParentDirSyncAdmissionSummary, ParentDirSyncEvidence, PlatformAdmissionSummary,
+    PlatformEvidenceSummary, StoreDiagnostics, StoreLockAdmissionSummary, StorePathEvidenceSummary,
+    StorePathStatusEvidence, StoreStats, WatermarkKind, WriterPressure,
 };
 pub use store_resource_report::{
     store_data_dir_identity_hash, store_resource_evidence_report_from_diagnostics,
@@ -145,6 +182,7 @@ pub use subscriber_frontier::{
     SubscriberFrontierReportError, SubscriberFrontierRequest, SubscriberFrontierSource,
     SUBSCRIBER_FRONTIER_REPORT_SCHEMA_VERSION,
 };
+pub use watch_api::ReactLoopHandle;
 pub use write::control::{AppendTicket, BatchAppendTicket, Outbox, VisibilityFence};
 pub use write::writer::{Notification, RestartPolicy};
 
@@ -152,7 +190,6 @@ use crate::coordinate::{Coordinate, KindFilter, Region};
 use crate::event::{
     self, EventKind, EventPayload, EventPayloadValidation, EventSourced, StoredEvent,
 };
-use crate::guard::{Denial, GateSet};
 use index::StoreIndex;
 use open::timestamp_us_for_hlc;
 use parking_lot::Mutex;
@@ -183,13 +220,54 @@ pub(crate) fn recv_writer_reply<T>(
 
 /// Store: the runtime. Sync API. Send + Sync.
 /// Invariant 2: all methods are sync; async integration lives in channels.
-// justifies: INV-STORE-SYNC-ONLY, ADR-0001; async-store is not a declared feature in src/store/mod.rs; this compile_error guard must survive cargo check by silencing the unexpected cfg name
-#[allow(unexpected_cfgs)]
+// async-store is intentionally undeclared in Cargo.toml; build.rs registers the
+// cfg via `cargo::rustc-check-cfg` so this INV-STORE-SYNC-ONLY guard (ADR-0001)
+// compiles warning-free in src/store/mod.rs.
 #[cfg(feature = "async-store")]
 compile_error!("INVARIANT 2: Store API is sync. Use spawn_blocking or flume recv_async.");
 
+/// Sealing module for [`StoreState`] (mirrors `typestate::transition::sealed`).
+///
+/// `Sealed` is a marker that only this crate's typestate markers implement, so
+/// downstream code cannot add new [`StoreState`] implementors.
+#[doc(hidden)]
+pub mod sealed {
+    /// Sealed marker implemented by every [`super::StoreState`] type.
+    pub trait Sealed {}
+}
+
+/// Sealed per-state teardown contract for the [`Store`] typestate.
+///
+/// This is what lets the single generic `Drop for Store<State>` reach the
+/// writer (when there is one) by `&mut` without moving any field out of the
+/// store. Only [`Open`] carries a writer handle; the other markers are ZSTs
+/// whose teardown is a no-op.
+///
+/// The trait is `pub` so it can bound the `State` parameter on the public
+/// [`Store`]/[`ProjectionEvidenceRegistry`] types, but it is **sealed** via the
+/// private `sealed::Sealed` supertrait: downstream code can neither implement
+/// it for new markers nor obtain a `StoreState` value to call its methods on
+/// (the marker constructors — e.g. `Open`'s field — are crate-private). No
+/// method signature names `WriterHandle`, so the crate-private writer type is
+/// never exposed in the public API either.
+pub trait StoreState: sealed::Sealed {
+    /// Drain + join the owned writer when `should_shutdown` is set.
+    fn shutdown_writer(&mut self, should_shutdown: bool);
+
+    /// Queue length of the owned writer's command channel, if any.
+    ///
+    /// Returns the channel length only for [`Open`]; the other states carry no
+    /// writer. Domain-neutral `usize` so the crate-private `WriterHandle` is
+    /// never named in the (sealed) trait signature.
+    fn writer_queue_len(&self) -> Option<usize>;
+}
+
 /// Typestate marker for an open store.
-pub struct Open;
+///
+/// `Open` is the only state that owns the writer handle: encoding the
+/// invariant "an open store always has a writer" directly in the type, so
+/// `writer_ref` can return `&WriterHandle` with no `Option`, no `expect`.
+pub struct Open(pub(crate) WriterHandle);
 
 /// Typestate marker for a cleanly closed store.
 pub struct Closed;
@@ -197,36 +275,16 @@ pub struct Closed;
 /// Typestate marker for a read-only store handle.
 pub struct ReadOnly;
 
-/// The main event store handle. Sync API; all methods are blocking. Send + Sync.
-pub struct Store<State = Open> {
-    pub(crate) index: Arc<StoreIndex>,
-    pub(crate) reader: Arc<Reader>,
-    pub(crate) cache: Box<dyn ProjectionCache>,
-    pub(crate) writer: Option<WriterHandle>,
-    pub(crate) watermark_handle: WatermarkAdvanceHandle,
-    pub(crate) projection_registry: ProjectionRegistry,
-    pub(crate) lifecycle_gate: Mutex<()>,
-    pub(crate) config: Arc<StoreConfig>,
-    pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
-    pub(crate) should_shutdown_on_drop: bool,
-    pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
-    pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
-    pub(crate) _state: std::marker::PhantomData<State>,
-    pub(crate) _store_lock: dir_lock::StoreDirLock,
-}
+impl sealed::Sealed for Open {}
+impl sealed::Sealed for Closed {}
+impl sealed::Sealed for ReadOnly {}
 
-/// Safety net: if Store is dropped without calling close(), send Shutdown to the
-/// writer thread and wait for it to drain pending events before releasing the
-/// directory lock.
-/// close(self) is still the preferred explicit path for guaranteed clean shutdown.
-impl<State> Drop for Store<State> {
-    fn drop(&mut self) {
-        if !self.should_shutdown_on_drop {
+impl StoreState for Open {
+    fn shutdown_writer(&mut self, should_shutdown: bool) {
+        if !should_shutdown {
             return;
         }
-        let Some(mut writer) = self.writer.take() else {
-            return;
-        };
+        let writer = &mut self.0;
         tracing::warn!(
             "Store dropped without explicit close(); draining writer before releasing store lock"
         );
@@ -238,7 +296,54 @@ impl<State> Drop for Store<State> {
         {
             wait_for_drop_shutdown_ack(&rx);
         }
-        join_drop_shutdown_writer(&mut writer);
+        join_drop_shutdown_writer(writer);
+    }
+
+    fn writer_queue_len(&self) -> Option<usize> {
+        Some(self.0.tx.len())
+    }
+}
+
+impl StoreState for Closed {
+    fn shutdown_writer(&mut self, _should_shutdown: bool) {}
+    fn writer_queue_len(&self) -> Option<usize> {
+        None
+    }
+}
+
+impl StoreState for ReadOnly {
+    fn shutdown_writer(&mut self, _should_shutdown: bool) {}
+    fn writer_queue_len(&self) -> Option<usize> {
+        None
+    }
+}
+
+/// The main event store handle. Sync API; all methods are blocking. Send + Sync.
+pub struct Store<State: StoreState = Open> {
+    pub(crate) index: Arc<StoreIndex>,
+    pub(crate) reader: Arc<Reader>,
+    pub(crate) cache: Box<dyn ProjectionCache>,
+    pub(crate) watermark_handle: WatermarkAdvanceHandle,
+    pub(crate) projection_registry: ProjectionRegistry,
+    pub(crate) lifecycle_gate: Mutex<()>,
+    pub(crate) config: Arc<StoreConfig>,
+    pub(crate) runtime: Arc<config::ValidatedStoreConfig>,
+    pub(crate) should_shutdown_on_drop: bool,
+    pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
+    pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
+    /// Typestate payload: carries the writer handle when (and only when) the
+    /// store is [`Open`]; a ZST for the other states.
+    pub(crate) state: State,
+    pub(crate) _store_lock: dir_lock::StoreDirLock,
+}
+
+/// Safety net: if Store is dropped without calling close(), send Shutdown to the
+/// writer thread and wait for it to drain pending events before releasing the
+/// directory lock.
+/// close(self) is still the preferred explicit path for guaranteed clean shutdown.
+impl<State: StoreState> Drop for Store<State> {
+    fn drop(&mut self) {
+        self.state.shutdown_writer(self.should_shutdown_on_drop);
     }
 }
 
@@ -248,4 +353,32 @@ fn wait_for_drop_shutdown_ack(rx: &flume::Receiver<Result<(), StoreError>>) {
 
 fn join_drop_shutdown_writer(writer: &mut WriterHandle) {
     let _join_result = writer.join();
+}
+
+#[cfg(feature = "dangerous-test-hooks")]
+impl Store<Open> {
+    /// Test-only: abandon this store the way a power loss would, WITHOUT the
+    /// clean-shutdown drain.
+    ///
+    /// A normal `drop`/`close` sends `Shutdown` to the writer, which drains the
+    /// queue, writes a SIDX footer, and fsyncs — defeating any pre-fsync crash
+    /// scenario. This hook instead disables the drop-time shutdown and quiesces
+    /// the writer by closing its command channel (NOT by sending `Shutdown`), so
+    /// the writer loop simply ends with no final sync/footer. The
+    /// write-but-unsynced tail therefore stays exactly where the durability seam
+    /// left it; the caller then drives [`crate::store::platform::fs::StoreFs::crash`]
+    /// (via the installed sim filesystem) to truncate it, modelling power loss.
+    ///
+    /// Consumes the store; reopen over the same data directory to recover.
+    pub(crate) fn abandon_without_shutdown(mut self) {
+        self.should_shutdown_on_drop = false;
+        // Close the writer's command channel WITHOUT sending Shutdown: the writer
+        // loop ends naturally (no drain, no footer, no final sync), then we join
+        // to quiescence so no thread is mid-fsync when the caller crashes the
+        // filesystem.
+        self.state.0.close_channel_and_join();
+        // `self` (should_shutdown_on_drop=false) drops here as an inert handle:
+        // `Open::shutdown_writer(false)` no-ops and the quiesced writer in
+        // `state.0` then drops inertly.
+    }
 }

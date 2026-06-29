@@ -19,7 +19,7 @@
 //! # Registration
 //!
 //! Steps register link-time through the same `inventory` pattern as the
-//! `EventPayload` kind registry. Use [`register_upcast!`] on an [`Upcast`] impl;
+//! `EventPayload` kind registry. Use [`register_upcast!`](crate::register_upcast) on an [`Upcast`] impl;
 //! each impl supplies a `(KIND, FROM_VERSION)` key and a pure value migration.
 
 use crate::event::{EventKind, EventPayload};
@@ -28,7 +28,7 @@ use serde::de::DeserializeOwned;
 /// A single vN -> vN+1 migration for one [`EventKind`].
 ///
 /// Implement this for each non-additive hop, then register it with
-/// [`register_upcast!`]. The migration is a *pure* value transform: given a
+/// [`register_upcast!`](crate::register_upcast). The migration is a *pure* value transform: given a
 /// decoded value of version [`Upcast::FROM_VERSION`], produce a value of version
 /// `FROM_VERSION + 1`. It must not perform I/O and must be deterministic so a
 /// replay is byte-stable.
@@ -246,9 +246,41 @@ pub(crate) fn value_from_json(value: &serde_json::Value) -> Result<rmpv::Value, 
 
 #[cfg(test)]
 mod tests {
-    // justifies: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT; unit tests assert via panic on impossible-by-construction branches in src/event/upcast.rs
-    #![allow(clippy::panic)]
     use super::*;
+    use proptest::prelude::*;
+    use proptest::test_runner::TestCaseError;
+    use serde_json::{Map, Value};
+
+    fn arb_json_value() -> impl Strategy<Value = Value> {
+        let leaf = prop_oneof![
+            Just(Value::Null),
+            any::<bool>().prop_map(Value::Bool),
+            any::<i64>().prop_map(|n| Value::Number(n.into())),
+            "[a-zA-Z0-9 _:-]{0,24}".prop_map(Value::String),
+        ];
+
+        leaf.prop_recursive(3, 24, 4, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..4).prop_map(Value::Array),
+                proptest::collection::btree_map("[a-zA-Z0-9_:-]{1,12}", inner, 0..4).prop_map(
+                    |items| {
+                        let mut map = Map::new();
+                        for (key, value) in items {
+                            map.insert(key, value);
+                        }
+                        Value::Object(map)
+                    }
+                ),
+            ]
+        })
+    }
+
+    fn prop_result<T, E: std::fmt::Display>(
+        result: Result<T, E>,
+        context: &'static str,
+    ) -> Result<T, TestCaseError> {
+        result.map_err(|err| TestCaseError::fail(format!("{context}: {err}")))
+    }
 
     #[test]
     fn value_from_msgpack_rejects_trailing_bytes() {
@@ -259,12 +291,14 @@ mod tests {
         rmpv::encode::write_value(&mut bytes, &rmpv::Value::from(42u8)).expect("encode test value");
         bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
 
-        let err = match value_from_msgpack(&bytes) {
-            Ok(_) => panic!("PROPERTY: trailing bytes after a msgpack value must be rejected"),
-            Err(e) => e,
-        };
+        let err = value_from_msgpack(&bytes)
+            .expect_err("PROPERTY: trailing bytes after a msgpack value must be rejected");
+        assert!(
+            matches!(&err, UpcastError::ValueCodec(_)),
+            "expected ValueCodec error, got {err:?}"
+        );
         let UpcastError::ValueCodec(msg) = err else {
-            panic!("expected ValueCodec error, got {err:?}");
+            unreachable!("matches! above already asserted the ValueCodec variant")
         };
         assert!(
             msg.contains("4 trailing byte(s)"),
@@ -278,5 +312,15 @@ mod tests {
         rmpv::encode::write_value(&mut bytes, &rmpv::Value::from(7u8)).expect("encode test value");
         let value = value_from_msgpack(&bytes).expect("clean single value decodes");
         assert_eq!(value.as_u64(), Some(7));
+    }
+
+    proptest! {
+        #[test]
+        fn value_from_json_and_msgpack_agree(value in arb_json_value()) {
+            let bytes = prop_result(crate::encoding::to_bytes(&value), "encode json value")?;
+            let from_json = prop_result(value_from_json(&value), "value from json")?;
+            let from_msgpack = prop_result(value_from_msgpack(&bytes), "value from msgpack")?;
+            prop_assert_eq!(from_json, from_msgpack);
+        }
     }
 }

@@ -224,7 +224,7 @@ impl std::fmt::Display for ReadWalkReportError {
 
 impl std::error::Error for ReadWalkReportError {}
 
-impl<State> Store<State> {
+impl<State: crate::store::StoreState> Store<State> {
     /// Perform a region query and return deterministic, opt-in read evidence.
     ///
     /// This method does not append evidence automatically.
@@ -354,10 +354,10 @@ fn source_refs_from_region(region: &Region) -> Vec<ReadWalkSourceRef> {
             KindFilter::Any => {}
         }
     }
-    if let Some((start_clock, end_clock)) = region.clock_range() {
+    if let Some(range) = region.clock_range() {
         refs.push(ReadWalkSourceRef::ClockRange {
-            start_clock,
-            end_clock,
+            start_clock: range.start(),
+            end_clock: range.end(),
         });
     }
     refs.sort();

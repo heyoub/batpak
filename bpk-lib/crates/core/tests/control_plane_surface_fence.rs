@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this visibility-fence harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the `VisibilityFence` lifecycle -- root/batch/reaction submissions stay
 //! hidden until commit, commit preserves reaction correlation/causation metadata,
 //! and cancel (explicit, on drop, or on shutdown) discards pending work and keeps
@@ -15,12 +13,10 @@ use batpak::store::{
 use std::time::Duration;
 use tempfile::TempDir;
 
-#[path = "support/control_plane_surface.rs"]
-mod cps_support;
+use batpak_testkit::control_plane_surface as cps_support;
 use cps_support::{test_config, KIND_COUNTER};
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 fn wait_append_ticket(ticket: &AppendTicket, label: &str) -> Result<AppendReceipt, StoreError> {
@@ -74,10 +70,10 @@ fn fence_drop_without_commit_auto_cancels() {
         .append(&coord, kind, &serde_json::json!({"after_drop": true}))
         .expect("append after fence drop");
     assert!(
-        receipt.sequence >= 1,
+        receipt.global_sequence >= 1,
         "PROPERTY: store must be usable after an auto-cancelled fence drop. \
          Got sequence {}, expected >= 1.",
-        receipt.sequence
+        receipt.global_sequence
     );
 
     store.close().expect("close store");
@@ -299,7 +295,7 @@ fn fenced_reaction_commit_preserves_reaction_metadata() {
     let reaction_entry = &entries[0];
     assert_eq!(
         reaction_entry.event_id(),
-        u128::from(reaction.event_id),
+        reaction.event_id,
         "PROPERTY: the committed reaction receipt must identify the stored reaction event."
     );
     assert_eq!(

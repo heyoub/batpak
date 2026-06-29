@@ -1,0 +1,40 @@
+# fitness_functions.yaml — declarative registry of the architecture fitness
+# functions the triangulation gate runs (the dual-ergonomic rule surface, D7).
+#
+# This YAML is the human-readable catalogue of (a) the independent crate-graph
+# ORACLES the triangulation engine cross-checks and (b) the directional
+# INVARIANT it enforces on top of acyclicity. It is NOT a second source of truth
+# that can drift: `tools/integrity/src/fitness_functions.rs::check` asserts in
+# LOCKSTEP that the `oracles` list here equals exactly the oracle names the live
+# `triangulation::default_oracles()` roster emits, and that every `invariant`
+# id here resolves to a real catalog entry in `traceability/invariants.yaml`.
+# A renamed/added/removed oracle or invariant that is not mirrored here fails the
+# gate, so the declarative surface and the code stay in step.
+#
+# Schema:
+#   oracles:    list of { name, predicate, source } — one per independent
+#               derivation; `name` MUST equal the oracle's `Oracle::name()`.
+#   invariants: list of { id, enforced_by } — `id` MUST exist in invariants.yaml.
+
+oracles:
+  - name: cargo-metadata
+    predicate: workspace-crate-graph/{acyclic,edge-signature}
+    source: "edges from `cargo metadata --no-deps` normal path dependencies + Tarjan SCC"
+  - name: manifest-scan
+    predicate: workspace-crate-graph/{acyclic,edge-signature}
+    source: "edges re-derived by directly scanning each member Cargo.toml for path deps + Tarjan SCC"
+  - name: source-usage
+    predicate: workspace-crate-graph/acyclic
+    source: "edges re-derived from actual source `use`/`extern crate` usage (acyclic predicate only; the usage edge set is a legal subset of the manifest set)"
+  - name: cargo-member-set
+    predicate: workspace/member-set
+    source: "workspace member crate names from cargo's own resolution (`cargo metadata` workspace_members)"
+  - name: git-member-set
+    predicate: workspace/member-set
+    source: "member crate names re-derived with NO cargo resolution: `git ls-files` tracked Cargo.toml set + textual root-manifest members/exclude glob parsing + textual `[package] name` scan"
+
+invariants:
+  - id: INV-WORKSPACE-DAG-ACYCLIC
+    enforced_by: "triangulation::check (oracle agreement + agreed-cycle rejection)"
+  - id: INV-DEPENDENCY-DIRECTION
+    enforced_by: "triangulation::check_direction_over (strictly-downward layer edges per dependency_direction.yaml)"

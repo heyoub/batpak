@@ -1,8 +1,8 @@
 schema_version: 1
 summary: >
   0.8.0 substrate/product firewall. Product doctrine informs BatPAK naming and
-  boundaries, but does not authorize product, agent-framework, Moonwalker, or
-  PCP-Core semantics inside the substrate.
+  boundaries, but does not authorize product, agent-framework, downstream product, or
+  external profile-spec semantics inside the substrate.
 entries:
   - id: onboarding_pressure
     downstream_pressure: >
@@ -17,9 +17,9 @@ entries:
       - receipts
       - examples and root command surface
     proof_commands:
-      - just host-dev
-      - just host-loop
-    owning_layer: downstream product / Moonwalker
+      - just verify
+      - cargo test -p netbat
+    owning_layer: downstream product
     explicit_non_goals:
       - pain intake
       - onboarding wizard
@@ -39,9 +39,8 @@ entries:
       - projection evidence
       - opaque extension bytes
     proof_commands:
-      - just host-loop
       - just inspect
-    owning_layer: downstream agent framework / Moonwalker
+    owning_layer: downstream agent framework
     explicit_non_goals:
       - agent policy
       - role authority
@@ -61,15 +60,14 @@ entries:
       - receipt extension coverage
       - evidence reports
     proof_commands:
-      - just host-dev
-      - cargo test -p hbat
+      - cargo test -p batpak
     owning_layer: BatPAK substrate proof / downstream trust policy
     explicit_non_goals:
       - granted authority
       - product permission model
       - agent trust policy
       - receipt-body domain semantics
-      - PCP-Core validation
+      - downstream profile validation
 
   - id: multi_representation_surfaces
     downstream_pressure: >
@@ -81,9 +79,8 @@ entries:
       - projection freshness and evidence reports
       - canonical substrate artifact envelopes
     proof_commands:
-      - just host-loop
       - just inspect
-    owning_layer: product surface registry / Moonwalker
+    owning_layer: product surface registry
     explicit_non_goals:
       - UI framework
       - role dashboard
@@ -104,11 +101,11 @@ entries:
     proof_commands:
       - just context
       - just inspect
-    owning_layer: PCP_SPEC / local tooling / downstream agent framework
+    owning_layer: external profile spec / local tooling / downstream agent framework
     explicit_non_goals:
-      - PCP-Core validation
+      - downstream profile validation
       - context hydration law
-      - pcp.recall
+      - external profile recall
       - agent memory protocol
       - runtime authority grant
 
@@ -124,15 +121,14 @@ entries:
       - Store::query_entries_after
       - Store::walk_ancestors
     proof_commands:
-      - just host-dev
-      - just host-loop
-    owning_layer: hbat NETBAT/1 reference host
+      - cargo test -p batpak
+    owning_layer: BatPAK substrate traversal (event.query/get/walk)
     explicit_non_goals:
       - event.cursor
       - event.stream
       - session cursor
       - workflow graph traversal
-      - Moonwalker route semantics
+      - downstream route semantics
 
   - id: overloaded_vocabulary
     downstream_pressure: >
@@ -150,6 +146,6 @@ entries:
     explicit_non_goals:
       - artifact studio
       - product workflow engine
-      - PCP context-packet semantics in core
-      - Moonwalker routes
+      - external context-packet semantics in core
+      - downstream routes
       - role-aware product surface

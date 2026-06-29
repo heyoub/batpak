@@ -198,9 +198,29 @@ pub enum RuntimeError {
         /// Handler-supplied error message.
         message: String,
     },
+    /// Runtime policy denied the invocation. Admission guards and observed
+    /// effect-row enforcement both record a `Denied` receipt before returning
+    /// this variant.
+    Denied {
+        /// Operation name that was denied.
+        name: String,
+        /// Guard-supplied denial class.
+        code: String,
+        /// Guard-supplied denial message.
+        message: String,
+    },
     /// The configured receipt sink rejected a runtime-emitted receipt.
     ReceiptSink {
         /// Operation name whose receipt could not be recorded.
+        name: String,
+        /// Sink error message.
+        message: String,
+        /// Handler failure that preceded this sink failure, when present.
+        caused_by_handler: Option<ReceiptSinkHandlerCause>,
+    },
+    /// The configured operation-status sink rejected a runtime-emitted fact.
+    StatusSink {
+        /// Operation name whose status fact could not be recorded.
         name: String,
         /// Sink error message.
         message: String,
@@ -236,6 +256,20 @@ impl RuntimeError {
         }
     }
 
+    /// Build an admission-denied error with an operation name, class, and message.
+    #[must_use]
+    pub fn denied(
+        name: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::Denied {
+            name: name.into(),
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
     /// Build a receipt-sink error with an operation name and message.
     #[must_use]
     pub fn receipt_sink(name: impl Into<String>, message: impl Into<String>) -> Self {
@@ -254,6 +288,30 @@ impl RuntimeError {
         cause: ReceiptSinkHandlerCause,
     ) -> Self {
         Self::ReceiptSink {
+            name: name.into(),
+            message: message.into(),
+            caused_by_handler: Some(cause),
+        }
+    }
+
+    /// Build a status-sink error with an operation name and message.
+    #[must_use]
+    pub fn status_sink(name: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::StatusSink {
+            name: name.into(),
+            message: message.into(),
+            caused_by_handler: None,
+        }
+    }
+
+    /// Build a status-sink error after a handler failure.
+    #[must_use]
+    pub fn status_sink_after_handler_failure(
+        name: impl Into<String>,
+        message: impl Into<String>,
+        cause: ReceiptSinkHandlerCause,
+    ) -> Self {
+        Self::StatusSink {
             name: name.into(),
             message: message.into(),
             caused_by_handler: Some(cause),
@@ -278,6 +336,13 @@ impl fmt::Display for RuntimeError {
                     "handler for operation `{name}` failed with {code}: {message}"
                 )
             }
+            Self::Denied {
+                name,
+                code,
+                message,
+            } => {
+                write!(f, "operation `{name}` denied with {code}: {message}")
+            }
             Self::ReceiptSink {
                 name,
                 message,
@@ -292,6 +357,22 @@ impl fmt::Display for RuntimeError {
                     )
                 } else {
                     write!(f, "receipt sink for operation `{name}` failed: {message}")
+                }
+            }
+            Self::StatusSink {
+                name,
+                message,
+                caused_by_handler,
+            } => {
+                if let Some(cause) = caused_by_handler {
+                    write!(
+                        f,
+                        "status sink for operation `{name}` failed after handler error {}: {}: {message}",
+                        cause.code(),
+                        cause.message()
+                    )
+                } else {
+                    write!(f, "status sink for operation `{name}` failed: {message}")
                 }
             }
         }

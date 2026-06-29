@@ -340,10 +340,21 @@ impl SidxEntryCollector {
     /// The `entity_idx` and `scope_idx` fields of `entry` are overwritten with
     /// the interned indices for `entity` and `scope`. All other fields are
     /// copied verbatim from `entry`.
-    pub(crate) fn record(&mut self, mut entry: SidxEntry, entity: &str, scope: &str) {
-        entry.entity_idx = self.intern(entity);
-        entry.scope_idx = self.intern(scope);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InternerExhausted`] if interning `entity` or
+    /// `scope` would overflow the `u32` string-table index domain.
+    pub(crate) fn record(
+        &mut self,
+        mut entry: SidxEntry,
+        entity: &str,
+        scope: &str,
+    ) -> Result<(), StoreError> {
+        entry.entity_idx = self.intern(entity)?;
+        entry.scope_idx = self.intern(scope)?;
         self.entries.push(entry);
+        Ok(())
     }
 
     /// Return a shared reference to all entries collected so far.
@@ -387,8 +398,6 @@ impl SidxEntryCollector {
     /// Returns [`StoreError::Serialization`] if the string table cannot be encoded to msgpack.
     /// Returns [`StoreError::SegmentTooManyEntries`] if the entry count exceeds `u32::MAX`.
     /// Returns [`StoreError::Io`] if the write fails.
-    // justifies: src/store/segment/sidx.rs and src/store/segment/mod.rs bound trailer sizing and string-table indexing by format ceilings, not caller input.
-    #[allow(clippy::expect_used)]
     pub(crate) fn write_footer<W: Write + Seek>(
         &self,
         writer: &mut W,
@@ -449,17 +458,23 @@ impl SidxEntryCollector {
     ///
     /// If `s` already exists in the table, returns the existing index.
     /// Otherwise appends it and returns the new index.
-    // justifies: src/store/segment/sidx.rs bounds the string table by the segment size ceiling, so this u32 slot assignment is a format invariant.
-    #[allow(clippy::expect_used)]
-    fn intern(&mut self, s: &str) -> u32 {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InternerExhausted`] if the string table has filled
+    /// the `u32` index domain (~4 billion distinct strings). This is unreachable
+    /// under the segment-size ceiling but is surfaced as a typed error rather
+    /// than truncating the index and shipping an aliased slot on disk.
+    fn intern(&mut self, s: &str) -> Result<u32, StoreError> {
         if let Some(&idx) = self.string_map.get(s) {
-            return idx;
+            return Ok(idx);
         }
-        let idx = u32::try_from(self.strings.len())
-            .expect("invariant: SIDX string table is bounded by segment size, well under u32::MAX");
+        let idx = u32::try_from(self.strings.len()).map_err(|_| StoreError::InternerExhausted {
+            count: u64::try_from(self.strings.len()).unwrap_or(u64::MAX),
+        })?;
         self.strings.push(s.to_owned());
         self.string_map.insert(s.to_owned(), idx);
-        idx
+        Ok(idx)
     }
 }
 

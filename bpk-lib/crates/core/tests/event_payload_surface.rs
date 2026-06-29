@@ -10,15 +10,12 @@
 //! CATCHES: typed payload public surface drift and clean-registry validator regressions.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::{AppendOptions, BatchAppendItem, CausationRef, Store};
 use batpak::typestate::transition::{StateMarker, Transition};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::bounded_writer_reply;
+use batpak_testkit::small_store as small_store_support;
 use bounded_writer_reply::writer_reply;
 use small_store_support::small_segment_store;
 
@@ -150,7 +147,7 @@ fn append_typed_round_trip() {
     );
     assert_eq!(
         hits[0].event_id(),
-        u128::from(receipt.event_id),
+        receipt.event_id,
         "PROPERTY: by_fact_typed must return the correct event_id"
     );
     store
@@ -211,7 +208,7 @@ fn try_submit_typed_ok_path() {
         .try_submit_typed(&coord(), &payload)
         .expect("try_submit_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -276,7 +273,7 @@ fn submit_reaction_typed_ticket_resolves() {
             batpak::id::CausationId::from(u128::from(root.event_id)),
         )
         .expect("submit_reaction_typed");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -304,7 +301,7 @@ fn try_submit_reaction_typed_ok_path() {
         )
         .expect("try_submit_reaction_typed");
     let ticket = outcome.into_result().expect("outcome is Ok");
-    writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
+    let _ = writer_reply(ticket.receiver(), "typed writer ticket").expect("ticket.wait");
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -315,16 +312,16 @@ fn try_submit_reaction_typed_ok_path() {
 #[test]
 fn by_fact_typed_filters_by_kind() {
     let (_dir, store) = test_store();
-    store
+    let _ = store
         .append_typed(&coord(), &ThingHappened { value: 1 })
         .expect("EventPayload surface test precondition holds");
-    store
+    let _ = store
         .append_typed(&coord(), &ThingHappened { value: 2 })
         .expect("EventPayload surface test precondition holds");
 
     let other_coord = Coordinate::new("entity:other", "scope:test")
         .expect("EventPayload surface test precondition holds");
-    store
+    let _ = store
         .append_typed(
             &other_coord,
             &OtherThingHappened {
@@ -379,7 +376,7 @@ fn batch_append_item_typed_constructor() {
     );
     assert_eq!(
         hits[0].event_id(),
-        u128::from(receipts[0].event_id),
+        receipts[0].event_id,
         "PROPERTY: batch receipt event_id must match by_fact_typed result"
     );
     store
@@ -418,7 +415,7 @@ fn transition_from_payload_store_round_trip() {
 
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -441,7 +438,7 @@ fn outbox_stage_typed_smoke() {
     );
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipts[0].event_id));
+    assert_eq!(hits[0].event_id(), receipts[0].event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");
@@ -524,7 +521,7 @@ fn fence_submit_typed_smoke() {
     assert_ne!(receipt.event_id, batpak::id::EventId::from(0u128));
     let hits = store.by_fact_typed::<ThingHappened>();
     assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].event_id(), u128::from(receipt.event_id));
+    assert_eq!(hits[0].event_id(), receipt.event_id);
     store
         .close()
         .expect("EventPayload surface test precondition holds");

@@ -31,6 +31,7 @@ use crate::event::{Event, EventKind, EventPayload};
 
 /// Source of a payload decode failure, retaining the lane-specific error chain.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum DecodeSource {
     /// Decode via `serde_json::from_value` failed.
     Json(serde_json::Error),

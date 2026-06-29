@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/coordinate_hardening.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Coordinate hardening coverage.
 //!
 //! [INV-COORDINATE-IS-LOGICAL-STREAM] `Coordinate::new` rejects every hostile or malformed
@@ -68,12 +66,14 @@ fn rejects_control_chars() {
     // DEL (0x7F) is the second forbidden region; validated as ControlChar.
     let del = char::from(0x7F).to_string();
     assert_eq!(
-        Coordinate::new(format!("ent{del}ity"), "scope").unwrap_err(),
+        Coordinate::new(format!("ent{del}ity"), "scope")
+            .expect_err("DEL in entity must be rejected"),
         CoordinateError::ControlChar,
         "PROPERTY: DEL (0x7F) in entity must map to ControlChar"
     );
     assert_eq!(
-        Coordinate::new("entity", format!("sco{del}pe")).unwrap_err(),
+        Coordinate::new("entity", format!("sco{del}pe"))
+            .expect_err("DEL in scope must be rejected"),
         CoordinateError::ControlChar,
         "PROPERTY: DEL (0x7F) in scope must map to ControlChar"
     );
@@ -91,10 +91,8 @@ fn rejects_path_traversal() {
     ];
 
     for (entity, scope) in cases {
-        let err = match Coordinate::new(entity, scope) {
-            Ok(_) => panic!("must produce an Err for entity={entity:?} scope={scope:?}; got Ok"),
-            Err(err) => err,
-        };
+        let err =
+            Coordinate::new(entity, scope).expect_err("path-traversal token must produce an Err");
         assert_eq!(
             err, CoordinateError::PathTraversal,
             "PROPERTY: path-traversal token in entity={entity:?} scope={scope:?} must route to PathTraversal, got {err:?}"

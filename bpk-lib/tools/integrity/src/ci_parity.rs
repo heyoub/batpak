@@ -7,7 +7,6 @@ use std::path::Path;
 
 /// Human-facing `just` recipes map to one or more xtask policy commands.
 const JUST_TO_XTASK_COMMANDS: &[(&str, &[&str])] = &[
-    ("host-dev", &["host-dev"]),
     ("ci-fast", &["ci-fast"]),
     ("ci-windows", &["ci-windows-surface"]),
     ("verify", &["preflight"]),
@@ -164,6 +163,7 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "writer-commit",
             "cursor-delivery",
             "projection-flow",
+            "projection-fusion",
             "segment-scan",
             "hash-chain-replay",
             "frontier-wait-durable",
@@ -174,7 +174,14 @@ pub(crate) fn check(repo_root: &Path) -> Result<()> {
             "integrity-graders",
             "syncbat-runtime-dispatch",
             "syncbat-register-catalog",
+            "syncbat-subscription-runtime",
             "netbat-boundary-protocol",
+            "fork-isolation",
+            "import-reapply",
+            "lane-branch",
+            "lane-frontier",
+            "bvisor-admission",
+            "bvisor-report-seal",
         ],
     )?;
     assert_workflow_list_values(
@@ -438,6 +445,7 @@ fn assert_workflow_just_recipes_map_to_xtask(
     workflows: &[(&str, &str)],
     xtask_main: &str,
 ) -> Result<()> {
+    // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; pattern is a string literal known-safe at compile time in tools/integrity/src/ci_parity.rs; this expect cannot fire in any reachable code path
     let just_re = Regex::new(r"\bjust\s+([a-z][a-z0-9-]*)\b")
         .expect("internal regex is a compile-time constant and will compile");
     let mut found_recipes: BTreeSet<(String, String)> = BTreeSet::new();
@@ -493,6 +501,7 @@ fn assert_workflow_just_recipes_map_to_xtask(
 /// lanes, or drops it entirely), the marker disappears from the `ci_fast` body
 /// and this gate fails — preventing silent re-burial.
 const CI_FAST_REQUIRED_GATE_MARKERS: &[(&str, &str)] = &[
+    ("template compile", "templates()?"),
     ("coverage floor", "coverage::cover(CoverArgs"),
     (
         "public-api baseline",
@@ -619,6 +628,7 @@ enum XtaskCommand {
 }
 
 pub(crate) fn ci_fast() -> Result<()> {
+    templates()?;
     coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;
     crate::public_api::public_api(PublicApiArgs { strict: true, check_baseline: true, bless_baseline: false })?;
     super::package_leak_scan(PackageLeakScanArgs { allow_dirty: false, strict_language: true })?;
@@ -669,10 +679,15 @@ fn install_tools() {
         yml
     }
 
+    // Must stay in EXACT lockstep with the canonical seam list `check` asserts
+    // above (the `seam` entry in the ci.yml `assert_workflow_list_values` call):
+    // the green fixture runs the full `check`, so any seam present there but
+    // absent here makes the green sanity-floor fixture fail.
     const GREEN_SEAMS: &[&str] = &[
         "writer-commit",
         "cursor-delivery",
         "projection-flow",
+        "projection-fusion",
         "segment-scan",
         "hash-chain-replay",
         "frontier-wait-durable",
@@ -683,7 +698,14 @@ fn install_tools() {
         "integrity-graders",
         "syncbat-runtime-dispatch",
         "syncbat-register-catalog",
+        "syncbat-subscription-runtime",
         "netbat-boundary-protocol",
+        "fork-isolation",
+        "import-reapply",
+        "lane-branch",
+        "lane-frontier",
+        "bvisor-admission",
+        "bvisor-report-seal",
     ];
 
     const GREEN_PERF_YML: &str = "name: perf\njobs:\n  bench:\n    strategy:\n      matrix:\n        surface: [neutral, native]\n";
@@ -828,6 +850,7 @@ fn install_tools() {
     const GREEN_CI_FAST_SOURCE: &str = r#"
 pub(crate) fn ci_fast() -> Result<()> {
     cargo(["fmt", "--check"])?;
+    templates()?;
     coverage::cover(CoverArgs { ci: true, json: false, threshold: Some(80) })?;
     crate::public_api::public_api(PublicApiArgs { strict: true, check_baseline: true, bless_baseline: false })?;
     super::package_leak_scan(PackageLeakScanArgs { allow_dirty: false, strict_language: true })?;
@@ -853,6 +876,19 @@ pub(crate) fn ci_fast() -> Result<()> {
             .expect_err("ci_fast missing the coverage gate must fail anti-rebury");
         assert!(
             err.to_string().contains("coverage floor"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn ci_parity_rejects_ci_fast_missing_template_gate() {
+        // Template compilation must stay in the every-PR fast lane, not only in
+        // the heavier consumer-smoke lane.
+        let reburied = GREEN_CI_FAST_SOURCE.replace("    templates()?;\n", "");
+        let err = assert_ci_fast_keeps_default_path_gates(&reburied)
+            .expect_err("ci_fast missing the template gate must fail anti-rebury");
+        assert!(
+            err.to_string().contains("template compile"),
             "unexpected error: {err:#}"
         );
     }

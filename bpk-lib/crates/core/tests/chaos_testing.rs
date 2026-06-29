@@ -2,16 +2,6 @@
 // CATCHES: FM-011 (Error Path Hollowing — write/CAS errors swallowed), FM-019 (Non-Replayable Truth — events dropped under concurrent load)
 // SEEDED: concurrent writer/CAS/idempotency storms (4–8 threads), subscription + cursor completeness under write storms
 // INVARIANTS: INV-CONCURRENCY-SCHEDULE-PROOF (linearizability, CAS, idempotency, exactly-once delivery)
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-FAULT-INJECT-GATED; chaos concurrency fixtures spawn threads for stress probes, emit stderr diagnostics during fault injection, and use unwrap/panic as assertion style when invariants are violated.
-#![allow(
-    clippy::panic,
-    clippy::print_stderr,
-    clippy::unwrap_used,
-    clippy::inconsistent_digit_grouping,
-    clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args,
-    clippy::unused_enumerate_index
-)]
 //! Chaos testing — concurrent stress and delivery-completeness lane.
 //! Harness pattern: Fault-Injection Harness (direct chaos lane).
 //! Keeps the concurrency family: writer stress, CAS contention, idempotent
@@ -23,14 +13,13 @@
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing --all-features --release
 
-mod support;
+use batpak::id::EntityIdType;
 use batpak::store::{AppendOptions, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/chaos_testing.rs"]
-mod chaos_support;
+use batpak_testkit::chaos_testing as chaos_support;
 use chaos_support::{chaos_iterations, effective_chaos_iterations, DEFAULT_CHAOS_ITERATIONS};
 
 #[test]
@@ -93,9 +82,6 @@ fn chaos_concurrent_writer_stress() {
         total_err += err;
     }
 
-    eprintln!(
-        "  CHAOS CONCURRENT STRESS: {total_ok} ok, {total_err} errors across {n_threads} threads"
-    );
     assert!(
         total_ok > 0,
         "CHAOS PROPERTY: at least one write must succeed under concurrent stress across {n_threads} threads.\n\
@@ -124,10 +110,10 @@ fn chaos_concurrent_writer_stress() {
         );
     }
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "Arc still has multiple owners")
+        .expect("store should be sole owner after all worker threads joined");
+    store.close().expect("close");
 }
 
 // ============================================================
@@ -145,7 +131,7 @@ fn chaos_cas_contention() {
     let kind = EventKind::custom(0xF, 1);
 
     // First, seed with one event so sequence > 0
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"seed": true}))
         .expect("seed");
 
@@ -188,7 +174,6 @@ fn chaos_cas_contention() {
         }
     }
 
-    eprintln!("  CHAOS CAS CONTENTION: 1 winner, {losers} losers");
     assert!(
         winning_receipt.is_some(),
         "CHAOS PROPERTY: exactly one thread must win CAS, but none did.\n\
@@ -222,10 +207,10 @@ fn chaos_cas_contention() {
         entries.len()
     );
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "Arc still has multiple owners")
+        .expect("store should be sole owner after all worker threads joined");
+    store.close().expect("close");
 }
 
 // ============================================================
@@ -261,10 +246,10 @@ fn chaos_idempotency_concurrent() {
 
     let mut event_ids = Vec::new();
     for h in handles {
-        match h.join().expect("join") {
-            Ok(receipt) => event_ids.push(receipt.event_id),
-            Err(e) => panic!("CHAOS: idempotent append failed: {e}"),
-        }
+        let receipt = h.join().expect("join").expect(
+            "CHAOS: idempotent append must succeed for every concurrent duplicate submission",
+        );
+        event_ids.push(receipt.event_id);
     }
 
     // All should return the same event_id
@@ -291,10 +276,10 @@ fn chaos_idempotency_concurrent() {
         entries.len()
     );
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "Arc still has multiple owners")
+        .expect("store should be sole owner after all worker threads joined");
+    store.close().expect("close");
 }
 
 // ============================================================
@@ -326,7 +311,7 @@ fn chaos_subscription_write_storm() {
         .name("chaos-sub-writer".to_string())
         .spawn(move || {
             for i in 0..iterations {
-                store2
+                let _ = store2
                     .append(&coord, kind, &serde_json::json!({"i": i}))
                     .expect("append");
             }
@@ -343,19 +328,18 @@ fn chaos_subscription_write_storm() {
         received += 1;
     }
 
-    eprintln!("  CHAOS SUBSCRIPTION: received {received}/{iterations} events");
-    assert!(
-        received == iterations,
+    assert_eq!(
+        received, iterations,
         "PROPERTY: every append() broadcasts before returning, so a subscriber joined after all \
          writes must see exactly {iterations} notifications, got {received}.\n\
          Investigate: src/store/write/writer.rs (broadcast send path), src/store/index/mod.rs (region filter).\n\
          Run: cargo test --test chaos_testing chaos_subscription_write_storm"
     );
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "Arc still has multiple owners")
+        .expect("store should be sole owner after all worker threads joined");
+    store.close().expect("close");
 }
 
 // ============================================================
@@ -374,7 +358,7 @@ fn chaos_cursor_completeness_concurrent() {
 
     // Write events
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -384,7 +368,7 @@ fn chaos_cursor_completeness_concurrent() {
     let mut cursor = store.cursor_guaranteed(&region);
     let mut seen = Vec::new();
     while let Some(entry) = cursor.poll() {
-        seen.push(entry.event_id());
+        seen.push(entry.event_id().as_u128());
     }
 
     assert_eq!(
@@ -412,8 +396,8 @@ fn chaos_cursor_completeness_concurrent() {
         seen.len()
     );
 
-    match Arc::try_unwrap(store) {
-        Ok(s) => s.close().expect("close"),
-        Err(_) => panic!("Arc still has multiple owners"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "Arc still has multiple owners")
+        .expect("store should be sole owner after all worker threads joined");
+    store.close().expect("close");
 }

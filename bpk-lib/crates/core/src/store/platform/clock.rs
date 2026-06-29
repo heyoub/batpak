@@ -264,7 +264,7 @@ impl Clock for MonotonicClock {
 
 #[cfg(test)]
 mod tests {
-    use super::{Clock, FnClock, MonotonicClock};
+    use super::{Clock, FnClock, MonotonicClock, SystemClock};
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 
@@ -386,6 +386,22 @@ mod tests {
             mono.now_wall_ns(),
             9_000_000_000,
             "PROPERTY: regressed wall_ns sequence stalls at its own high-water mark"
+        );
+    }
+
+    #[test]
+    fn system_clock_now_wall_ns_reports_real_wall_time() {
+        // The production clock must report a genuine UNIX-epoch wall-clock
+        // reading in nanoseconds, not a constant stand-in. 1_600_000_000 s
+        // (~2020-09-13) is far below any real "now" yet far above the trivial
+        // values (`0`, `1`) a body-stubbing mutant would substitute.
+        const EARLIEST_PLAUSIBLE_WALL_NS: i64 = 1_600_000_000_000_000_000;
+
+        let reading = SystemClock::new().now_wall_ns();
+        assert!(
+            reading > EARLIEST_PLAUSIBLE_WALL_NS,
+            "PROPERTY: SystemClock::now_wall_ns must read the real wall clock \
+             (>{EARLIEST_PLAUSIBLE_WALL_NS} ns), got {reading}"
         );
     }
 }

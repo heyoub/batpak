@@ -2,16 +2,6 @@
 // CATCHES: FM-011 (Error Path Hollowing — corruption swallowed as opaque/panic), FM-019 (Non-Replayable Truth — torn-tail data lost on cold start)
 // SEEDED: byte flips at random offsets (fastrand seed 42), random msgpack bombardment (seed 0xCA05), 32-byte tail truncation
 // INVARIANTS: INV-BATCH-CRASH-RECOVERY (corruption recovery), INV-CONCURRENCY-SCHEDULE-PROOF (replay integrity)
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-FAULT-INJECT-GATED; chaos byte-corruption fixtures emit stderr diagnostics during fault injection and use unwrap/panic as assertion style when invariants are violated.
-#![allow(
-    clippy::panic,
-    clippy::print_stderr,
-    clippy::unwrap_used,
-    clippy::inconsistent_digit_grouping,
-    clippy::disallowed_methods,
-    clippy::needless_borrows_for_generic_args,
-    clippy::unused_enumerate_index
-)]
 //! Chaos testing — low-level byte corruption lane.
 //! Harness pattern: Fault-Injection Harness (direct chaos lane).
 //! Splits the byte-level corruption cases out of `chaos_testing`: random
@@ -23,14 +13,12 @@
 //! Default depth: 500 iterations (override with `CHAOS_ITERATIONS=<n>`)
 //! Extended: CHAOS_ITERATIONS=5000 cargo test --test chaos_testing_byte_corruption --all-features --release
 
-mod support;
 use batpak::store::segment::frame_decode;
 use batpak::store::{Store, StoreConfig, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/chaos_testing.rs"]
-mod chaos_support;
+use batpak_testkit::chaos_testing as chaos_support;
 use chaos_support::chaos_iterations;
 
 // ============================================================
@@ -49,7 +37,7 @@ fn chaos_corrupted_segment_bytes() {
 
     // Write some events
     for i in 0..20 {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -97,11 +85,9 @@ fn chaos_corrupted_segment_bytes() {
     // The key invariant: no panic. Either Ok or a structured error.
     match result {
         Ok(store) => {
-            eprintln!("  CHAOS: corrupted segment opened (corruption hit non-critical area)");
             let _ = store.close();
         }
         Err(e) => {
-            eprintln!("  CHAOS: corrupted segment correctly rejected: {e}");
             // Verify it's an expected error variant — match typed variants, not Display strings.
             // Corruption injected at a random byte offset 40+ can produce:
             //   - CrcMismatch: CRC32 no longer matches frame data
@@ -121,18 +107,17 @@ fn chaos_corrupted_segment_bytes() {
                     | StoreError::Io(_)
                     | StoreError::Coordinate(_)
             );
-            if !acceptable {
-                panic!(
-                    "CHAOS PROPERTY: corrupted segment must produce a structured \
-                     CrcMismatch/CorruptSegment/Serialization/Io/Coordinate error, \
-                     but got variant: {e}\n\
-                     Investigate: src/store/mod.rs Store::open, \
-                     src/store/segment/mod.rs frame_decode error mapping.\n\
-                     Common causes: new error variant added without updating open() \
-                     match arm, raw unwrap() escaping as opaque error.\n\
-                     Run: cargo test --test chaos_testing_byte_corruption chaos_corrupted_segment_bytes"
-                );
-            }
+            assert!(
+                acceptable,
+                "CHAOS PROPERTY: corrupted segment must produce a structured \
+                 CrcMismatch/CorruptSegment/Serialization/Io/Coordinate error, \
+                 but got variant: {e}\n\
+                 Investigate: src/store/mod.rs Store::open, \
+                 src/store/segment/mod.rs frame_decode error mapping.\n\
+                 Common causes: new error variant added without updating open() \
+                 match arm, raw unwrap() escaping as opaque error.\n\
+                 Run: cargo test --test chaos_testing_byte_corruption chaos_corrupted_segment_bytes"
+            );
         }
     }
 }
@@ -159,9 +144,6 @@ fn chaos_frame_decode_random_bombardment() {
         // Key: no panics
     }
 
-    eprintln!(
-        "  CHAOS FRAME DECODE: {ok_count} accepted, {err_count} rejected out of {iterations}"
-    );
     // With random data, almost nothing should decode as valid
     // (valid CRC match on random data is ~1 in 4 billion)
     assert!(
@@ -195,7 +177,7 @@ fn chaos_truncated_segment_recovers() {
     let n_events = 20usize;
 
     for i in 0..n_events {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -258,12 +240,6 @@ fn chaos_truncated_segment_recovers() {
     std::fs::write(&last_seg_path, &original_data[..truncated_len])
         .expect("write truncated segment");
 
-    eprintln!(
-        "  CHAOS TRUNCATE: truncated {} → {} bytes (removed 32 bytes from tail)",
-        original_data.len(),
-        truncated_len
-    );
-
     // Reopen: cold start must tolerate the truncated tail and not panic.
     // Checkpoint disabled: the checkpoint references pre-truncation offsets
     // that no longer exist, so it would produce corrupt reads.
@@ -284,12 +260,6 @@ fn chaos_truncated_segment_recovers() {
          Run: cargo test --test chaos_testing_byte_corruption chaos_truncated_segment_recovers"
     );
 
-    eprintln!(
-        "  CHAOS TRUNCATE: recovered {}/{} events after tail truncation",
-        recovered_entries.len(),
-        n_events
-    );
-
     // Every recovered event_id must have been one we originally wrote
     for entry in &recovered_entries {
         assert!(
@@ -305,11 +275,9 @@ fn chaos_truncated_segment_recovers() {
 
     // All recovered events must be readable via get()
     for entry in &recovered_entries {
-        let fetched = store2
-            .get(batpak::id::EventId::from(entry.event_id()))
-            .expect("get recovered event");
+        let fetched = store2.get(entry.event_id()).expect("get recovered event");
         assert_eq!(
-            u128::from(fetched.event.event_id()),
+            fetched.event.event_id(),
             entry.event_id(),
             "CHAOS PROPERTY: store.get() for a recovered event_id must return the matching event.\n\
              Investigate: src/store/segment/scan.rs get(), src/store/index/mod.rs offset lookup.\n\

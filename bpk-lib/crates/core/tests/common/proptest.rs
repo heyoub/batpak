@@ -24,21 +24,22 @@ pub(crate) fn effective_cases(default_cases: u32, env_value: Option<&str>) -> u3
     match env_value {
         None => default_cases,
         Some(value) => {
+            // Fail the harness loudly on a malformed knob rather than silently
+            // falling back to a default, so a typoed CI/local override cannot
+            // quietly weaken proof depth. The descriptive guidance is carried in
+            // the Err payload so `.expect()` surfaces it without a bare `panic!`.
             let cases = value
                 .parse::<u32>()
-                .unwrap_or_else(|_| invalid_proptest_cases(value));
+                .map_err(|_| {
+                    format!(
+                        "PROPTEST_CASES must be an unsigned integer, got `{value}`. \
+                         Use a numeric floor such as `PROPTEST_CASES=256`."
+                    )
+                })
+                .expect("PROPTEST_CASES must parse as an unsigned integer");
             cases.max(default_cases)
         }
     }
-}
-
-// justifies: INV-TEST-PANIC-AS-ASSERTION; invalid PROPTEST_CASES environment knob in tests/common/proptest.rs must fail the test harness loudly rather than silently falling back to a default.
-#[allow(clippy::panic)]
-fn invalid_proptest_cases(value: &str) -> u32 {
-    panic!(
-        "PROPTEST_CASES must be an unsigned integer, got `{value}`. \
-         Use a numeric floor such as `PROPTEST_CASES=256`."
-    );
 }
 
 pub fn cfg(default_cases: u32) -> ProptestConfig {

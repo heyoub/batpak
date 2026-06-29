@@ -233,7 +233,7 @@ pub(crate) fn corroborate_untrusted_entries(
     entries: &[sidx::SidxEntry],
     recovered: &RecoveredFrameMap,
     recovery_stop: u64,
-    fallback_fail_closed: bool,
+    _fallback_fail_closed: bool,
 ) -> UntrustedRecovery {
     // An entry is CORROBORATED when a recovered frame sits at its offset with a
     // matching length AND a matching content event_hash. event_hash match is the
@@ -256,7 +256,6 @@ pub(crate) fn corroborate_untrusted_entries(
         // used to override this — without a corroborated manifest there is no proof a
         // committed frame is missing, and a false fail-closed here would brick cold
         // start / compaction on a benign corrupt-footer + intact-frames segment.
-        let _ = fallback_fail_closed;
         return UntrustedRecovery::RecoverPrefix(recovery_stop);
     }
 

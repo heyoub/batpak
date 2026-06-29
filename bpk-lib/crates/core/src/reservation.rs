@@ -539,3 +539,56 @@ pub fn reservation_reconciliation_report_body_hash(
     let bytes = crate::encoding::to_bytes(body)?;
     Ok(content_hash(&bytes))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ReservationSubjectRef;
+    use std::cmp::Ordering;
+
+    fn subject(namespace: u32, key: &[u8]) -> ReservationSubjectRef {
+        ReservationSubjectRef {
+            namespace,
+            key_bytes: key.to_vec(),
+        }
+    }
+
+    #[test]
+    fn partial_cmp_orders_by_namespace_then_key_bytes() {
+        let a = subject(1, b"k");
+        let b = subject(2, b"k");
+
+        // A `partial_cmp -> None` mutant breaks every one of these.
+        assert_eq!(
+            a.partial_cmp(&b),
+            Some(Ordering::Less),
+            "PROPERTY: lower namespace orders first"
+        );
+        assert_eq!(
+            b.partial_cmp(&a),
+            Some(Ordering::Greater),
+            "PROPERTY: higher namespace orders last"
+        );
+        assert_eq!(
+            a.partial_cmp(&a.clone()),
+            Some(Ordering::Equal),
+            "PROPERTY: identical subjects compare equal, never None"
+        );
+
+        // Key bytes are the tie-break once namespaces match.
+        let k1 = subject(7, b"alpha");
+        let k2 = subject(7, b"beta");
+        assert_eq!(
+            k1.partial_cmp(&k2),
+            Some(Ordering::Less),
+            "PROPERTY: equal namespace falls through to lexicographic key_bytes"
+        );
+
+        // The derived comparison operators route through partial_cmp, so a
+        // `None`-returning mutant also makes `<` evaluate to false here.
+        assert!(
+            a < b,
+            "PROPERTY: `<` is well-defined and total (never None)"
+        );
+        assert!(k1 < k2);
+    }
+}

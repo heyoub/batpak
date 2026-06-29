@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/decode_typed_dispatch_contract.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Behavioural dispatch-contract test for the `DecodeTyped` seam.
 //!
 //! Covers the observable routing behaviour the `DecodeTyped` seam must
@@ -59,14 +57,19 @@ impl Counter {
     /// matching `route_typed`. Events outside the relevant kinds fall
     /// through without invoking any handler.
     fn apply(&mut self, event: &Event<serde_json::Value>) {
-        match event.route_typed::<PayloadA>() {
-            Ok(Some(p)) => self.on_a(&p),
-            Ok(None) => match event.route_typed::<PayloadB>() {
-                Ok(Some(p)) => self.on_b(&p),
-                Ok(None) => {}
-                Err(e) => panic!("dispatch contract: decode failed for PayloadB: {e}"),
-            },
-            Err(e) => panic!("dispatch contract: decode failed for PayloadA: {e}"),
+        let routed_a = event
+            .route_typed::<PayloadA>()
+            .expect("dispatch contract: decode for PayloadA must not error");
+        match routed_a {
+            Some(p) => self.on_a(&p),
+            None => {
+                let routed_b = event
+                    .route_typed::<PayloadB>()
+                    .expect("dispatch contract: decode for PayloadB must not error");
+                if let Some(p) = routed_b {
+                    self.on_b(&p);
+                }
+            }
         }
     }
 }

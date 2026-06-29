@@ -30,7 +30,7 @@
 
 use crate::assurance::{self, AssuranceEntry, AssuranceLevel};
 use anyhow::Result;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// The severity / blast radius of a detected weakening. `L4` weakenings (an L4
@@ -78,6 +78,13 @@ pub(crate) enum WeakeningKind {
     /// A `red_fixture_test` was deleted, or `has_blocking_authority: true`
     /// flipped to `false`, in the gate registry.
     BlockingAuthorityRemoved,
+    /// GAUNT-CAPSNAP: the committed capability floor
+    /// (`traceability/capability_snapshot.yaml`) lost ground — an enforcement
+    /// grade weakened, a `(backend,kind)` row was removed, an evidence claim was
+    /// dropped, or a witnessed invariant was un-proved. A capability the family
+    /// used to advertise and no longer does. A removal / drop to `Unsupported`
+    /// (a fully-lost capability) carries L4 blast radius.
+    CapabilityDowngraded,
 }
 
 impl WeakeningKind {
@@ -90,6 +97,7 @@ impl WeakeningKind {
             WeakeningKind::AssuranceDowngraded => "assurance-downgraded",
             WeakeningKind::GateReburied => "gate-reburied",
             WeakeningKind::BlockingAuthorityRemoved => "blocking-authority-removed",
+            WeakeningKind::CapabilityDowngraded => "capability-downgraded",
         }
     }
 }
@@ -197,6 +205,14 @@ struct FileDiff {
     path: String,
     added: Vec<String>,
     removed: Vec<String>,
+    body: Vec<DiffLine>,
+}
+
+#[derive(Debug)]
+enum DiffLine {
+    Added(String),
+    Removed(String),
+    Context(String),
 }
 
 /// Parse a unified diff into per-file added/removed line sets. Robust to the
@@ -237,13 +253,21 @@ fn parse_unified_diff(diff: &str) -> Vec<FileDiff> {
             }
             continue;
         }
-        if line.starts_with("--- ") || line.starts_with("@@") {
+        if line.starts_with("--- ") {
+            continue;
+        }
+        if line.starts_with("@@") {
+            file.body.push(DiffLine::Context(String::new()));
             continue;
         }
         if let Some(content) = line.strip_prefix('+') {
             file.added.push(content.to_string());
+            file.body.push(DiffLine::Added(content.to_string()));
         } else if let Some(content) = line.strip_prefix('-') {
             file.removed.push(content.to_string());
+            file.body.push(DiffLine::Removed(content.to_string()));
+        } else if let Some(content) = line.strip_prefix(' ') {
+            file.body.push(DiffLine::Context(content.to_string()));
         }
     }
     if let Some(file) = current.take() {
@@ -340,6 +364,7 @@ fn classify_file(file: &FileDiff, entries: &[AssuranceEntry], findings: &mut Vec
     detect_mutation_enforcement(file, entries, findings);
     detect_waiver_additions(file, findings);
     detect_assurance_downgrade(file, findings);
+    detect_capability_downgrade(file, findings);
     detect_gate_rebury(file, findings);
     detect_blocking_authority_removal(file, findings);
 }
@@ -550,42 +575,68 @@ fn waiver_blast_radius(file: &FileDiff) -> BlastRadius {
     }
 }
 
-/// Detect a new quoted-string / `r"..."` element added to one of the watched
-/// source allowlist arrays. Requires a context signal — an array marker present
-/// in any of the file's diff lines — then flags an added bare quoted list
-/// element as a new exclusion entry.
+/// Detect a new raw-regex element added to one of the watched source allowlist
+/// arrays. Requires a context signal — an array marker present in any of the
+/// file's diff lines — then flags an added raw-string list element as a new
+/// exclusion entry. Plain quoted file paths are intentionally ignored here:
+/// mutation lane include-lists also live in `lanes.rs`, and adding a covered
+/// source file strengthens the gate rather than weakening it.
 fn detect_source_array_entry(file: &FileDiff, findings: &mut Vec<Weakening>) {
-    let touches_allowlist_array = file
-        .added
-        .iter()
-        .chain(file.removed.iter())
-        .any(|l| SOURCE_ALLOWLIST_ARRAY_MARKERS.iter().any(|m| l.contains(m)));
-    if !touches_allowlist_array {
-        return;
-    }
-    for line in &file.added {
-        if is_quoted_list_element(line) {
-            findings.push(Weakening {
-                kind: WeakeningKind::WaiverEntryAdded,
-                detail: format!("new mutant-exclusion / allowlist entry: {}", line.trim()),
-                file: file.path.clone(),
-                blast_radius: BlastRadius::Standard,
-            });
-            break;
+    let mut in_allowlist_array = false;
+    for line in &file.body {
+        let content = match line {
+            DiffLine::Added(content) | DiffLine::Removed(content) | DiffLine::Context(content) => {
+                content
+            }
+        };
+        if SOURCE_ALLOWLIST_ARRAY_MARKERS
+            .iter()
+            .any(|marker| content.contains(marker))
+        {
+            in_allowlist_array = true;
+        }
+        if in_allowlist_array {
+            if let DiffLine::Added(added) = line {
+                if is_raw_regex_list_element(added) && !is_registered_exclusion(added) {
+                    findings.push(Weakening {
+                        kind: WeakeningKind::WaiverEntryAdded,
+                        detail: format!("new mutant-exclusion / allowlist entry: {}", added.trim()),
+                        file: file.path.clone(),
+                        blast_radius: BlastRadius::Standard,
+                    });
+                    break;
+                }
+            }
+            if content.trim() == "];" {
+                in_allowlist_array = false;
+            }
         }
     }
 }
 
-/// True for an added line that is a standalone quoted-string list element:
-/// `"..."` or `r"..."` optionally with a trailing comma. NOT a `const`
+/// True for an added line that is a standalone raw-string regex list element:
+/// `r"..."` or `r#"..."#` optionally with a trailing comma. NOT a `const`
 /// declaration line (that is the array itself, not an entry) and NOT a comment.
-fn is_quoted_list_element(line: &str) -> bool {
+fn is_raw_regex_list_element(line: &str) -> bool {
     let t = line.trim();
     if t.starts_with("//") || t.contains("const ") || t.contains('=') {
         return false;
     }
-    (t.starts_with('"') || t.starts_with("r\"") || t.starts_with("r#\""))
-        && (t.ends_with("\",") || t.ends_with('"') || t.ends_with("\"#,"))
+    (t.starts_with("r\"") && (t.ends_with("\",") || t.ends_with('"')))
+        || (t.starts_with("r#\"") && (t.ends_with("\"#,") || t.ends_with("\"#")))
+}
+
+/// True when an added raw-regex list element is a registered mutation exclusion.
+/// meta-gate delegates mutation-exclusion authority to the structural
+/// `mutation-exclusion-registry` gate: a registered exclusion is categorized and
+/// (for equivalents) witnessed — a governed denominator change that needs no
+/// human `GAUNTLET-WEAKEN-OK`. An UNREGISTERED exclusion, or any non-mutation
+/// allowlist entry (`HEADER_DEBT_ALLOWLIST`, `OVERSIZE_HARNESS_ALLOWLIST`), is
+/// never registered and so is still flagged as an unapproved weakening.
+fn is_registered_exclusion(added: &str) -> bool {
+    crate::mutation_exclusion_registry::extract_raw_strings(added)
+        .iter()
+        .any(|regex| crate::mutation_exclusion_registry::is_registered(regex))
 }
 
 /// An `assurance_levels.yaml` DOWNGRADE: fires when the max `level:` on the added
@@ -638,6 +689,199 @@ fn parse_assurance_level(line: &str) -> Option<u8> {
         .next()?
         .to_digit(10)
         .and_then(|d| u8::try_from(d).ok())
+}
+
+/// GAUNT-CAPSNAP: a downgrade in the committed capability floor
+/// (`traceability/capability_snapshot.yaml`). The structural `capability-snapshot`
+/// gate keeps that file an exact mirror of the source `support_matrix()` tables,
+/// so a weakening of the family's advertised capabilities ALWAYS surfaces here as
+/// a diff: an enforcement rank that DECREASED, a removed `(backend,kind)` row, a
+/// removed evidence claim, or a witness `true->false`. A drop to `Unsupported` or
+/// a removed row (a fully-lost capability) carries L4 blast radius (two-person).
+fn detect_capability_downgrade(file: &FileDiff, findings: &mut Vec<Weakening>) {
+    if !file.path.contains(crate::capability_snapshot::SNAPSHOT_REL) {
+        return;
+    }
+    let removed = ceiling_cells(&file.removed);
+    let added = ceiling_cells(&file.added);
+    let added_splits = split_manifest_rows(&file.added);
+    for ((backend, kind), (enf_removed, ev_removed)) in &removed {
+        let Some((enf_added, ev_added)) = added.get(&(backend.clone(), kind.clone())) else {
+            if split_manifest_covers_removed_row(backend, kind, &added, &added_splits) {
+                continue;
+            }
+            // The cell is gone from the added side and not re-added: the family no
+            // longer advertises this capability at all.
+            findings.push(capability_weakening(
+                format!("capability row removed: {backend}:{kind} (was {enf_removed})"),
+                file,
+                true,
+            ));
+            continue;
+        };
+        if crate::capability_snapshot::enforcement_rank(enf_added)
+            < crate::capability_snapshot::enforcement_rank(enf_removed)
+        {
+            findings.push(capability_weakening(
+                format!(
+                    "capability enforcement weakened: {backend}:{kind} {enf_removed} -> {enf_added}"
+                ),
+                file,
+                enf_added == "Unsupported",
+            ));
+        }
+        for claim in ev_removed {
+            if !ev_added.contains(claim) {
+                findings.push(capability_weakening(
+                    format!("capability evidence claim removed: {backend}:{kind} dropped {claim}"),
+                    file,
+                    false,
+                ));
+            }
+        }
+    }
+    let removed_w = witness_cells(&file.removed);
+    let added_w = witness_cells(&file.added);
+    for (id, was_witnessed) in &removed_w {
+        if *was_witnessed && added_w.get(id).copied() != Some(true) {
+            findings.push(capability_weakening(
+                format!("invariant witness un-proved: {id} (was witnessed)"),
+                file,
+                false,
+            ));
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct SplitManifestDiffRow {
+    backend: String,
+    from_kind: String,
+    to_kinds: BTreeSet<String>,
+}
+
+fn split_manifest_covers_removed_row(
+    backend: &str,
+    kind: &str,
+    added: &BTreeMap<(String, String), (String, BTreeSet<String>)>,
+    added_splits: &[SplitManifestDiffRow],
+) -> bool {
+    added_splits.iter().any(|split| {
+        split.backend == backend
+            && split.from_kind == kind
+            && !split.to_kinds.is_empty()
+            && split
+                .to_kinds
+                .iter()
+                .all(|to_kind| added.contains_key(&(backend.to_string(), to_kind.clone())))
+    })
+}
+
+fn capability_weakening(detail: String, file: &FileDiff, l4: bool) -> Weakening {
+    Weakening {
+        kind: WeakeningKind::CapabilityDowngraded,
+        detail,
+        file: file.path.clone(),
+        blast_radius: if l4 {
+            BlastRadius::L4
+        } else {
+            BlastRadius::Standard
+        },
+    }
+}
+
+/// Parse `- { backend: B, kind: K, enforcement: E, evidence: [..] }` lines into a
+/// `(backend,kind) -> (enforcement, evidence-set)` map. Lines that are not ceiling
+/// cells are skipped.
+fn ceiling_cells(lines: &[String]) -> BTreeMap<(String, String), (String, BTreeSet<String>)> {
+    let mut map = BTreeMap::new();
+    for line in lines {
+        if !line.trim_start().starts_with("- {") {
+            continue;
+        }
+        let (Some(backend), Some(kind), Some(enforcement)) = (
+            flow_field(line, "backend"),
+            flow_field(line, "kind"),
+            flow_field(line, "enforcement"),
+        ) else {
+            continue;
+        };
+        map.insert((backend, kind), (enforcement, flow_list(line, "evidence")));
+    }
+    map
+}
+
+/// Parse `- { id: INV-X, witnessed: true|false }` lines into `id -> witnessed`.
+fn witness_cells(lines: &[String]) -> BTreeMap<String, bool> {
+    let mut map = BTreeMap::new();
+    for line in lines {
+        if !line.trim_start().starts_with("- {") {
+            continue;
+        }
+        let (Some(id), Some(witnessed)) = (flow_field(line, "id"), flow_field(line, "witnessed"))
+        else {
+            continue;
+        };
+        map.insert(id, witnessed == "true");
+    }
+    map
+}
+
+fn split_manifest_rows(lines: &[String]) -> Vec<SplitManifestDiffRow> {
+    let mut rows = Vec::new();
+    for line in lines {
+        if !line.trim_start().starts_with("- {") {
+            continue;
+        }
+        let (Some(backend), Some(from_kind)) =
+            (flow_field(line, "backend"), flow_field(line, "from"))
+        else {
+            continue;
+        };
+        let to_kinds = flow_list(line, "to");
+        if to_kinds.is_empty() {
+            continue;
+        }
+        rows.push(SplitManifestDiffRow {
+            backend,
+            from_kind,
+            to_kinds,
+        });
+    }
+    rows
+}
+
+/// Extract a scalar flow-mapping field value (`key: value` up to the next `,`/`}`).
+/// Returns `None` when the key is absent. Not used for list values (`evidence`).
+fn flow_field(line: &str, key: &str) -> Option<String> {
+    let needle = format!("{key}:");
+    let idx = line.find(&needle)?;
+    let after = &line[idx + needle.len()..];
+    let end = after.find([',', '}']).unwrap_or(after.len());
+    let value = after[..end].trim();
+    // A list value (`evidence: [..]`) is not a scalar field.
+    if value.starts_with('[') {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// Extract the `key: [a, b, ..]` flow-sequence items as a set.
+fn flow_list(line: &str, key: &str) -> BTreeSet<String> {
+    let needle = format!("{key}: [");
+    let mut items = BTreeSet::new();
+    if let Some(idx) = line.find(&needle) {
+        let after = &line[idx + needle.len()..];
+        if let Some(end) = after.find(']') {
+            for item in after[..end].split(',') {
+                let item = item.trim();
+                if !item.is_empty() {
+                    items.insert(item.to_string());
+                }
+            }
+        }
+    }
+    items
 }
 
 /// A gate re-buried off the default PR path: a `CI_FAST_REQUIRED_GATE_MARKERS`

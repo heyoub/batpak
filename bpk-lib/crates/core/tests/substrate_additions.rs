@@ -1,6 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; this integration harness uses panic! to surface structural regressions with explicit messages.
-#![allow(clippy::panic, clippy::unwrap_used)]
-
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
 use batpak::guard::{
@@ -15,7 +12,7 @@ use batpak::store::{
     ReceiptVerificationError, SigningDowngradeBody, SigningDowngradeReason,
     SigningExtensionNamespace, Store, StoreConfig, SIGNING_DOWNGRADE_SCHEMA_VERSION,
 };
-use batpak::store::{DenialReceipt, SigningKey};
+use batpak::store::{DenialReceipt, DenialRequest, SigningKey};
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -143,7 +140,7 @@ fn caller_supplied_receipt_extensions_flow_through_append_paths() {
         append_receipt.extensions.get(&commit_key),
         Some(&vec![1, 2, 3])
     );
-    assert!(store.verify_append_receipt(&append_receipt));
+    assert!(store.verify_append_receipt(&append_receipt).is_valid());
 
     let mut batch_extensions = std::collections::BTreeMap::new();
     batch_extensions.insert(batch_key.clone(), vec![4, 5, 6]);
@@ -177,18 +174,18 @@ fn caller_supplied_receipt_extensions_flow_through_append_paths() {
     gates.push(DenyGate);
     let failing = Denial::new("deny_gate", "blocked");
     let denial_receipt = store
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0xA5; 32]),
-            Some("pipeline:extension".to_owned()),
-            AppendOptions::new().with_extension(denial_key.clone(), vec![10]),
-        )
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0xA5; 32]),
+            pipeline_id: Some("pipeline:extension".to_owned()),
+            options: AppendOptions::new().with_extension(denial_key.clone(), vec![10]),
+        })
         .expect("append denial");
     assert_eq!(denial_receipt.extensions.get(&denial_key), Some(&vec![10]));
-    assert!(store.verify_denial_receipt(&denial_receipt));
+    assert!(store.verify_denial_receipt(&denial_receipt).is_valid());
 }
 
 #[test]
@@ -227,7 +224,7 @@ fn idempotency_replay_uses_committed_receipt_extensions() {
 
     assert_eq!(replay.event_id, first.event_id);
     assert_eq!(replay.extensions.get(&key), Some(&vec![7, 8, 9]));
-    assert!(store.verify_append_receipt(&replay));
+    assert!(store.verify_append_receipt(&replay).is_valid());
 }
 
 #[test]
@@ -251,13 +248,13 @@ fn receipt_extensions_count_against_single_append_limit() {
         AppendOptions::new().with_extension(key, vec![0xAB; 128]),
     );
 
-    match result {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against single append limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::Configuration(ref message) if message.contains("single append bytes")),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = result
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against single append limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::Configuration(ref message) if message.contains("single append bytes")),
+        "wrong error: {err:?}"
+    );
 }
 
 #[test]
@@ -283,13 +280,14 @@ fn receipt_extensions_count_against_batch_limits() {
     )
     .expect("batch item");
 
-    match store.append_batch(vec![per_item]) {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against batch per-item limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::BatchItemTooLarge { .. }),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = store
+        .append_batch(vec![per_item])
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against batch per-item limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::BatchItemTooLarge { .. }),
+        "wrong error: {err:?}"
+    );
 
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(
@@ -311,13 +309,14 @@ fn receipt_extensions_count_against_batch_limits() {
         .expect("batch item")
     };
 
-    match store.append_batch(vec![make_item(1), make_item(2)]) {
-        Ok(_) => panic!("PROPERTY: extension bytes must count against batch total limit"),
-        Err(err) => assert!(
-            matches!(err, batpak::store::StoreError::BatchFailed { .. }),
-            "wrong error: {err:?}"
-        ),
-    }
+    let err = store
+        .append_batch(vec![make_item(1), make_item(2)])
+        .map(|_| ())
+        .expect_err("PROPERTY: extension bytes must count against batch total limit");
+    assert!(
+        matches!(err, batpak::store::StoreError::BatchFailed { .. }),
+        "wrong error: {err:?}"
+    );
 }
 
 fn receipt_extension_restore_config(
@@ -349,7 +348,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
             enable_mmap_index,
         ))
         .expect("open store");
-        store
+        let _ = store
             .append_with_options(
                 &coord,
                 kind,
@@ -374,18 +373,18 @@ fn assert_receipt_extensions_survive_close_reopen_case(
         let mut gates = GateSet::new();
         gates.push(DenyGate);
         let failing = Denial::new("deny_gate", "blocked");
-        store
-            .append_denial(
-                &coord,
-                kind,
-                &gates,
-                &failing,
-                Some([0x5A; 32]),
-                Some("pipeline:reopen".to_owned()),
-                AppendOptions::new()
+        let _ = store
+            .append_denial(DenialRequest {
+                coord: &coord,
+                proposed_kind: kind,
+                gate_set: &gates,
+                failing: &failing,
+                proposed_content_hash: Some([0x5A; 32]),
+                pipeline_id: Some("pipeline:reopen".to_owned()),
+                options: AppendOptions::new()
                     .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                     .with_extension(denial_key.clone(), vec![3]),
-            )
+            })
             .expect("append denial");
         store.close().expect("close store");
     }
@@ -415,7 +414,7 @@ fn assert_receipt_extensions_survive_close_reopen_case(
         )
         .expect("replay append");
     assert_eq!(append_replay.extensions.get(&append_key), Some(&vec![1]));
-    assert!(reopened.verify_append_receipt(&append_replay));
+    assert!(reopened.verify_append_receipt(&append_replay).is_valid());
 
     let batch_replay_item = BatchAppendItem::new(
         coord.clone(),
@@ -436,20 +435,20 @@ fn assert_receipt_extensions_survive_close_reopen_case(
     gates.push(DenyGate);
     let failing = Denial::new("deny_gate", "blocked");
     let denial_replay = reopened
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0x5A; 32]),
-            Some("pipeline:reopen".to_owned()),
-            AppendOptions::new()
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0x5A; 32]),
+            pipeline_id: Some("pipeline:reopen".to_owned()),
+            options: AppendOptions::new()
                 .with_idempotency(batpak::id::IdempotencyKey::from(0xE3))
                 .with_extension(denial_key.clone(), vec![9]),
-        )
+        })
         .expect("replay denial");
     assert_eq!(denial_replay.extensions.get(&denial_key), Some(&vec![3]));
-    assert!(reopened.verify_denial_receipt(&denial_replay));
+    assert!(reopened.verify_denial_receipt(&denial_replay).is_valid());
 }
 
 #[test]
@@ -473,7 +472,7 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
     let key = SigningKey::from_bytes([0x44; 32]);
     let coord = Coordinate::new("extension:signed", "scope:test").expect("coord");
     let kind = EventKind::custom(0xA, 14);
-    let pcp_key = ExtensionKey::new("pcp.receipt").expect("pcp extension key");
+    let ext_key = ExtensionKey::new("ext.receipt").expect("external profile extension key");
     let app_key = ExtensionKey::new("acme.receipt").expect("app extension key");
 
     {
@@ -491,19 +490,19 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
                 &serde_json::json!({"n": 1}),
                 AppendOptions::new()
                     .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
-                    .with_extension(pcp_key.clone(), vec![0x50, 0x43, 0x50])
+                    .with_extension(ext_key.clone(), vec![0x45, 0x58, 0x54])
                     .with_extension(app_key.clone(), vec![0x41, 0x50, 0x50]),
             )
             .expect("append signed extension receipt");
         assert_eq!(
-            receipt.extensions.get(&pcp_key),
-            Some(&vec![0x50, 0x43, 0x50])
+            receipt.extensions.get(&ext_key),
+            Some(&vec![0x45, 0x58, 0x54])
         );
         assert_eq!(
             receipt.extensions.get(&app_key),
             Some(&vec![0x41, 0x50, 0x50])
         );
-        assert!(store.verify_append_receipt(&receipt));
+        assert!(store.verify_append_receipt(&receipt).is_valid());
         store.close().expect("close signed store");
     }
 
@@ -521,26 +520,26 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
             &serde_json::json!({"n": 2}),
             AppendOptions::new()
                 .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
-                .with_extension(pcp_key.clone(), vec![0])
+                .with_extension(ext_key.clone(), vec![0])
                 .with_extension(app_key.clone(), vec![0]),
         )
         .expect("idempotent replay");
 
     assert_eq!(
-        replay.extensions.get(&pcp_key),
-        Some(&vec![0x50, 0x43, 0x50])
+        replay.extensions.get(&ext_key),
+        Some(&vec![0x45, 0x58, 0x54])
     );
     assert_eq!(
         replay.extensions.get(&app_key),
         Some(&vec![0x41, 0x50, 0x50])
     );
-    assert!(reopened.verify_append_receipt(&replay));
+    assert!(reopened.verify_append_receipt(&replay).is_valid());
 
     let mut tampered = replay.clone();
-    tampered.extensions.insert(pcp_key, vec![0x66]);
+    tampered.extensions.insert(ext_key, vec![0x66]);
     assert!(
-        !reopened.verify_append_receipt(&tampered),
-        "pcp.* bytes are opaque substrate cargo and must still be covered by the signature"
+        !reopened.verify_append_receipt(&tampered).is_valid(),
+        "external profile bytes are opaque substrate cargo and must still be covered by the signature"
     );
 }
 
@@ -558,15 +557,15 @@ fn namespace_prefix_query_excludes_adjacent_namespaces() {
     let alice_child = Coordinate::new("alice:child", "scope:test").expect("alice child coord");
     let alice2 = Coordinate::new("alice2", "scope:test").expect("alice2 coord");
 
-    store
+    let _ = store
         .append(&alice, kind, &serde_json::json!({"n": 1}))
-        .unwrap();
-    store
+        .expect("append alice");
+    let _ = store
         .append(&alice_child, kind, &serde_json::json!({"n": 2}))
-        .unwrap();
-    store
+        .expect("append alice child");
+    let _ = store
         .append(&alice2, kind, &serde_json::json!({"n": 3}))
-        .unwrap();
+        .expect("append alice2");
 
     let hits = store.query(&Region::entity("alice"));
     let entities = hits
@@ -611,11 +610,11 @@ fn cursor_gap_accessor_drains_once() {
     let gaps: Vec<GapObservation> = cursor.take_gaps();
 
     assert_eq!(delivered.len(), 2);
-    assert_eq!(delivered[0].global_sequence(), receipt0.sequence);
-    assert_eq!(delivered[1].global_sequence(), receipt2.sequence);
+    assert_eq!(delivered[0].global_sequence(), receipt0.global_sequence);
+    assert_eq!(delivered[1].global_sequence(), receipt2.global_sequence);
     assert_eq!(gaps.len(), 1);
-    assert_eq!(gaps[0].expected_sequence, receipt0.sequence + 1);
-    assert_eq!(gaps[0].delivered_sequence, receipt2.sequence);
+    assert_eq!(gaps[0].expected_sequence, receipt0.global_sequence + 1);
+    assert_eq!(gaps[0].delivered_sequence, receipt2.global_sequence);
     assert!(
         cursor.take_gaps().is_empty(),
         "take_gaps must drain observations"
@@ -702,15 +701,15 @@ fn cursor_gap_accessor_uses_bounded_ring_buffer() {
     let gaps = cursor.take_gaps();
 
     assert_eq!(delivered.len(), 3);
-    assert_eq!(delivered[0].global_sequence(), receipt0.sequence);
-    assert_eq!(delivered[1].global_sequence(), receipt2.sequence);
-    assert_eq!(delivered[2].global_sequence(), receipt4.sequence);
+    assert_eq!(delivered[0].global_sequence(), receipt0.global_sequence);
+    assert_eq!(delivered[1].global_sequence(), receipt2.global_sequence);
+    assert_eq!(delivered[2].global_sequence(), receipt4.global_sequence);
     assert_eq!(gaps.len(), 1, "bounded ring buffer must evict oldest gaps");
-    assert_eq!(gaps[0].expected_sequence, receipt2.sequence + 1);
-    assert_eq!(gaps[0].delivered_sequence, receipt4.sequence);
+    assert_eq!(gaps[0].expected_sequence, receipt2.global_sequence + 1);
+    assert_eq!(gaps[0].delivered_sequence, receipt4.global_sequence);
     assert_eq!(
         gaps[0].cancelled_ranges,
-        vec![(receipt2.sequence + 1, receipt4.sequence)],
+        vec![(receipt2.global_sequence + 1, receipt4.global_sequence)],
     );
 
     store.close().expect("close store");
@@ -719,8 +718,10 @@ fn cursor_gap_accessor_uses_bounded_ring_buffer() {
 #[test]
 fn guarded_prefix_sites_no_longer_use_raw_starts_with() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let coordinate = std::fs::read_to_string(root.join("src/coordinate/mod.rs")).unwrap();
-    let query = std::fs::read_to_string(root.join("src/store/index/query.rs")).unwrap();
+    let coordinate = std::fs::read_to_string(root.join("src/coordinate/mod.rs"))
+        .expect("read coordinate/mod.rs");
+    let query =
+        std::fs::read_to_string(root.join("src/store/index/query.rs")).expect("read query.rs");
 
     assert!(
         !coordinate.contains("entity.starts_with(prefix.as_ref())"),
@@ -807,7 +808,7 @@ fn signed_receipts_round_trip() {
         let receipt = store
             .append(&coord, kind, &serde_json::json!({"n": 1}))
             .expect("append signed event");
-        let verified_receipt = store.verify_append_receipt(&receipt);
+        let verified_receipt = store.verify_append_receipt(&receipt).is_valid();
         assert_ne!(receipt.key_id, [0; 32]);
         assert!(receipt.signature.is_some());
         assert!(verified_receipt);
@@ -823,7 +824,7 @@ fn signed_receipts_round_trip() {
             .with_signing_key(key2),
     )
     .expect("reopen signed store with rotated key");
-    let verified_old_receipt = store.verify_append_receipt(&receipt1);
+    let verified_old_receipt = store.verify_append_receipt(&receipt1).is_valid();
     assert!(
         verified_old_receipt,
         "older signed receipts must verify after key rotation"
@@ -832,7 +833,7 @@ fn signed_receipts_round_trip() {
     let receipt2 = store
         .append(&coord, kind, &serde_json::json!({"n": 2}))
         .expect("append second signed event");
-    let verified_new_receipt = store.verify_append_receipt(&receipt2);
+    let verified_new_receipt = store.verify_append_receipt(&receipt2).is_valid();
     assert!(verified_new_receipt);
 
     let mut tampered = receipt2.clone();
@@ -840,22 +841,22 @@ fn signed_receipts_round_trip() {
         ExtensionKey::new("acme.trace").expect("extension key"),
         vec![1, 2, 3],
     );
-    let verified_tampered_receipt = store.verify_append_receipt(&tampered);
+    let verified_tampered_receipt = store.verify_append_receipt(&tampered).is_valid();
     assert!(
         !verified_tampered_receipt,
         "tampering with receipt extensions must invalidate the signature"
     );
 
     let denial_receipt: DenialReceipt = store
-        .append_denial(
-            &coord,
-            kind,
-            &gates,
-            &failing,
-            Some([0xEF; 32]),
-            Some("pipeline:test".to_owned()),
-            batpak::store::AppendOptions::new(),
-        )
+        .append_denial(DenialRequest {
+            coord: &coord,
+            proposed_kind: kind,
+            gate_set: &gates,
+            failing: &failing,
+            proposed_content_hash: Some([0xEF; 32]),
+            pipeline_id: Some("pipeline:test".to_owned()),
+            options: batpak::store::AppendOptions::new(),
+        })
         .expect("append denial");
     assert_eq!(
         store
@@ -866,9 +867,9 @@ fn signed_receipts_round_trip() {
             .event_kind,
         EventKind::SYSTEM_DENIAL
     );
-    let verified_denial_receipt = store.verify_denial_receipt(&denial_receipt);
+    let verified_denial_receipt = store.verify_denial_receipt(&denial_receipt).is_valid();
     assert_eq!(
-        store.verify_denial_receipt_detailed(&denial_receipt),
+        store.verify_denial_receipt(&denial_receipt),
         ReceiptVerification::Signed
     );
     assert!(verified_denial_receipt);
@@ -893,7 +894,7 @@ fn unsigned_receipt_without_keys_has_no_signing_downgrade() {
         receipt.signing_downgrade().is_none(),
         "unsigned receipts from an empty signing registry must not claim downgrade evidence"
     );
-    assert!(store.verify_append_receipt(&receipt));
+    assert!(store.verify_append_receipt(&receipt).is_valid());
 }
 
 #[test]
@@ -916,10 +917,10 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
         .expect("append signed event");
 
     assert!(
-        store.verify_append_receipt(&receipt),
+        store.verify_append_receipt(&receipt).is_valid(),
         "fresh signed receipt should verify"
     );
-    let detailed = store.verify_append_receipt_detailed(&receipt);
+    let detailed = store.verify_append_receipt(&receipt);
     assert!(detailed.is_valid());
     assert!(detailed.error().is_none());
 
@@ -927,44 +928,44 @@ fn receipt_verification_rejects_stripped_signature_and_index_field_tampering() {
     stripped.key_id = [0; 32];
     stripped.signature = None;
     assert_eq!(
-        store.verify_append_receipt_detailed(&stripped),
+        store.verify_append_receipt(&stripped),
         ReceiptVerification::Invalid(ReceiptVerificationError::UnsignedReceiptRejected)
     );
     assert!(
-        !store.verify_append_receipt(&stripped),
+        !store.verify_append_receipt(&stripped).is_valid(),
         "stripping a signature must fail when the store has a verifying key registry"
     );
 
     let mut wrong_sequence = receipt.clone();
-    wrong_sequence.sequence += 1;
+    wrong_sequence.global_sequence += 1;
     assert_eq!(
-        store.verify_append_receipt_detailed(&wrong_sequence),
+        store.verify_append_receipt(&wrong_sequence),
         ReceiptVerification::Invalid(ReceiptVerificationError::SequenceMismatch)
     );
     assert!(
-        !store.verify_append_receipt(&wrong_sequence),
+        !store.verify_append_receipt(&wrong_sequence).is_valid(),
         "sequence must match the committed index entry, not just the signature cover"
     );
 
     let mut wrong_content_hash = receipt.clone();
     wrong_content_hash.content_hash[0] ^= 0xFF;
     assert_eq!(
-        store.verify_append_receipt_detailed(&wrong_content_hash),
+        store.verify_append_receipt(&wrong_content_hash),
         ReceiptVerification::Invalid(ReceiptVerificationError::ContentHashMismatch)
     );
     assert!(
-        !store.verify_append_receipt(&wrong_content_hash),
+        !store.verify_append_receipt(&wrong_content_hash).is_valid(),
         "content hash must match the committed index entry"
     );
 
     let mut wrong_extensions = receipt.clone();
     wrong_extensions.extensions.insert(ext_key, vec![9]);
     assert_eq!(
-        store.verify_append_receipt_detailed(&wrong_extensions),
+        store.verify_append_receipt(&wrong_extensions),
         ReceiptVerification::Invalid(ReceiptVerificationError::ExtensionsMismatch)
     );
     assert!(
-        !store.verify_append_receipt(&wrong_extensions),
+        !store.verify_append_receipt(&wrong_extensions).is_valid(),
         "receipt extensions must match the committed index entry"
     );
 }
@@ -980,18 +981,18 @@ fn unsigned_receipt_verification_still_checks_committed_index_state() {
         .expect("append unsigned event");
 
     assert!(
-        store.verify_append_receipt(&receipt),
+        store.verify_append_receipt(&receipt).is_valid(),
         "unsigned receipts still verify when signing is not configured"
     );
 
     let mut wrong_sequence: AppendReceipt = receipt.clone();
-    wrong_sequence.sequence += 1;
+    wrong_sequence.global_sequence += 1;
     assert_eq!(
-        store.verify_append_receipt_detailed(&wrong_sequence),
+        store.verify_append_receipt(&wrong_sequence),
         ReceiptVerification::Invalid(ReceiptVerificationError::SequenceMismatch)
     );
     assert!(
-        !store.verify_append_receipt(&wrong_sequence),
+        !store.verify_append_receipt(&wrong_sequence).is_valid(),
         "unsigned verification must still reject receipts whose index fields do not match"
     );
 }
@@ -1008,7 +1009,7 @@ fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
 
     let verification = store.verify_append_receipt_wire_detailed(
         receipt.event_id,
-        receipt.sequence,
+        receipt.global_sequence,
         receipt.content_hash,
         receipt.key_id,
         receipt.signature,
@@ -1019,7 +1020,7 @@ fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
     assert_eq!(
         store.verify_append_receipt_wire_detailed(
             receipt.event_id,
-            receipt.sequence + 1,
+            receipt.global_sequence + 1,
             receipt.content_hash,
             receipt.key_id,
             receipt.signature,
@@ -1033,7 +1034,7 @@ fn wire_append_receipt_verification_hydrates_disk_pos_from_index() {
     assert_eq!(
         store.verify_append_receipt_wire_detailed(
             receipt.event_id,
-            receipt.sequence,
+            receipt.global_sequence,
             wrong_hash,
             receipt.key_id,
             receipt.signature,

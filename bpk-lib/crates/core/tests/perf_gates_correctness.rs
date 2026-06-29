@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; correctness-gate tests in tests/perf_gates_correctness.rs stream gate reports to stderr, panic! on violations, and narrow timing counters into smaller integer types.
-#![allow(clippy::panic, clippy::print_stderr, clippy::cast_possible_truncation)]
 //! PROVES: LAW-004 (Composition Over Construction — quadratic dogfooding) for the
 //! six correctness gates (fd-eviction round-trip, cross-segment reads, CAS,
 //! idempotency, cursor completeness, snapshot bootability) plus the tripwire
@@ -13,10 +11,9 @@
 //! code-level tripwires, not an independent production certification system.
 //! Harness pattern: Property Harness (catastrophic threshold lane).
 
-#[path = "support/mod.rs"]
-mod support;
 use batpak::store::{Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
+use std::io::Write;
 use tempfile::TempDir;
 
 // ================================================================
@@ -171,7 +168,7 @@ fn correctness_gates_self_validate() {
 
     // Populate with enough events to trigger segment rotation + fd eviction
     for i in 0..n {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -179,11 +176,9 @@ fn correctness_gates_self_validate() {
 
     // --- Probe 1: FD eviction round-trip ---
     let entries = store.by_entity("correctness:entity");
-    let first = store.get(batpak::id::EventId::from(entries[0].event_id()));
-    let last = store.get(batpak::id::EventId::from(
-        entries[entries.len() - 1].event_id(),
-    ));
-    let first_again = store.get(batpak::id::EventId::from(entries[0].event_id())); // re-read after eviction
+    let first = store.get(entries[0].event_id());
+    let last = store.get(entries[entries.len() - 1].event_id());
+    let first_again = store.get(entries[0].event_id()); // re-read after eviction
     let fd_eviction_round_trips = first.is_ok()
         && last.is_ok()
         && first_again.is_ok()
@@ -201,10 +196,11 @@ fn correctness_gates_self_validate() {
                 .unwrap_or(false)
         })
         .count();
-    let cross_segment_reads_ok = segment_count > 1 && entries.len() == n as usize;
+    let cross_segment_reads_ok = segment_count > 1
+        && entries.len() == usize::try_from(n).expect("bounded test event count fits usize");
 
     // --- Probe 3: CAS rejection ---
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"extra": true}))
         .expect("one more");
     let cas_result = store.append_with_options(
@@ -240,7 +236,7 @@ fn correctness_gates_self_validate() {
     // --- Probe 5: Cursor completeness ---
     let coord2 = Coordinate::new("cursor:test", "correctness:scope").expect("valid");
     for i in 0..5 {
-        store
+        let _ = store
             .append(&coord2, kind, &serde_json::json!({"c": i}))
             .expect("append");
     }
@@ -284,28 +280,41 @@ fn correctness_gates_self_validate() {
 
     let denials = gates.evaluate_all(&ctx);
 
-    eprintln!("\n  CORRECTNESS GATE REPORT:");
-    eprintln!("    fd_eviction_round_trips:   {fd_eviction_round_trips}");
-    eprintln!("    cross_segment_reads:        {cross_segment_reads_ok}");
-    eprintln!("    cas_rejects_stale:          {cas_rejects_stale}");
-    eprintln!("    idempotency_deduplicates:   {idempotency_deduplicates}");
-    eprintln!("    cursor_sees_all_events:     {cursor_sees_all_events}");
-    eprintln!("    snapshot_boots:             {snapshot_boots}");
-
-    if denials.is_empty() {
-        eprintln!("    Result: ALL 6 CORRECTNESS GATES PASSED");
-    } else {
-        eprintln!("    Result: {} CORRECTNESS GATES FAILED:", denials.len());
-        for d in &denials {
-            eprintln!("      [{gate}] {msg}", gate = d.gate, msg = d.message);
-        }
-        panic!(
-            "CORRECTNESS SELF-TEST FAILED: {} gate(s) denied.\n\
-             Each denial above points to the likely file + function to investigate.\n\
-             This is the library stress-testing itself with the shared guard primitives.",
-            denials.len()
-        );
+    let mut report = String::from("\n  CORRECTNESS GATE REPORT:");
+    report.push_str(&format!(
+        "\n    fd_eviction_round_trips:   {fd_eviction_round_trips}"
+    ));
+    report.push_str(&format!(
+        "\n    cross_segment_reads:        {cross_segment_reads_ok}"
+    ));
+    report.push_str(&format!(
+        "\n    cas_rejects_stale:          {cas_rejects_stale}"
+    ));
+    report.push_str(&format!(
+        "\n    idempotency_deduplicates:   {idempotency_deduplicates}"
+    ));
+    report.push_str(&format!(
+        "\n    cursor_sees_all_events:     {cursor_sees_all_events}"
+    ));
+    report.push_str(&format!(
+        "\n    snapshot_boots:             {snapshot_boots}"
+    ));
+    for d in &denials {
+        report.push_str(&format!(
+            "\n      [{gate}] {msg}",
+            gate = d.gate,
+            msg = d.message
+        ));
     }
+    let _ = writeln!(std::io::stderr(), "{report}");
+
+    assert!(
+        denials.is_empty(),
+        "CORRECTNESS SELF-TEST FAILED: {} gate(s) denied.\n\
+         Each denial above points to the likely file + function to investigate.\n\
+         This is the library stress-testing itself with the shared guard primitives.{report}",
+        denials.len()
+    );
 
     store.close().expect("close");
 }

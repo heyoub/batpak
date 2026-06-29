@@ -1,14 +1,11 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; crash-safety tests in tests/group_commit_crash.rs use unwrap as assertion style and narrow bounded counters that the fixture guarantees fit in target types.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 //! Crash safety and deterministic concurrency tests for group commit.
 //!
 //! PROVES: partial batch writes survive crash + idempotent retry,
 //!         group commit drain loop is race-free under loom.
 //! INVARIANTS: INV-GROUP-COMMIT-IDEMPOTENCY, INV-BATCH-ATOMIC-VISIBILITY.
 
-mod support;
 use batpak::store::{Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 /// Run a loom model with a bounded preemption budget. See
@@ -42,9 +39,9 @@ fn partial_batch_crash_idempotent_retry() {
 
     // Phase 1: write events 0..10
     for i in 0u32..10 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
-        store
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
+        let _ = store
             .append_with_options(&coord, kind, &serde_json::json!({"i": i}), opts)
             .expect("append phase 1");
     }
@@ -56,9 +53,9 @@ fn partial_batch_crash_idempotent_retry() {
         .with_sync_every_n_events(1);
     let store2 = Store::open(config2).expect("reopen");
     for i in 5u32..15 {
-        let opts =
-            AppendOptions::new().with_idempotency(batpak::id::IdempotencyKey::from(i as u128 + 1));
-        store2
+        let opts = AppendOptions::new()
+            .with_idempotency(batpak::id::IdempotencyKey::from(u128::from(i) + 1));
+        let _ = store2
             .append_with_options(&coord, kind, &serde_json::json!({"i": i}), opts)
             .expect("append phase 2");
     }
@@ -104,10 +101,10 @@ fn loom_group_commit_drain_race() {
         let c2 = Arc::clone(&committed);
 
         let h1 = loom::thread::spawn(move || {
-            tx1.send(1).unwrap();
+            tx1.send(1).expect("loom channel send must succeed");
         });
         let h2 = loom::thread::spawn(move || {
-            tx2.send(2).unwrap();
+            tx2.send(2).expect("loom channel send must succeed");
         });
 
         // Writer: blocking recv for first, then try_recv drain
@@ -119,8 +116,8 @@ fn loom_group_commit_drain_race() {
             }
         }
 
-        h1.join().unwrap();
-        h2.join().unwrap();
+        h1.join().expect("loom sender thread must join");
+        h2.join().expect("loom sender thread must join");
 
         let total = committed.load(Ordering::Acquire);
         // At least the first message must always be committed and no model
@@ -163,12 +160,12 @@ fn loom_interner_concurrent_resolve() {
         let nid_w = Arc::clone(&next_id);
         let writer = loom::thread::spawn(move || {
             let s = "hello".to_string();
-            let mut fwd = fwd_w.write().unwrap();
+            let mut fwd = fwd_w.write().expect("forward map write lock");
             if !fwd.contains_key(&s) {
                 let id = nid_w.fetch_add(1, loom::sync::atomic::Ordering::Relaxed);
                 fwd.insert(s.clone(), id);
                 drop(fwd);
-                let mut rev = rev_w.write().unwrap();
+                let mut rev = rev_w.write().expect("reverse map write lock");
                 rev.push(s);
             }
         });
@@ -176,7 +173,7 @@ fn loom_interner_concurrent_resolve() {
         // Reader 1: try to resolve id 0
         let rev_r1 = Arc::clone(&reverse);
         let reader1 = loom::thread::spawn(move || {
-            let rev = rev_r1.read().unwrap();
+            let rev = rev_r1.read().expect("reverse map read lock");
             // May or may not find it yet — that's fine
             if !rev.is_empty() {
                 assert_eq!(rev[0], "hello");
@@ -186,18 +183,18 @@ fn loom_interner_concurrent_resolve() {
         // Reader 2: check forward map
         let fwd_r2 = Arc::clone(&forward);
         let reader2 = loom::thread::spawn(move || {
-            let fwd = fwd_r2.read().unwrap();
+            let fwd = fwd_r2.read().expect("forward map read lock");
             if let Some(&id) = fwd.get("hello") {
                 assert_eq!(id, 0);
             }
         });
 
-        writer.join().unwrap();
-        reader1.join().unwrap();
-        reader2.join().unwrap();
+        writer.join().expect("interner writer thread must join");
+        reader1.join().expect("interner reader1 thread must join");
+        reader2.join().expect("interner reader2 thread must join");
 
-        let fwd = forward.read().unwrap();
-        let rev = reverse.read().unwrap();
+        let fwd = forward.read().expect("forward map read lock");
+        let rev = reverse.read().expect("reverse map read lock");
         assert_eq!(fwd.len(), 1, "PROPERTY: final forward map has one key");
         assert_eq!(fwd.get("hello"), Some(&0));
         assert_eq!(rev.as_slice(), ["hello"]);

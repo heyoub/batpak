@@ -1,8 +1,7 @@
 //! PROVES: INV-PREPARED-BATCH-STAGING-EQUIVALENCE.
 
-mod support;
 use batpak::store::{BatchAppendItem, CausationRef, Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 const KIND: EventKind = EventKind::custom(0xF, 0x66);

@@ -19,8 +19,10 @@
 //! as durable going forward.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
+use batpak::id::EntityIdType;
 use batpak::prelude::{Coordinate, EventKind, Region};
 use batpak::store::{AppendReceipt, HlcPoint, Store, StoreConfig, StoreError};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -71,7 +73,10 @@ fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
 }
 
 fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> Vec<u128> {
-    entries.iter().map(|entry| entry.event_id()).collect()
+    entries
+        .iter()
+        .map(|entry| entry.event_id().as_u128())
+        .collect()
 }
 
 fn entry_point_for(
@@ -80,7 +85,7 @@ fn entry_point_for(
 ) -> HlcPoint {
     entries
         .iter()
-        .find(|entry| entry.event_id() == u128::from(receipt.event_id))
+        .find(|entry| entry.event_id() == receipt.event_id)
         .map(point)
         .expect("receipt event must be query-visible before failure")
 }
@@ -105,7 +110,10 @@ fn reopen_existing_device(backing: &Path) -> FlakeyDevice {
 #[test]
 fn durable_frontier_covers_recovered_state_after_device_failure_cadence_1000() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged torn-tail proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged torn-tail proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -159,7 +167,10 @@ fn durable_frontier_covers_recovered_state_after_device_failure_cadence_1000() {
 #[test]
 fn single_append_written_surfaces_io_error_cadence_1() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged cadence=1 IO proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged cadence=1 IO proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -171,14 +182,13 @@ fn single_append_written_surfaces_io_error_cadence_1() {
     let _durable = append_named(&store, "entity:torn-tail:cadence1-durable", 1);
     device.flip_to_error().expect("flip device to error target");
 
-    let err = match store.append(
-        &coord("entity:torn-tail:cadence1-after-flip"),
-        kind(),
-        &serde_json::json!({ "value": 2 }),
-    ) {
-        Ok(_) => panic!("PROPERTY: append after dm-flakey error target must not succeed"),
-        Err(err) => err,
-    };
+    let err = store
+        .append(
+            &coord("entity:torn-tail:cadence1-after-flip"),
+            kind(),
+            &serde_json::json!({ "value": 2 }),
+        )
+        .expect_err("PROPERTY: append after dm-flakey error target must not succeed");
     assert!(
         matches!(err, StoreError::Io(_) | StoreError::WriterCrashed),
         "PROPERTY: device failure must surface as IO or writer crash, got {err:?}"
@@ -188,7 +198,10 @@ fn single_append_written_surfaces_io_error_cadence_1() {
 #[test]
 fn post_fsync_events_survive_device_failure_durability_floor() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged durability-floor proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged durability-floor proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 

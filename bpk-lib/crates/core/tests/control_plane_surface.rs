@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0007; this control-plane smoke harness treats invariant violations as test failures; panic! is the assertion style throughout this file.
-#![allow(clippy::panic)]
 //! PROVES: the end-to-end control-plane surface -- ticket submit/reaction,
 //! try_submit, batch + outbox staging/flush, scan folding, generation-gated
 //! projection, visibility-fence commit and cancel, cursor worker shutdown, and
@@ -9,7 +7,7 @@
 //! SEEDED: a single deterministic store driven through every public submit path.
 
 use batpak::coordinate::{Coordinate, Region};
-use batpak::event::{Event, EventKind, EventSourced};
+use batpak::event::{Event, EventKind, EventSourced, ProjectionStateContract, StateExtent};
 use batpak::store::delivery::cursor::{CursorWorkerAction, CursorWorkerConfig, CursorWorkerHandle};
 use batpak::store::delivery::subscription::{ScanSubscriptionOps, SubscriptionOps};
 use batpak::store::Freshness;
@@ -21,14 +19,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 
-#[path = "support/control_plane_surface.rs"]
-mod cps_support;
+use batpak_testkit::control_plane_surface as cps_support;
 use cps_support::{test_config, KIND_COUNTER};
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_blocking;
+use batpak_testkit::bounded_writer_reply;
 use bounded_blocking::blocking;
 use bounded_writer_reply::writer_reply;
 
@@ -39,6 +34,8 @@ struct CounterProjection {
 
 impl EventSourced for CounterProjection {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("control-plane-surface-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -61,6 +58,10 @@ impl EventSourced for CounterProjection {
 
     fn supports_incremental_apply() -> bool {
         true
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -103,7 +104,7 @@ fn control_plane_surface_smoke() {
         .submit(&coord, kind, &serde_json::json!({"n": 1}))
         .expect("submit");
     let receipt = wait_append_ticket(&ticket, "control-plane submit").expect("wait");
-    assert_eq!(receipt.sequence, 1);
+    assert_eq!(receipt.global_sequence, 1);
 
     let reaction_ticket = store
         .submit_reaction(
@@ -116,14 +117,14 @@ fn control_plane_surface_smoke() {
         .expect("submit reaction");
     let reaction = wait_append_ticket(&reaction_ticket, "control-plane submit reaction")
         .expect("wait reaction");
-    assert_eq!(reaction.sequence, 2);
+    assert_eq!(reaction.global_sequence, 2);
 
     let outcome = store
         .try_submit(&coord, kind, &serde_json::json!({"n": 3}))
         .expect("try_submit");
     let ticket: AppendTicket = outcome.into_result().expect("ok outcome");
     let receipt = wait_append_ticket(&ticket, "control-plane try_submit").expect("wait try_submit");
-    assert_eq!(receipt.sequence, 3);
+    assert_eq!(receipt.global_sequence, 3);
 
     let try_reaction = store
         .try_submit_reaction(
@@ -248,7 +249,7 @@ fn control_plane_surface_smoke() {
         *count += 1;
         Some(*count)
     });
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 11}))
         .expect("append for scan");
     let folded_count =
@@ -275,7 +276,7 @@ fn control_plane_surface_smoke() {
         "generation gate should skip unchanged entities"
     );
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 12}))
         .expect("append after projection");
     let changed = store
@@ -349,7 +350,7 @@ fn control_plane_surface_smoke() {
     );
     let visible_after_cancel = store.by_fact(kind).len();
     let stream_after_cancel = store.by_entity("entity:control").len();
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 15.5}))
         .expect("append after cancelled fence");
     assert_eq!(
@@ -374,7 +375,7 @@ fn control_plane_surface_smoke() {
             |_batch, _store, _witness| CursorWorkerAction::Stop,
         )
         .expect("spawn cursor worker");
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"n": 13}))
         .expect("append for cursor worker");
     worker.stop_and_join().expect("stop and join cursor worker");
@@ -384,10 +385,9 @@ fn control_plane_surface_smoke() {
         capacity: 10,
     };
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: cursor worker should release the last Arc"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "shared")
+        .expect("PROPERTY: cursor worker should release the last Arc");
     let visible_before_close = store.by_fact(kind).len();
     store.close().expect("close");
     let native_cache_dir = dir.path().join("native-cache");

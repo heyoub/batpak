@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-FENCE-CANCELLED-STAYS-HIDDEN; tests in tests/fence_cancellation.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Visibility-fence cancellation is durable across close+reopen.
 //!
 //! [INV-FENCE-CANCELLED-STAYS-HIDDEN] When a batch submitted under a visibility fence
@@ -15,8 +13,7 @@ use batpak::store::{Store, StoreConfig, StoreError};
 use std::time::Duration;
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 const FENCE_KIND: EventKind = EventKind::custom(0xC, 1);
@@ -50,7 +47,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
     // several writes under it. Cancel the fence before committing.
     {
         let store = Store::open(config(&dir)).expect("open store");
-        store
+        let _ = store
             .append(&coord, FENCE_KIND, &serde_json::json!({"baseline": true}))
             .expect("append baseline");
 
@@ -133,7 +130,7 @@ fn cancelled_fence_hides_batch_before_and_after_reopen() {
         assert!(
             final_entries
                 .iter()
-                .any(|e| e.event_id() == u128::from(receipt.event_id)),
+                .any(|e| e.event_id() == receipt.event_id),
             "PROPERTY: the post-reopen append must surface by its event id"
         );
 
@@ -178,7 +175,7 @@ fn dropped_fence_auto_cancels_pending_work_and_releases_active_fence() {
         .expect("append after dropped fence");
     let visible = user_visible_entries(&store);
     assert!(
-        visible.iter().any(|entry| entry.event_id() == u128::from(receipt.event_id)),
+        visible.iter().any(|entry| entry.event_id() == receipt.event_id),
         "PROPERTY: dropping a visibility fence must release the active fence so subsequent unfenced appends become visible"
     );
 

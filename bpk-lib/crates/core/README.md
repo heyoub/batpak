@@ -5,9 +5,8 @@ the core battery: an embedded, sync-first append-only journal with typed
 payloads, Blake3 hash-chained ancestry, verifiable receipts, deterministic
 replay, and derived projections.
 
-The family around it — `syncbat`, `netbat`, `hbat`, and `@batpak/sdk` — wires
-that journal into networked hosts and TypeScript clients through explicit
-terminals and circuits. See the
+The family around it — `syncbat`, `netbat`, and `hostbat` — wires
+the journal into larger Rust hosts through explicit terminals and circuits. See the
 [repository README](https://github.com/heyoub/batpak/blob/main/README.md) for
 the full family map, scale-out model, and host path.
 
@@ -63,11 +62,13 @@ design.
 
 ## Trust
 
-Judge the evidence, not the 0.x version number: roughly one line of tests
-per line of source, deterministic concurrency proofs with `loom`,
-property-based tests over hash-chain integrity and canonical encoding,
-crash-recovery and fault-injection suites, mutation testing on critical
-seams, and 73 named invariants enforced by an executable integrity gate.
+Judge the evidence, not the 0.x version number: a deep test surface
+(integration, property, crash-recovery, cold-start), deterministic
+concurrency proofs with `loom`, property-based tests over hash-chain
+integrity and canonical encoding, crash-recovery and fault-injection
+suites, mutation testing on critical seams, and a catalog of named
+invariants enforced by an executable integrity gate. See the root
+README and `03_INVARIANTS.md` for the current counts.
 
 ## Docs
 
@@ -77,14 +78,10 @@ Full documentation lives in the
 evaluator path, the
 [cookbook](https://github.com/heyoub/batpak/blob/main/cookbook/README.md) for
 task-shaped recipes, and
-[MODEL](https://github.com/heyoub/batpak/blob/main/MODEL.md) /
-[INVARIANTS](https://github.com/heyoub/batpak/blob/main/INVARIANTS.md) /
-[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/CONFORMANCE.md)
+[MODEL](https://github.com/heyoub/batpak/blob/main/02_MODEL.md) /
+[INVARIANTS](https://github.com/heyoub/batpak/blob/main/03_INVARIANTS.md) /
+[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/12_CONFORMANCE.md)
 for the mental model and the guarantees.
-
-This is the substrate crate in the batpak family. TypeScript clients talk to
-a networked batpak host through
-[`@batpak/sdk`](https://www.npmjs.com/package/@batpak/sdk).
 
 ```text
 bp records.

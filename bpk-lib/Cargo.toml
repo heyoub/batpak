@@ -6,10 +6,12 @@ members = [
     "crates/macros-support",
     "crates/macros",
     "crates/bench-support",
-    "crates/syncbat-macros",
+    "crates/testkit",
     "crates/syncbat",
     "crates/netbat",
-    "crates/hbat",
+    "crates/bvisor",
+    "crates/hostbat",
+    "crates/batpak-examples",
 ]
 # The cargo-fuzz crate (`fuzz/`) is its own workspace: it pulls in nightly-only
 # libfuzzer-sys / -Z build-std machinery and a `-C panic=abort` profile that

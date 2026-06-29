@@ -18,6 +18,7 @@ use serde::Serialize;
 /// helper thread so the caller thread does not stall. For deterministic
 /// cleanup — especially when the writer may have crashed — call
 /// [`VisibilityFence::cancel`] explicitly instead of relying on drop.
+#[must_use = "dropping a VisibilityFence only best-effort cancels it; call commit() or cancel() to control the publish boundary deterministically"]
 pub struct VisibilityFence<'a> {
     store: &'a Store<Open>,
     token: u64,
@@ -138,6 +139,9 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.store.writer_handle()?.pump();
         crate::store::recv_writer_reply(&rx)
     }
 
@@ -159,6 +163,9 @@ impl<'a> VisibilityFence<'a> {
             })
             .map_err(|_| StoreError::WriterCrashed)?;
         self.closed = true;
+        // Cooperative mode: drive the queued command inline before awaiting its
+        // reply (no-op under the threaded path).
+        self.store.writer_handle()?.pump();
         crate::store::recv_writer_reply(&rx)
     }
 }
@@ -171,8 +178,7 @@ impl<'a> VisibilityFence<'a> {
     /// Returns:
     /// * `Ok(())` when the cancel command was enqueued directly, offloaded
     ///   to a helper thread, or when there is no action to take
-    ///   (`self.closed` is true, or the store is no longer holding a
-    ///   writer handle).
+    ///   (`self.closed` is true).
     /// * `Err(String)` when the writer channel is disconnected or the helper
     ///   thread could not be spawned. We never panic in `Drop` under any
     ///   circumstance.
@@ -180,10 +186,8 @@ impl<'a> VisibilityFence<'a> {
         if self.closed {
             return Ok(());
         }
-        let Some(writer) = self.store.writer.as_ref() else {
-            return Ok(());
-        };
-        let writer_tx = writer.tx.clone();
+        // `self.store` is a `&Store<Open>`, which always owns a writer handle.
+        let writer_tx = self.store.state.0.tx.clone();
         let (tx, _rx) = flume::bounded(1);
         // D4: best-effort cancel on drop. We do not wait for the writer's
         // ack here — doing so would turn every fence drop into a
@@ -202,11 +206,17 @@ impl<'a> VisibilityFence<'a> {
             Err(TrySendError::Disconnected(_)) => {
                 Err("writer channel disconnected during fence drop".to_string())
             }
-            Err(TrySendError::Full(command)) => std::thread::Builder::new()
-                .name("batpak-fence-drop-cancel".to_string())
-                .spawn(move || {
-                    drop(writer_tx.send(command));
-                })
+            Err(TrySendError::Full(command)) => self
+                .store
+                .config
+                .spawner()
+                .spawn(
+                    "batpak-fence-drop-cancel".to_string(),
+                    None,
+                    Box::new(move || {
+                        drop(writer_tx.send(command));
+                    }),
+                )
                 .map(|_| ())
                 .map_err(|error| format!("failed to spawn drop-cancel helper: {error}")),
         }

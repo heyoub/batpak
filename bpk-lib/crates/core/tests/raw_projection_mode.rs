@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; raw projection mode parity/watch tests in tests/raw_projection_mode.rs use panic! as the assertion style when the raw-dispatch contract breaks.
-#![allow(clippy::panic)]
 //! Raw projection mode: raw-vs-value parity and watch replay lanes.
 //! Harness pattern: Equivalence Harness.
 //!
@@ -13,18 +11,15 @@
 
 use std::sync::Arc;
 
-mod support;
 use batpak::store::{Freshness, ProjectionWatcher, Store, StoreConfig};
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/raw_projection_mode.rs"]
-mod rpm_support;
+use batpak_testkit::raw_projection_mode as rpm_support;
 use rpm_support::{CounterDelta, KIND};
 
-#[path = "support/bounded_blocking.rs"]
-mod bounded_blocking;
+use batpak_testkit::bounded_blocking;
 use bounded_blocking::blocking;
 
 const NOISE_KIND: EventKind = EventKind::custom(0xF, 0x32);
@@ -37,6 +32,8 @@ struct ValueCounter {
 
 impl EventSourced for ValueCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-mode-value-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -59,6 +56,10 @@ impl EventSourced for ValueCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +70,8 @@ struct RawCounter {
 
 impl EventSourced for RawCounter {
     type Input = RawMsgpackInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("raw-projection-mode-raw-counter");
 
     fn from_events(events: &[Event<Vec<u8>>]) -> Option<Self> {
         if events.is_empty() {
@@ -91,6 +94,10 @@ impl EventSourced for RawCounter {
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[KIND]
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 fn seeded_store() -> (TempDir, Arc<Store>) {
@@ -98,7 +105,7 @@ fn seeded_store() -> (TempDir, Arc<Store>) {
     let store = Arc::new(Store::open(StoreConfig::new(dir.path())).expect("open"));
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
     for (amount, label) in [(3, "a"), (-1, "b"), (7, "c"), (2, "d")] {
-        store
+        let _ = store
             .append(
                 &coord,
                 KIND,
@@ -146,12 +153,9 @@ fn raw_projection_matches_value_projection_live_and_reopen() {
         "raw-mode and value-mode projections must converge on the same state live"
     );
 
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!("PROPERTY: raw projection test should release all Arc clones before close")
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw projection test should release all Arc clones before close");
     store.close().expect("close");
 
     let reopened = Store::open(StoreConfig::new(dir.path())).expect("reopen");
@@ -185,7 +189,7 @@ fn raw_watch_projection_emits_updated_state() {
     );
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -205,10 +209,9 @@ fn raw_watch_projection_emits_updated_state() {
         gen > baseline_generation,
         "watch projection generation should advance after a relevant append"
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => panic!("PROPERTY: raw watch test should release all Arc clones before close"),
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw watch test should release all Arc clones before close");
     store.close().expect("close");
 }
 
@@ -222,7 +225,7 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             KIND,
@@ -257,12 +260,9 @@ fn raw_watch_projection_matches_project_if_changed_after_relevant_append() {
         "PROPERTY: watch_projection and project_if_changed must report the same honest generation \
          after a relevant append."
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!("PROPERTY: raw parity watch test should release all Arc clones before close")
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw parity watch test should release all Arc clones before close");
     store.close().expect("close");
 }
 
@@ -280,7 +280,7 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         Arc::clone(&store).watch_projection::<RawCounter>("entity:raw-proj", Freshness::Consistent);
     let coord = Coordinate::new("entity:raw-proj", "scope:test").expect("coord");
 
-    store
+    let _ = store
         .append(
             &coord,
             NOISE_KIND,
@@ -325,13 +325,8 @@ fn raw_watch_projection_matches_project_if_changed_after_irrelevant_append() {
         changed.0 > baseline_generation,
         "entity generation should still advance on the irrelevant append"
     );
-    let store = match Arc::try_unwrap(store) {
-        Ok(store) => store,
-        Err(_) => {
-            panic!(
-                "PROPERTY: raw irrelevant parity test should release all Arc clones before close"
-            )
-        }
-    };
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| ())
+        .expect("PROPERTY: raw irrelevant parity test should release all Arc clones before close");
     store.close().expect("close");
 }

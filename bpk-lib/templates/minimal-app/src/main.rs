@@ -6,6 +6,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let coord = Coordinate::new("template:demo", "workspace:local")?;
     let kind = EventKind::custom(0xF, 1);
     let receipt = store.append(&coord, kind, &serde_json::json!({"hello": "batpak"}))?;
-    println!("stored {} at {}", receipt.event_id, receipt.sequence);
+    println!("stored {} at {}", receipt.event_id, receipt.global_sequence);
     Ok(())
 }

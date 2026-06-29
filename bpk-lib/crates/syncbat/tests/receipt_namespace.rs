@@ -25,5 +25,8 @@ fn syncbat_receipt_extension_value_flows_through_batpak_append_options() {
 
 #[test]
 fn syncbat_receipt_extension_key_rejects_nested_fields() {
-    assert!(receipt_extension_key("run.id").is_err());
+    assert!(
+        receipt_extension_key("run.id").is_err(),
+        "PROPERTY: syncbat receipt extension keys reserve dotted nesting for batpak metadata"
+    );
 }

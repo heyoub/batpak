@@ -19,9 +19,9 @@
 //! `today` is injected ([`check_with_today`]) so fixtures stay deterministic and
 //! never rot as the wall clock advances.
 
+use crate::anchors::{extract_anchors, resolve_anchor};
 use crate::assurance::AssuranceLevel;
 use crate::repo_surface::{ensure, load_yaml};
-use crate::shared_checks::{extract_anchors, resolve_anchor};
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +43,19 @@ pub(crate) enum WaiverKind {
     /// Invariant-citation exemption.
     #[serde(rename = "invariant-citation")]
     InvariantCitation,
+    /// A sanctioned, expiring CAPABILITY DOWNGRADE (GAUNT-CAPSNAP): a backend
+    /// `support_matrix()` cell whose enforcement was deliberately lowered, a
+    /// (backend,kind) row removed, an evidence claim dropped, or a witness
+    /// un-proved. The `target` is `backend:kind` (e.g. `linux:ExposePath`). This
+    /// is the DURABLE record a downgrade takes — its `target` is validated against
+    /// a real cell by `capability_snapshot::check`, and ADDING it is itself an
+    /// approval-gated weakening (`meta_gate::detect_waiver_additions`). A downgrade
+    /// to `Unsupported` (a fully-lost capability) is L4 blast radius and so requires
+    /// `independent_signoff: true`. (The meta-gate clears the diff's
+    /// `CapabilityDowngraded` finding via its standard two-person approval path; it
+    /// does not special-case this waiver as a same-diff clearance.)
+    #[serde(rename = "capability-downgrade")]
+    CapabilityDowngrade,
 }
 
 /// One typed waiver as declared in `typed_waivers.yaml`. `serde(deny_unknown_fields)`
@@ -212,7 +225,7 @@ pub(crate) fn validate(repo_root: &Path, waivers: &[Waiver], today: IsoDate) -> 
 
 /// Today's date from the system clock as an [`IsoDate`] (UTC). Used by the
 /// production gate; tests inject a fixed date via [`check_with_today`].
-fn today_utc() -> IsoDate {
+pub(crate) fn today_utc() -> IsoDate {
     // Days since the Unix epoch, converted to a proleptic-Gregorian calendar
     // date. No external clock crate; deterministic and dependency-free.
     let secs = std::time::SystemTime::now()
@@ -252,7 +265,7 @@ pub(crate) fn check_with_today(repo_root: &Path, today: IsoDate) -> Result<()> {
     let waivers = load_waivers(repo_root)?;
     validate(repo_root, &waivers, today)?;
     let aggregate: u32 = waivers.iter().map(|w| u32::from(w.debt_score)).sum();
-    println!(
+    outln!(
         "typed-waivers: ok ({} waiver(s), aggregate debt {})",
         waivers.len(),
         aggregate

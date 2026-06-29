@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; trybuild harness in tests/derive_event_sourced_errors.rs uses panic! internally to surface fixture mismatches; test bodies follow panic-as-assertion idiom.
-#![allow(clippy::panic)]
 //! Compile-fail coverage for the `#[derive(EventSourced)]` attribute contract.
 //! Harness pattern: Fault-Injection Harness (compile-fail lane).
 //!

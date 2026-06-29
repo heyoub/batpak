@@ -8,11 +8,23 @@ use tempfile::TempDir;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
+macro_rules! single_entity_state_contract {
+    ($key_space:literal) => {
+        const STATE_CONTRACT: crate::event::ProjectionStateContract =
+            crate::event::ProjectionStateContract::single_entity($key_space);
+
+        fn state_extent(&self) -> crate::event::StateExtent {
+            crate::event::StateExtent::single_entity()
+        }
+    };
+}
+
 #[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
 struct Counter;
 
 impl EventSourced for Counter {
     type Input = crate::event::JsonValueInput;
+    single_entity_state_contract!("projection-flow-counter");
 
     fn apply_event(&mut self, event: &Event<serde_json::Value>) {
         std::hint::black_box(event.event_kind());
@@ -78,7 +90,7 @@ fn elapsed_us_converts_nanoseconds_by_division() {
 
 fn append_counter_event(store: &Store<Open>, entity: &str) -> TestResult {
     let coord = crate::coordinate::Coordinate::new(entity, "scope:test")?;
-    store.append(
+    let _ = store.append(
         &coord,
         Counter::relevant_event_kinds()[0],
         &serde_json::json!({"n": 1}),
@@ -86,7 +98,7 @@ fn append_counter_event(store: &Store<Open>, entity: &str) -> TestResult {
     Ok(())
 }
 
-fn replay_context_for<State>(
+fn replay_context_for<State: crate::store::StoreState>(
     store: &Store<State>,
     entity: &str,
     type_id: std::any::TypeId,
@@ -124,7 +136,7 @@ fn projection_replay_plan_matches_legacy_stream_filtering() -> TestResult {
         (skipped, serde_json::json!({"n": 2})),
         (kept, serde_json::json!({"n": 3})),
     ] {
-        store.append(&coord, kind, &payload)?;
+        let _ = store.append(&coord, kind, &payload)?;
     }
 
     let Some(plan) = store
@@ -274,7 +286,7 @@ fn projection_timings_cold_path_breakdown() -> TestResult {
     let coord = crate::coordinate::Coordinate::new("entity:timed", "scope:test")?;
     let kind = EventKind::custom(0xF, 1);
     for i in 0..1_000u32 {
-        store.append(&coord, kind, &serde_json::json!({"i": i}))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({"i": i}))?;
     }
 
     // Close and reopen to get a true cold path
@@ -451,6 +463,7 @@ fn incremental_projection_applies_events_after_cached_watermark() -> TestResult 
     }
     impl EventSourced for IncCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-incremental-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(IncCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -483,8 +496,8 @@ fn incremental_projection_applies_events_after_cached_watermark() -> TestResult 
 
     let coord = Coordinate::new("entity:inc", "scope:test").expect("coordinate");
     let kind = EventKind::custom(0xF, 1);
-    store.append(&coord, kind, &serde_json::json!({ "x": 1 }))?;
-    store.append(&coord, kind, &serde_json::json!({ "x": 2 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 1 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 2 }))?;
 
     // First project: cache miss → full replay → external cache populated at the
     // current watermark (count == 2).
@@ -492,7 +505,7 @@ fn incremental_projection_applies_events_after_cached_watermark() -> TestResult 
     assert_eq!(first, Some(IncCounter { count: 2 }));
 
     // Commit one more event past the cached watermark.
-    store.append(&coord, kind, &serde_json::json!({ "x": 3 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 3 }))?;
 
     // Second project: cache hit at the stale watermark + incremental enabled, so
     // `apply_incremental_events` must fold the single post-watermark event via
@@ -528,6 +541,7 @@ fn external_cache_path_full_replays_for_non_incremental_type() -> TestResult {
     }
     impl EventSourced for NonIncCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-non-incremental-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(NonIncCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -577,8 +591,8 @@ fn external_cache_path_full_replays_for_non_incremental_type() -> TestResult {
 
     let coord = Coordinate::new("entity:noninc", "scope:test").expect("coordinate");
     let kind = EventKind::custom(0xF, 1);
-    store.append(&coord, kind, &serde_json::json!({ "x": 1 }))?;
-    store.append(&coord, kind, &serde_json::json!({ "x": 2 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 1 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 2 }))?;
 
     // First project: cache miss -> full replay -> external cache populated at W2
     // (count == 2), and the group-local slot is warmed at W2.
@@ -586,7 +600,7 @@ fn external_cache_path_full_replays_for_non_incremental_type() -> TestResult {
     assert_eq!(first, Some(NonIncCounter { count: 2 }));
 
     // Commit one more event past the cached watermark (W3).
-    store.append(&coord, kind, &serde_json::json!({ "x": 3 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "x": 3 }))?;
 
     // Second project: the stale external row at W2 + a non-incremental type must
     // take FULL REPLAY (count == 3 from on-disk events).
@@ -631,6 +645,7 @@ fn maybe_stale_external_cache_age_boundary_is_pinned() -> TestResult {
     }
     impl EventSourced for AgeCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-age-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(AgeCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -657,8 +672,8 @@ fn maybe_stale_external_cache_age_boundary_is_pinned() -> TestResult {
 
     let coord = Coordinate::new("entity:agecmp", "scope:test").expect("coordinate");
     let kind = Counter::relevant_event_kinds()[0];
-    store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
 
     // First project warms the external cache at cached_at_us == 0 with count 2.
     // (Counter is non-incremental, so the second project routes through the
@@ -669,7 +684,7 @@ fn maybe_stale_external_cache_age_boundary_is_pinned() -> TestResult {
     assert_eq!(first, Some(AgeCounter { count: 2 }));
 
     // Disk advances past the cached watermark: a full replay now yields 3.
-    store.append(&coord, kind, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 3 }))?;
 
     // age = 999_999 < 1_000_000 -> FRESH -> serve cached 2.
     // Kills `* -> +` (threshold 2000 -> stale -> 3) and `* -> /`
@@ -720,6 +735,7 @@ fn external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed(
     }
     impl EventSourced for FreshnessCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-freshness-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(FreshnessCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -739,8 +755,8 @@ fn external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed(
 
     let coord = Coordinate::new("entity:freshobs", "scope:test").expect("coordinate");
     let kind = FreshnessCounter::relevant_event_kinds()[0];
-    store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
 
     // ---- FRESH branch (meta.watermark == replay.watermark) ----
     // First run warms the external cache at the current watermark (W2). Close and
@@ -772,7 +788,7 @@ fn external_cache_hit_observed_freshness_distinguishes_fresh_from_stale_allowed(
     // wide age window so the (older-watermark) cached row is still age-fresh:
     // is_fresh == true, but meta.watermark (2) != replay.watermark (3) -> the
     // line-607 else arm yields StaleAllowed. The served value is the cached 2.
-    store.append(&coord, kind, &serde_json::json!({ "n": 3 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 3 }))?;
     let (stale_state, stale_report) = store.project_run_evidence::<FreshnessCounter>(
         "entity:freshobs",
         &Freshness::MaybeStale {
@@ -818,6 +834,7 @@ fn ahead_of_disk_external_cache_row_is_not_served_on_freshness_path() -> TestRes
     }
     impl EventSourced for AheadCounter {
         type Input = crate::event::JsonValueInput;
+        single_entity_state_contract!("projection-flow-ahead-counter");
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             Some(AheadCounter {
                 count: u32::try_from(events.len()).expect("test uses < 2^32 events"),
@@ -838,8 +855,8 @@ fn ahead_of_disk_external_cache_row_is_not_served_on_freshness_path() -> TestRes
     let coord = Coordinate::new("entity:ahead", "scope:test").expect("coordinate");
     let kind = AheadCounter::relevant_event_kinds()[0];
     // Disk holds two events -> the honest projection is count 2.
-    store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
-    store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 1 }))?;
+    let _ = store.append(&coord, kind, &serde_json::json!({ "n": 2 }))?;
 
     // Forge an external cache row that is AHEAD of disk: it claims a future
     // watermark (u64::MAX, guaranteed > the current disk watermark) and a bogus

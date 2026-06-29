@@ -53,7 +53,7 @@ fn check_no_live_spec_markers(repo_root: &Path, tracked_files: &[PathBuf]) -> Re
             || rel.starts_with("tests/")
             || rel.starts_with("crates/core/benches/")
             || rel.starts_with("benches/")
-            || rel.starts_with("crates/core/examples/")
+            || rel.starts_with("crates/batpak-examples/src/bin/")
             || rel.starts_with("examples/")
             || rel.starts_with("traceability/")
             || rel.starts_with("cookbook/");
@@ -86,16 +86,19 @@ fn check_no_legacy_topology_or_replay_names(
         ),
         (
             "ViewConfig",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bViewConfig\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),
         (
             "ProjectionMode",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bProjectionMode\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),
         (
             "ValueInput",
+            // justifies: INV-LITERAL-REGEX-UNWRAP-SAFE; literal regex pattern is compile-time-constant in tools/integrity/src/architecture_lints/repo_hygiene.rs, unwrap safe by construction
             Regex::new(r"\bValueInput\b")
                 .expect("internal regex is a compile-time constant and will compile"),
         ),
@@ -110,21 +113,21 @@ fn check_no_legacy_topology_or_replay_names(
         }
         let rel = relative(repo_root, path);
         let is_live_surface = rel == "README.md"
-            || rel == "FACTORY.md"
-            || rel == "MODEL.md"
-            || rel == "INVARIANTS.md"
-            || rel == "BATTERIES.md"
-            || rel == "TERMINALS.md"
-            || rel == "EVENTS.md"
-            || rel == "RECEIPTS.md"
-            || rel == "CIRCUITS.md"
-            || rel == "REPLAY.md"
-            || rel == "PROJECTIONS.md"
-            || rel == "INTEGRATION.md"
-            || rel == "CONFORMANCE.md"
+            || rel == "01_FACTORY.md"
+            || rel == "02_MODEL.md"
+            || rel == "03_INVARIANTS.md"
+            || rel == "04_BATTERIES.md"
+            || rel == "05_TERMINALS.md"
+            || rel == "06_EVENTS.md"
+            || rel == "07_RECEIPTS.md"
+            || rel == "08_CIRCUITS.md"
+            || rel == "09_REPLAY.md"
+            || rel == "10_PROJECTIONS.md"
+            || rel == "11_INTEGRATION.md"
+            || rel == "12_CONFORMANCE.md"
             || rel.starts_with("crates/core/src/")
             || rel.starts_with("src/")
-            || rel.starts_with("crates/core/examples/")
+            || rel.starts_with("crates/batpak-examples/src/bin/")
             || rel.starts_with("examples/")
             || rel.starts_with("crates/core/tests/")
             || rel.starts_with("tests/");
@@ -345,12 +348,7 @@ fn check_bidirectional_substrate_lane_terms(
     repo_root: &Path,
     tracked_files: &[PathBuf],
 ) -> Result<()> {
-    let forbidden_substrate_ops = [
-        "mission.replay",
-        "moonwalker.query",
-        "workflow.events",
-        "receipt.walk",
-    ];
+    let forbidden_substrate_ops = ["mission.replay", "workflow.events", "receipt.walk"];
     for path in tracked_files {
         let rel = relative(repo_root, path);
         if rel == "tools/integrity/src/architecture_lints/repo_hygiene.rs" {
@@ -360,10 +358,8 @@ fn check_bidirectional_substrate_lane_terms(
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or_default();
-        let is_substrate_wire_surface = rel.starts_with("crates/hbat/")
-            || rel.starts_with("crates/netbat/")
-            || rel.starts_with("crates/syncbat/")
-            || rel.starts_with("bpk-ts/");
+        let is_substrate_wire_surface =
+            rel.starts_with("crates/netbat/") || rel.starts_with("crates/syncbat/");
         if is_substrate_wire_surface && matches!(ext, "rs" | "ts" | "json" | "md") {
             let content =
                 fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
@@ -379,7 +375,11 @@ fn check_bidirectional_substrate_lane_terms(
 
         let is_live_doc = matches!(
             rel.as_str(),
-            "REPLAY.md" | "INTEGRATION.md" | "EVENTS.md" | "TERMINALS.md" | "CONFORMANCE.md"
+            "09_REPLAY.md"
+                | "11_INTEGRATION.md"
+                | "06_EVENTS.md"
+                | "05_TERMINALS.md"
+                | "12_CONFORMANCE.md"
         );
         if is_live_doc && ext == "md" {
             let content =

@@ -9,7 +9,7 @@ invariants.
 
 ```bash
 cargo xtask setup --install-tools
-cargo run --example quickstart
+cargo run -p batpak-examples --bin quickstart
 ```
 
 If you just want the crate:
@@ -51,7 +51,7 @@ library boundary, keep a checked-in table such as `kinds.yaml`, and allocate
 `validate_event_payload_registry()` in integration tests or set
 `StoreConfig::with_event_payload_validation(EventPayloadValidation::FailFast)`
 when a duplicate linked payload kind must reject store open instead of only
-emitting the default one-time warning. See `bpk-lib/crates/core/examples/cross_crate_payloads.rs`
+emitting the default one-time warning. See `crates/core/tests/event_payload_registry_policy.rs`
 for the startup validation pattern.
 
 ## Append And Query
@@ -195,7 +195,7 @@ let opts = AppendOptions::new().with_receipt_extension(key, value);
 store.append_typed_with_options(&coord, &payload, opts)?;
 ```
 
-batpak treats all extension namespaces as opaque substrate cargo. A `pcp.*`
+batpak treats all extension namespaces as opaque substrate cargo. An external-profile
 extension and an application extension are persisted, signed, replayed, and
 reconstructed by the same generic mechanism; namespace-aware code outside
 batpak decides what those bytes mean.

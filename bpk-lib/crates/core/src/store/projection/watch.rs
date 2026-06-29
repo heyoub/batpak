@@ -103,6 +103,7 @@ impl From<StoreError> for CursorWatcherError {
 /// Pull-based: the caller drives the loop by calling [`recv()`](Self::recv).
 /// Each `recv()` blocks until a new event arrives for the entity, re-projects,
 /// and returns the state materialized at the next honest generation.
+#[must_use = "dropping a ProjectionWatcher stops watching; hold it and call recv() to observe updated projections"]
 pub struct ProjectionWatcher<T, C: Canal = Subscription> {
     canal: C,
     store: Arc<Store<Open>>,
@@ -354,6 +355,8 @@ mod tests {
 
     impl EventSourced for CountAll {
         type Input = JsonValueInput;
+        const STATE_CONTRACT: crate::event::ProjectionStateContract =
+            crate::event::ProjectionStateContract::single_entity("projection-watch-count-all");
 
         fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
             (!events.is_empty()).then_some(Self(events.len() as u64))
@@ -365,6 +368,10 @@ mod tests {
 
         fn relevant_event_kinds() -> &'static [EventKind] {
             &[]
+        }
+
+        fn state_extent(&self) -> crate::event::StateExtent {
+            crate::event::StateExtent::single_entity()
         }
     }
 
@@ -400,13 +407,15 @@ mod tests {
         let coord = Coordinate::new("watch:startup-race", "watch:scope").expect("coord");
         let sub = store.subscribe_lossy(&crate::coordinate::Region::entity("watch:startup-race"));
 
-        store
-            .append(
-                &coord,
-                EventKind::custom(0xF, 1),
-                &serde_json::json!({"n": 1}),
-            )
-            .expect("append");
+        drop(
+            store
+                .append(
+                    &coord,
+                    EventKind::custom(0xF, 1),
+                    &serde_json::json!({"n": 1}),
+                )
+                .expect("append"),
+        );
 
         let mut watcher = ProjectionWatcher::<CountAll>::new(
             sub,

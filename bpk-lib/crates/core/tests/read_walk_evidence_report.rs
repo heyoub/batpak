@@ -4,19 +4,17 @@
 //! incorrect limit/drop counts, unsorted findings, and body-hash drift.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::{
     ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
     ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,
     ReadWalkReplayMode, ReadWalkReportBody, ReadWalkReportError, ReadWalkRequest,
     ReadWalkSourceRef, READ_WALK_REPORT_SCHEMA_VERSION,
 };
+use batpak_testkit::prelude::*;
 use std::error::Error;
 use std::time::Duration;
-use support::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 type TestResult = Result<(), Box<dyn Error>>;
 
@@ -24,7 +22,7 @@ fn append_events(store: &Store<Open>, entity: &str, scope: &str, count: u64) -> 
     let coord = Coordinate::new(entity, scope)?;
     let kind = EventKind::custom(0xE, 0x41);
     for n in 0..count {
-        store.append(&coord, kind, &serde_json::json!({ "n": n }))?;
+        let _ = store.append(&coord, kind, &serde_json::json!({ "n": n }))?;
     }
     Ok(())
 }
@@ -130,13 +128,7 @@ fn read_walk_visibility_matches_plain_query_across_hidden_gap() -> TestResult {
         plain_ids, evidence_ids,
         "PROPERTY: read-walk evidence must apply the same hidden-range visibility predicate as plain query"
     );
-    assert_eq!(
-        plain_ids,
-        vec![
-            u128::from(before_gap.event_id),
-            u128::from(after_gap.event_id)
-        ]
-    );
+    assert_eq!(plain_ids, vec![before_gap.event_id, after_gap.event_id]);
     assert_eq!(report.body.matched_count, 2);
     assert_eq!(report.body.returned_count, 2);
     assert!(
@@ -241,7 +233,7 @@ fn read_walk_report_round_trips_through_canonical_encoding() -> TestResult {
             .with_fact(batpak::coordinate::KindFilter::Exact(EventKind::custom(
                 0xE, 0x41,
             )))
-            .with_clock_range((0, 9)),
+            .with_clock_range(ClockRange::new(0, 9).expect("valid clock range")),
         limit: Some(3),
         include_proof_refs: true,
         freshness_intent: Freshness::MaybeStale { max_stale_ms: 25 },

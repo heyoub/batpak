@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-IDEMPOTENCY-DURABLE-WINDOW; integration tests rely on expect/panic; clippy allowances are standard for harness tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! `IdempotencyKey::for_operation` determinism + collision-resistance.
 //!
 //! PROVES: INV-IDEMPOTENCY-DURABLE-WINDOW (operation-identity derivation).

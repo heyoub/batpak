@@ -1,21 +1,30 @@
 - id: INV-NO-TOKIO-PROD
   statement: Production dependencies remain runtime-agnostic; Tokio stays out of non-dev dependencies.
+  witness_test: tools/integrity/src/no_runtime_gate.rs::planted_runtime_dep_is_rejected
   artifacts:
     - ART-CARGO
     - ART-BUILD-RS
 - id: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT
   statement: The single typed-decode seam keeps decoding historical payload bytes as schemas evolve - additive-with-default is absorbed by serde, an older stored payload_version is lifted to the current shape by the registered Upcast chain (in-memory only, stored bytes never rewritten), and a stored version newer than the decoder is a hard FutureVersion error; adding the payload_version header field moves no event content hash or signature.
+  witness_test: crates/core/tests/schema_evolution.rs::upcast_chain_lifts_frozen_v1_into_current_v2_struct
   artifacts:
     - ART-EVENT-PAYLOAD-DECODE-SEAM
     - ART-EVENT-PAYLOAD-FROZEN-GOLDENS
     - ART-SCHEMA-EVOLUTION-DOC
 - id: INV-IDEMPOTENCY-DURABLE-WINDOW
   statement: A keyed append is deduplicated as a true no-op via a durable sidecar (index.idemp - magic FBATID, versioned, crc32fast CRC, atomic write) that survives retention compaction, cold-start, and snapshot independent of event eviction and is restored unconditionally (never rebuilt from segment scan); growth is bounded by a window-priority hybrid where the window is inviolable (a key whose recorded global sequence is within keep_sequences of the frontier is never evicted by the soft max_keys cap, which may only trim out-of-window keys), so a retry of a within-window key is always a no-op regardless of load while a corrupt or missing sidecar degrades to empty (logged, never crashing) and a future on-disk version is a hard error; IdempotencyKey::for_operation derives operation identity from a length-delimited blake3 over domain plus components and is not a payload content hash.
+  witness_test: crates/core/tests/idempotency_durable_store.rs::keyed_retry_is_noop_after_close_and_reopen
   artifacts:
     - ART-IDEMPOTENCY-DURABLE-SOURCE
     - ART-IDEMPOTENCY-DURABLE-TESTS
+- id: INV-ONDISK-FORWARD-COMPAT-CANONICAL
+  statement: Every on-disk format declared in the compat matrix opens or fails with exactly one canonical typed error per (writer_version, reader_version) pair - never silent corruption and never a silent rebuild-from-scan downgrade. A reader opening an artifact written at its own live version succeeds (the OpensOK self-row), and an artifact written at a strictly-newer version is a canonical typed refusal. The governed formats and their future-version refusals are - mmap-index (index.fbati, StoreError MmapFutureVersion), checkpoint (index.ckpt, StoreError CheckpointFutureVersion), idempotency-index (index.idemp, StoreError IdempotencyFutureVersion), and visibility-ranges (visibility_ranges.fbv, StoreError HiddenRangesFutureVersion); each refusal is propagated out of cold-start rather than degrading to a scan, while corrupt or older artifacts keep their graceful-rebuild path. The matrix is the live contract, so a bump to an on-disk version const with no matching matrix row is caught because the self-row reader_version is cross-checked against the live supported version. The segment/.fbat format is intentionally excluded - its version is msgpack-encoded (no fixed-offset forge) and a future-version segment already fails closed via CorruptSegment with no silent-degrade path.
+  witness_test: crates/core/tests/compat_matrix.rs::compat_matrix_rows_match_declared_outcomes
+  artifacts:
+    - ART-COMPAT-MATRIX
 - id: INV-SYNCBAT-DISPATCH-RECEIPTS
   statement: syncbat checkout dispatch emits at most one completed or failed runtime receipt for resolved operations, emits no receipt for unknown operations, and fails closed when the configured receipt sink fails.
+  witness_test: crates/syncbat/tests/runtime.rs::receipt_sink_failure_is_fail_closed
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
@@ -23,6 +32,15 @@
     - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC
   statement: syncbat durable register catalog rows fold in store sequence order, reject malformed or conflicting lifecycle transitions, and rebuild the same active register after reopen.
+  witness_test: crates/syncbat/tests/register_store_catalog.rs::rebuilt_register_survives_store_reopen
+  artifacts:
+    - ART-SYNCBAT-SOURCE
+    - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
+    - ART-ADR-SYNCBAT-CONTRACT
+- id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT
+  statement: syncbat operation descriptors declare an effect row consistent with their EffectClass (validated at registration); cross-module effect conflicts are rejected at composition; and every observed effect axis (reads_events, appends_events, queries_projections, emits_receipts, uses_host_controls) flows only through a Ctx capability handle that performs the effect through the runtime-owned effect backend and records it in the same step, so the observed row is authoritative. checkout fails closed with a denied receipt when an operation observes an effect outside its declared row, and an effect attempt with no backend bound or with a rejecting backend fails closed rather than recording the observation.
+  witness_test: crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_read_event_outside_declared_row
   artifacts:
     - ART-SYNCBAT-SOURCE
     - ART-SYNCBAT-TESTS
@@ -30,6 +48,7 @@
     - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-NETBAT-LINE-PROTOCOL-STABLE
   statement: netbat request and response frames keep stable NETBAT/1 CALL and OK/ERR line shapes, bounded decode behavior, and deterministic error-code mapping.
+  witness_test: crates/netbat/tests/boundary.rs::encodes_request_with_stable_versioned_line_protocol
   artifacts:
     - ART-NETBAT-SOURCE
     - ART-NETBAT-TESTS
@@ -37,44 +56,42 @@
     - ART-ADR-NETBAT-CONTRACT
 - id: INV-NETBAT-BOUNDARY-THIN
   statement: netbat remains a sync-first boundary over syncbat; it validates and frames calls but does not own handler execution, receipt emission, durable writes, async runtime policy, or application protocol semantics.
+  witness_test: crates/netbat/tests/boundary.rs::inspects_borrowed_syncbat_core_without_invoking_handlers
   artifacts:
     - ART-NETBAT-SOURCE
     - ART-NETBAT-TESTS
     - ART-ADR-NETBAT-CONTRACT
 - id: INV-BIDIRECTIONAL-SUBSTRATE-LANE
   statement: Any non-Rust terminal that can commit events must expose bounded domain-neutral enumeration by coordinate, region, and global commit order, or docs must explicitly state replay requires caller-supplied event IDs and is not substrate-complete.
+  witness_test: crates/core/tests/read_api_pagination.rs::query_entries_after_returns_ascending_global_sequence_order
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL
-  statement: Traversal terminals return substrate metadata only; they must not expose Moonwalker missions, workflow verbs, movement-graph semantics, receipt_kind dispatch, decoded envelope bodies, or domain replay names.
+  statement: Traversal terminals return substrate metadata only; they must not expose any downstream domain entities, workflow verbs, application graph semantics, receipt_kind dispatch, decoded envelope bodies, or domain replay names.
+  witness_test: crates/core/tests/read_api_pagination.rs::query_entries_after_applies_region_filtering
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
+    - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH
   statement: External replay may use caches or indexes, but authoritative reconstruction must be possible through event.query plus event.get plus envelope decoding above batpak; sidecar indexes are projections, not source truth.
+  witness_test: crates/core/tests/replay_consistency.rs::authoritative_reconstruction_survives_sidecar_deletion
   artifacts:
-    - ART-HBAT-SOURCE
-    - ART-HBAT-TESTS
-    - ART-HBAT-MANIFEST-EXPORT
     - ART-STORE-QUERY-TRAVERSAL
     - ART-STORE-QUERY-TRAVERSAL-TESTS
     - ART-DX-DOCS
 - id: INV-STORE-SYNC-ONLY
   statement: The Store public API remains synchronous.
+  witness_test: tools/integrity/src/store_sync_gate_tests.rs::every_async_store_evasion_is_rejected
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-CONFIG
     - ART-ADR-SYNC
 - id: INV-STORE-LIFECYCLE-HONESTY
   statement: Store sync and drop paths must surface writer failures honestly and send best-effort shutdown rather than silently succeeding.
+  witness_test: crates/core/src/store/runtime_contracts.rs::sync_reports_writer_crash_when_channel_is_closed
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-ERROR
@@ -82,22 +99,36 @@
     - ART-STORE-RUNTIME-CONTRACTS
 - id: INV-STORE-ERROR-TAXONOMY
   statement: Store failure paths must preserve structured error variants instead of laundering failures into defaults or strings.
+  witness_test: crates/core/tests/store_properties.rs::errors_propagate_not_launder_to_defaults
   artifacts:
     - ART-STORE-ERROR
     - ART-STORE-PROPERTIES
+- id: INV-PAYLOAD-VERSION-NONZERO
+  statement: >-
+    A typed event payload always carries a non-zero PAYLOAD_VERSION in the event header; the reserved
+    legacy sentinel 0 marks an untyped/legacy frame, so the typed-append seam rejects any payload that
+    forges PAYLOAD_VERSION = 0 (the derive macro forbids it at compile time and the runtime seam
+    forbids a hand-written impl), keeping typed frames distinguishable from legacy frames on read.
+  artifacts:
+    - ART-PAYLOAD-VERSION-NONZERO-TEST
+    - ART-EVENT-PAYLOAD-DECODE-SEAM
+  witness_test: crates/core/tests/store_append_behavior.rs::typed_append_rejects_manual_payload_version_zero
 - id: INV-PAYLOAD-LENGTH-EXACT
   statement: Serialized payload lengths must be computed exactly and rejected when they exceed the wire contract.
   artifacts:
     - ART-STORE-APPEND
     - ART-STORE-RUNTIME-CONTRACTS
+  witness_test: crates/core/src/store/runtime_contracts.rs::checked_payload_len_returns_exact_serialized_length
 - id: INV-CLOCK-NOW-US-LIVE
   statement: The store wall-clock helper must produce positive microsecond timestamps that advance with real time.
+  witness_test: crates/core/src/store/runtime_contracts.rs::now_us_moves_forward_over_real_time
   artifacts:
     - ART-STORE-CONFIG
     - ART-STORE-PLATFORM
     - ART-STORE-RUNTIME-CONTRACTS
 - id: INV-PLATFORM-EVIDENCE-NOT-MEANING
   statement: store::platform may perform target-sensitive machine-contact operations and emit descriptive evidence/profile records, but it must not define batpak durability, replay, visibility, or admission semantics. Store, cold-start, segment, and frontier logic own those guarantees; configured profile mismatch is a hard open-time admission failure.
+  witness_test: crates/core/tests/platform_backend.rs::platform_profile_match_allows_open_and_mismatch_fails_before_lifecycle
   artifacts:
     - ART-STORE-PLATFORM
     - ART-STORE-CONFIG
@@ -109,16 +140,19 @@
     - ART-BUILD-RS
 - id: INV-RECEIPT-SEALED
   statement: Receipts are only constructible by gate evaluation, not by external callers.
+  witness_test: crates/core/tests/typestate_safety.rs::compile_fail_tests
   artifacts:
     - ART-GUARD-RECEIPT
     - ART-TYPESTATE-TESTS
 - id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT
   statement: Dangerous test hooks are not exposed in default production builds.
+  witness_test: tools/integrity/src/dangerous_hooks_contract.rs::dangerous_hooks_default_feature_and_cfg_contract_rejects_planted_exposure
   artifacts:
     - ART-STORE-DANGEROUS-TEST-HOOKS
     - ART-STORE-ADVANCED
 - id: INV-CACHE-CAPABILITIES-EXPLICIT
   statement: Cache prefetch behavior must be discoverable through an explicit capability surface.
+  witness_test: crates/core/tests/projection_cache.rs::nocache_prefetch_is_noop
   artifacts:
     - ART-PROJECTION
     - ART-STORE-PROJECTION
@@ -128,13 +162,21 @@
   artifacts:
     - ART-PROJECTION
     - ART-PROJECTION-TESTS
+  witness_test: crates/core/tests/projection_cache.rs::native_delete_prefix_is_idempotent
 - id: INV-TRACEABILITY-COMPLETE
   statement: Each important requirement, invariant, and flow links to concrete proving artifacts, and every artifact participates in that graph.
+  # Cited witness covers the first (coverage) clause: a registered example with no
+  # concept_catalog row is a red `expect_err`. PARTIAL: the second clause ("every
+  # artifact participates in the graph") is enforced inline in traceability.rs::run
+  # (the "artifact {} is orphaned" check) but has NO dedicated red fixture that
+  # plants an orphan artifact and asserts rejection — candidate GateNegativePath.
+  witness_test: tools/integrity/src/traceability.rs::rejects_uncovered_registered_example
   artifacts:
     - ART-TRACEABILITY
     - ART-TRACEABILITY-CHECK
 - id: INV-CONCURRENCY-SCHEDULE-PROOF
   statement: Idempotency, compare-and-set, restart-budget, and compaction-exclusivity semantics remain valid under deterministic schedule exploration.
+  witness_test: crates/core/tests/deterministic_concurrency.rs::loom_idempotency_single_winner_under_race
   artifacts:
     - ART-DETERMINISTIC-CONCURRENCY-TESTS
     - ART-LOOM-CI-LANE
@@ -142,12 +184,14 @@
     - ART-STORE-LIFECYCLE
 - id: INV-OBSERVABILITY-FAILURE-PATHS
   statement: Named flows emit enough telemetry to distinguish successful execution from cache-degraded or causal-reaction execution paths.
+  witness_test: crates/core/tests/observability_flows.rs::project_failure_paths_emit_cache_warnings_without_hiding_flow
   artifacts:
     - ART-OBSERVABILITY-TESTS
     - ART-STORE-PROJECTION
     - ART-STORE-MOD
 - id: INV-CANONICAL-CONTAINER-CI
   statement: The canonical Linux CI path executes inside the checked-in devcontainer image rather than a separately hand-installed host environment.
+  witness_test: tools/integrity/src/ci_container_contract.rs::canonical_container_contract_rejects_host_cargo_fast_lane
   artifacts:
     - ART-DEVCONTAINER
     - ART-DEVCONTAINER-RUNNER
@@ -158,8 +202,10 @@
     - ART-STORE-MOD
     - ART-STORE-APPEND
     - ART-GROUP-COMMIT-TESTS
+  witness_test: crates/core/tests/group_commit_crash.rs::partial_batch_crash_idempotent_retry
 - id: INV-CHECKPOINT-V2-INTERNED
   statement: Index checkpoint v2 and later persist an interner snapshot and use InternId u32s instead of raw strings, saving ~22 bytes per entry and enabling fast cold-start restore. SIDX footers provide per-segment fast path.
+  witness_test: crates/core/src/store/segment/sidx/tests.rs::footer_round_trip
   artifacts:
     - ART-STORE-CHECKPOINT
     - ART-STORE-INTERNER
@@ -170,8 +216,10 @@
     - ART-SCHEMA-SNAPSHOT
     - ART-CANONICAL-PATCH-STABILITY-TESTS
     - ART-ADR-CANONICAL-ENCODING
+  witness_test: crates/core/tests/canonical_patch_stability.rs::schema_snapshot_report_body_canonical_bytes_are_patch_stable_for_equal_logical_inputs
 - id: INV-MMAP-SEALED-READS
   statement: Sealed segment reads use zero-copy memory-mapped I/O via memmap2. Active segment uses FD cache with pread (Unix) or seek+read (Windows).
+  witness_test: crates/core/src/store/segment/scan/tests.rs::sealed_mmap_and_fd_paths_return_identical_bytes
   artifacts:
     - ART-STORE-PLATFORM
     - ART-STORE-SCAN
@@ -183,6 +231,7 @@
     cumulative fallback totals/histograms persisted through mmap/checkpoint
     artifacts; mutable opens also append one durable SYSTEM_OPEN_COMPLETED
     lifecycle event while read-only opens remain side-effect free.
+  witness_test: crates/core/tests/mmap_cold_start.rs::mutable_open_appends_system_open_completed_and_read_only_does_not
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-REBUILD
@@ -191,11 +240,13 @@
     - ART-OBSERVABILITY-TESTS
 - id: INV-COLUMNAR-REPLACES-DASHMAP
   statement: The scan index always keeps the base AoS by_fact and scope_entities maps, and may additionally fan out into SoA, SoAoS, and AoSoA64 overlays. IndexTopology is the live public model for enabling those overlays.
+  witness_test: crates/core/src/store/index/columnar/tests.rs::scan_index_columnar_scope_entity_set_uses_base_aos_view
   artifacts:
     - ART-STORE-COLUMNAR
     - ART-STORE-CONFIG
 - id: INV-MULTI-VIEW-PUBLISH-AFTER-VIEW-SYNC
   statement: Writer visibility publish happens only after every active index view has been populated; readers must observe either all view updates for a sequence range or none of them.
+  witness_test: crates/core/tests/writer_command_flow.rs::notification_is_not_observable_before_published_visibility
   artifacts:
     - ART-STORE-INDEX
     - ART-STORE-WRITER
@@ -203,6 +254,7 @@
     - ART-ADR-CONTROL-PLANE
 - id: INV-FENCE-CANCELLED-STAYS-HIDDEN
   statement: Cancelling a public visibility fence leaves its writes durable but hidden, and that hidden-range state survives reopen, snapshot export, and fast-start restore.
+  witness_test: crates/core/tests/fence_cancellation.rs::cancelled_fence_hides_batch_before_and_after_reopen
   artifacts:
     - ART-STORE-INDEX
     - ART-STORE-WRITER
@@ -211,13 +263,135 @@
     - ART-STORE-REBUILD
     - ART-CONTROL-PLANE-TESTS
     - ART-ADR-CONTROL-PLANE
+- id: INV-FORK-ISOLATION
+  statement: >-
+    Store fork materializes a self-contained directory at a drained visibility
+    boundary: immutable sealed segments may be shared by reflink or hardlink,
+    but the active segment and mutable correctness authorities such as
+    index.idemp and visibility_ranges.fbv are deep-copied, regenerable caches
+    are excluded by default, symlink leaves are rejected, and writes or
+    visibility cancellations after the fork cannot mutate the fork view.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-STORE-FORK-IMPORT-TESTS
+    - ART-STORE-FORK-BENCH
+    - ART-STORE-FORK-IMPORT-EXAMPLES
+  witness_test: crates/core/tests/store_fork_isolation.rs::fork_isolates_parent_writes_on_fresh_reopen
+- id: INV-FORK-HOSTILE-FS-REFUSAL
+  statement: >-
+    Store fork fails closed under hostile filesystem conditions: a symlink
+    destination leaf is refused with an IO error, a destination canonicalizing
+    to the source data dir is refused as InvalidInput, a destination holding
+    stale store artifacts is positively cleared (DestinationCleared) before the
+    fork so the result is the source state rather than a merge, and an ENOSPC
+    that strikes mid-copy returns a StorageFull error with no openable partial
+    fork published at the destination.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-FORK-HOSTILE-TESTS
+  witness_test: crates/core/tests/fork_hostile_fs.rs::fork_enospc_mid_copy_publishes_nothing
+- id: INV-FORK-CRASH-ATOMIC
+  statement: >-
+    Store fork survives StoreFs-level seeded faults: after SimFs crash, a fork
+    destination must classify as exactly one of {CommittedPrefix | RolledBack |
+    CanonicalRefusal} via the recovery oracle — never an illegal half-fork that
+    open() accepts as valid corrupted state.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-FORK-UNDER-FAULT-TESTS
+  witness_test: crates/core/tests/fork_under_fault.rs::fork_under_fault_is_legal_and_deterministic
+- id: INV-IMPORT-CONTENT-ISOMORPHISM
+  statement: >-
+    Store import is re-application rather than merge: source event identity,
+    sequence, and causation are regenerated or cleared, while raw MessagePack
+    payload bytes, content hashes, correlation metadata, deterministic
+    source-namespace idempotency keys, and provenance receipt extensions are
+    preserved across chunking, replay, and compaction.
+  artifacts:
+    - ART-STORE-FORK-IMPORT-SOURCE
+    - ART-STORE-FORK-IMPORT-TESTS
+    - ART-STORE-FORK-IMPORT-EXAMPLES
+  witness_test: crates/core/tests/import_events.rs::import_events_reimport_is_noop_and_preserves_raw_payload_bytes
+- id: INV-IMPORT-CRASH-IDEMPOTENT
+  statement: >-
+    Import over a fault-injecting StoreFs survives crash at the durability boundary:
+    abandoning the destination without shutdown and truncating the unsynced tail must
+    leave a reopenable store whose post-crash re-import deduplicates already-applied
+    events via durable import keys while preserving raw payload bytes, content hashes,
+    and a valid per-entity hash chain.
+  witness_test: crates/core/tests/import_under_fault.rs::import_under_fault_crash_reimport_deduplicates
+  artifacts:
+    - ART-IMPORT-FAULT-TESTS
+    - ART-STORE-FORK-IMPORT-SOURCE
+- id: INV-IMPORT-NO-RUNAWAY
+  statement: >-
+    Same-store import terminates at the call-time source visible frontier: it imports
+    exactly the events present when the call began and never paginates into its own
+    freshly-appended output, even when tiny segment rotation interleaves with chunked
+    pagination.
+  witness_test: crates/core/tests/import_same_store_ceiling.rs::same_store_import_terminates_under_segment_rotation
+  artifacts:
+    - ART-IMPORT-FAULT-TESTS
+    - ART-STORE-FORK-IMPORT-SOURCE
+- id: INV-STORE-ISOMORPHISM-LAWS
+  statement: >-
+    Serialization seams that define durable store identity round-trip generated
+    values without loss: DagPosition MessagePack encoding, SIDX entry encoding,
+    lane-neutral JSON-to-MessagePack upcast, and raw imported payload hashing all
+    preserve their intended value or byte identity.
+  witness_test: crates/core/tests/isomorphism_laws.rs::dag_position_msgpack_roundtrip_is_identity
+  artifacts:
+    - ART-STORE-FORK-IMPORT-TESTS
+- id: INV-LANE-BRANCH-ISOLATION
+  statement: >-
+    DAG lanes are independent branch heads for the same entity: writer
+    prev_hash, per-lane clock/CAS state, batch staging, cold-start latest-head
+    reconstruction, query pagination, cursor delivery, and push fanout all route
+    by `(entity,lane)`, while a Region with no lane filter observes the
+    historical all-lane timeline and the lane-0 default path remains the
+    compatibility path.
+  artifacts:
+    - ART-STORE-LANE-BRANCH-SOURCE
+    - ART-STORE-LANE-BRANCH-TESTS
+    - ART-STORE-FORK-IMPORT-EXAMPLES
+  witness_test: crates/core/tests/lane_branches.rs::default_lane_zero_path_and_lane_scoped_cas
+- id: INV-PROJECTION-FUSION-EQUIVALENT
+  statement: >-
+    Fused projection replay over an entity is equivalent to the tuple of
+    separate consistent projections: one shared direct replay stream is read
+    once, each projection folds only events matching its declared
+    relevant_event_kinds, projection-applied notifications use each
+    projection's own per-lane relevant input maxima even when the projection
+    returns None, and cache watermarks remain
+    projection-specific because the fused path does not write cache rows.
+  witness_test: crates/core/tests/projection_fusion.rs::fused_projection_matches_separate_consistent_projection
+  artifacts:
+    - ART-STORE-PROJECTION-FUSION-SOURCE
+    - ART-STORE-PROJECTION-FUSION-TESTS
+- id: INV-PER-LANE-FRONTIER
+  statement: >-
+    Frontier state is a lattice with one global physical durability axis and
+    per-lane logical accepted, written, durable, visible, applied, and emitted
+    HLC tracks. The lattice ordering for lane durability and visibility is the
+    shared global_sequence axis, not wall-clock HLC ordering. For every lane,
+    accepted >= written >= durable, accepted >= visible >= applied, emitted >=
+    visible, and logical durable never exceeds the global physical durable point.
+    Lane-scoped reads and waits use the lane cursor; cancelled visibility ranges
+    are persisted with per-lane ranges over the shared global_sequence axis;
+    legacy global reads and frontier fields remain the max compatibility view.
+  artifacts:
+    - ART-STORE-LANE-FRONTIER-SOURCE
+    - ART-STORE-LANE-FRONTIER-TESTS
+  witness_test: crates/core/tests/per_lane_frontier.rs::lane_frontier_waits_are_scoped_to_lane
 - id: INV-SCHEMA-VERSION-ISOLATION
   statement: Cached projections are keyed by entity + schema_version. Different versions get separate cache slots, preventing stale cached values from being served to new code.
   artifacts:
     - ART-STORE-PROJECTION
     - ART-UNIFIED-TESTS
+  witness_test: crates/core/tests/unified_projection_red.rs::versioned_cache_key_isolates_versions
 - id: INV-REPLAY-LANE-SELECTION
   statement: Projection replay lane selection stays sealed to the built-in `ProjectionInput` modes, with `ReplayLane` naming the live default-vs-raw split and `RawMsgpackInput` remaining a real throughput lane rather than doc-only decoration.
+  witness_test: crates/core/tests/raw_projection_mode.rs::projection_input_modes_select_expected_replay_lanes
   artifacts:
     - ART-EVENT-SOURCING
     - ART-PROJECTION-TESTS
@@ -231,6 +405,7 @@
     - ART-ADR-AT-LEAST-ONCE-WITNESS
     - ART-DX-DOCS
     - ART-EXAMPLES
+  witness_test: crates/core/tests/cursor_at_least_once_witness.rs::cursor_worker_with_checkpoint_id_passes_witness
 - id: INV-BATCH-ATOMIC-VISIBILITY
   statement: Batch append events are invisible to queries, cursors, and subscriptions until the entire batch is committed, fsynced, and atomically published via SequenceGate::publish(). All read methods filter by visible_sequence. No partial batch is ever observable. Proved by loom model and concurrent-read integration test.
   artifacts:
@@ -241,17 +416,20 @@
     - ART-SUBSCRIPTION-TESTS
     - ART-DETERMINISTIC-CONCURRENCY-TESTS
     - ART-LOOM-CI-LANE
+  witness_test: crates/core/tests/atomic_batch.rs::batch_oversized_item_no_partial_visibility
 - id: INV-BATCH-CRASH-RECOVERY
   statement: Incomplete batches (BEGIN without matching COMMIT) are discarded during cold-start segment scan. Cross-segment batch state persists across segment boundaries to handle batches spanning rotation points.
   artifacts:
     - ART-STORE-SCAN
     - ART-BATCH-TESTS
+  witness_test: crates/core/tests/atomic_batch.rs::single_append_fault_at_segment_rotation_recovers
 - id: INV-PREPARED-BATCH-STAGING-EQUIVALENCE
   statement: Prepared-batch staging and fresh batch construction must commit, reopen, and publish the same runtime-visible outcomes; reused staged packets may optimize allocation but must not alter persisted or replayed semantics.
   artifacts:
     - ART-STORE-WRITER
     - ART-STORE-APPEND
     - ART-BATCH-STAGING-REGRESSION
+  witness_test: crates/core/tests/batch_staging_regression.rs::reused_and_fresh_coordinate_batches_have_identical_visibility_after_reopen
 - id: INV-POSITION-HINT-PERSISTENCE
   statement: Append position hints may supply only DAG lane/depth; writer-owned HLC wall/counter and sequence remain authoritative, and non-root lane/depth must survive live commit, mmap reopen, checkpoint reopen, SIDX-backed reconstruction, and full rebuild.
   artifacts:
@@ -265,8 +443,10 @@
     - ART-ADR-POSITION-HINTS
     - ART-DX-DOCS
     - ART-RELEASE-HISTORY
+  witness_test: crates/core/tests/dag_position_hint.rs::lane_depth_survives_store_reopen_via_checkpoint
 - id: INV-SIDX-TIMESTAMP-US-APPROXIMATION
   statement: SIDX-accelerated cold start reconstructs timestamp_us from persisted wall_ms to the nearest millisecond; this best-effort value is suitable for age/display APIs but is not a sub-millisecond ordering contract.
+  witness_test: crates/core/src/store/cold_start/row.rs::cold_start_row_to_event_header_preserves_lane_depth_and_ids
   artifacts:
     - ART-EVENT-SOURCING
     - ART-STORE-SIDX
@@ -277,29 +457,34 @@
   artifacts:
     - ART-STORE-FAULT
     - ART-STORE-CONFIG
+  witness_test: crates/core/tests/fault_hooks.rs::probabilistic_injector_and_maybe_inject_surface_faults
 - id: INV-FRONTIER-MONOTONIC
   statement: Each frontier watermark (accepted, written, durable, visible, emitted, applied) advances monotonically; advance methods take max with the proposed point and never permit backward motion.
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
     - ART-ADR-DURABLE-FRONTIER
+  witness_test: crates/core/src/store/write/writer/watermark_tests.rs::wait_for_watermark_on_lane_satisfied_at_equal_point_returns_ok
 - id: INV-FRONTIER-ORDERING
   statement: At every torn-free observation, accepted_hlc >= written_hlc >= durable_hlc, accepted_hlc >= visible_hlc >= applied_hlc, and emitted_hlc >= visible_hlc.
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-TYPES
     - ART-FRONTIER-SEMANTICS-TESTS
+  witness_test: crates/core/tests/durable_frontier_semantics_frontier.rs::frontier_api_is_public_and_returns_consistent_view
 - id: INV-FRONTIER-TORN-FREE
   statement: FrontierView is composed under a single watermark mutex acquisition; visible+emitted advances at commit time use a composite advance helper that holds the lock across both field updates.
   artifacts:
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
+  witness_test: crates/core/tests/durable_frontier_semantics_frontier.rs::concurrent_snapshot_never_observes_torn_emitted_below_visible
 - id: INV-FRONTIER-OPEN-MONOTONIC
   statement: On Store::open and Store::open_read_only, the bootstrap open_hlc satisfies open_hlc >= max_recovered_hlc and open_hlc >= last_close_hlc, where last_close_hlc is the highest HLC carried by recovered SYSTEM_CLOSE_COMPLETED lifecycle events. This monotonicity is enforced post-emit and surfaces as StoreError::InvariantViolation if violated.
   artifacts:
     - ART-FRONTIER-BOOTSTRAP
     - ART-FRONTIER-SEMANTICS-TESTS
     - ART-FRONTIER-CHAOS-TESTS
+  witness_test: crates/core/tests/durable_frontier_semantics.rs::open_after_close_advances_open_hlc_past_max_pre_close
 - id: INV-FRONTIER-APPLIED-MIN
   statement: applied_hlc equals the minimum HLC across all registered projections; with zero registered projections it remains at the bootstrap open_hlc, never drifting forward. wait_for_applied honors this min so a single lagging projection blocks the wait until it catches up.
   artifacts:
@@ -307,13 +492,16 @@
     - ART-FRONTIER-WATERMARK-STATE
     - ART-FRONTIER-SEMANTICS-TESTS
     - ART-FRONTIER-WAIT-TESTS
+  witness_test: crates/core/tests/durable_frontier_semantics_frontier.rs::applied_is_min_across_two_projections
 - id: INV-FRONTIER-FAULT-ORDINALS
   statement: SingleAppendStart fires before any watermark advance, SingleAppendWritten fires after written advance and before durable, and SingleAppendPublished fires after visible+emitted advance and before the receipt is returned.
+  witness_test: crates/core/tests/durable_frontier_semantics_frontier.rs::single_append_written_fault_fires_after_written_before_visible
   artifacts:
     - ART-FRONTIER-FAULT-INJECTION
     - ART-FRONTIER-SEMANTICS-TESTS
 - id: INV-FRONTIER-DURABLE-COVERS-RECOVERED
   statement: On reopen after any crash or device failure, durable_hlc covers every event observable via query, and durable_hlc is monotonic across crash boundaries (recovered_durable_hlc >= pre_failure_durable_hlc). batpak makes no claim about which specific in-flight events survive a particular crash; it only guarantees that the durable frontier honestly classifies whatever was preserved.
+  witness_test: crates/core/tests/chaos/scenarios/batch_commit_written.rs::durable_frontier_covers_recovered_state_after_batch_device_failure_cadence_1000
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-CHAOS-BATCH-COMMIT-WRITTEN
@@ -325,6 +513,7 @@
     - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
+  witness_test: crates/core/tests/durable_frontier_waits.rs::wait_for_durable_blocks_then_returns_after_advance
 - id: INV-FRONTIER-APPEND-GATE-HONORED
   statement: When AppendOptions::gate is Some(DurabilityGate { kind, timeout }), Store::append_with_options and Store::append_batch_with_options return only after the corresponding watermark crosses the appended event's HLC, or return StoreError::WaitTimeout. The committed event is queryable in both cases; the timeout reflects the gate guarantee, not the commit.
   artifacts:
@@ -332,45 +521,55 @@
     - ART-FRONTIER-WAIT-API
     - ART-FRONTIER-WAIT-TESTS
     - ART-ADR-DURABILITY-GATING
+  witness_test: crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_durable_gate_blocks_until_synced
 - id: INV-CHAOS-LINUX-ONLY
   statement: The chaos harness uses Linux device-mapper primitives and is unconditionally cfg'd off on non-Linux targets; durability proofs derived from this harness apply to Linux kernels only.
+  witness_test: tools/integrity/src/chaos_contract.rs::chaos_contract_rejects_missing_linux_or_feature_cfg
   artifacts:
     - ART-CHAOS-HARNESS
     - ART-CHAOS-DM-FLAKEY
     - ART-ADR-CHAOS-HARNESS
 - id: INV-ALLOW-IS-DESIGN
-  statement: "Every `#[allow(...)]` in the repo is a deliberate design decision, not a silencer. The allow carries a `// justifies <prose>` comment on the same or preceding line that cites at least one resolvable anchor — an INV-id from this catalog, an `ADR-NNNN` root ADR file, or a concrete repo path (`crates/core/src/...`, `crates/core/tests/...`, `crates/core/examples/...`, `crates/macros/...`, `crates/macros-support/...`) — so the rationale is traceable, not narrative-only."
+  statement: "The repo contains ZERO `#[allow(...)]`/`#![allow(...)]`/`#[expect(...)]` attributes. Clippy and rustc findings are FIXED, never silenced; structural-check fails on any allow/expect attribute in tracked source. The ONLY permitted occurrences are the raw-string test fixtures inside the allow-silencer detector itself (crates/core/build_support/shared_checks.rs), which are string data, not attributes."
+  witness_test: tools/integrity/src/structural_tests.rs::allow_ban_rejects_even_a_justified_allow
   artifacts:
     - ART-DOCTOR
     - ART-STRUCTURAL-CHECK
     - ART-BUILD-RS
 - id: INV-EXAMPLES-OBSERVABLE-OUTPUT
-  statement: "Examples in crates/core/examples/*.rs prove shipped behaviour by producing observable stdout/stderr output that a reader can see; print_stdout, print_stderr, wildcard match arms over enums, and bounded integer narrowing in teaching fixtures are expected for that role. The Teaches-header convention keeps each example focused on a single pattern."
+  statement: "Examples emit output via `writeln!(std::io::stdout().lock(), ..)` (the explicit Write API), not the println!/print! macros; no print allow is used."
+  witness_test: tools/integrity/src/structural_tests.rs::examples_observable_output_rejects_print_macros
   artifacts:
     - ART-EXAMPLES
 - id: INV-MACRO-BOUNDED-CAST
-  statement: "Narrowing integer casts inside batpak-macros (under crates/macros) are preceded by an explicit u8::MAX / u16::MAX comparison that returns an error before the cast, so clippy::cast_possible_truncation at the cast site cannot fire."
+  statement: "Integer narrowing inside batpak-macros (under crates/macros) is preceded by an explicit u8::MAX / u16::MAX comparison that returns a syn error before the conversion, and the conversion itself uses a total u8::try_from / u16::try_from(..).expect(..) (expect is permitted in the proc-macro crate) rather than an `as` cast — so there is no unchecked narrowing cast and no clippy::cast_possible_truncation suppression."
+  witness_test: crates/core/tests/derive_eventpayload_errors.rs::compile_fail_derive_errors
   artifacts:
     - ART-MACROS
 - id: INV-GENERATED-WITNESS-PIN
-  statement: "Derive-generated handler-signature pin consts (for example _HANDLER_PIN_<i>, __batpak_kind_collision_check_<Ident>) are type-check witnesses — they exist to make a mismatched handler signature fail compilation, have no runtime role, and embed the user's ident (often CamelCase or snake). non_upper_case_globals, non_snake_case, and dead_code are suppressed on those specific generated items only."
+  statement: "Derive-generated kind-collision witnesses (the per-payload __batpak_kind_collision_check_<ident> #[test] fn, plus the unconditional inventory registration) detect when two EventPayload types share a (category, type_id) pair: a same-binary collision is a per-payload generated #[test] panic, and a cross-crate collision surfaces through validate_event_payload_registry. The generated identifier is emitted in snake_case (the user's ident is lowered via to_snake_case before being embedded), so the item is a valid snake_case fn name and carries no non_snake_case / lint suppression on generated code."
+  witness_test: crates/core/fixtures/kind-collision-composer/src/lib.rs::dependency_payload_collision_is_visible_to_composer
   artifacts:
     - ART-MACROS
 - id: INV-LITERAL-REGEX-UNWRAP-SAFE
   statement: "unwrap / expect on regex::Regex::new with a literal string pattern inside tool code is safe because the pattern is a compile-time constant string with known-valid regex syntax; the call cannot fire in any reachable execution of the tool."
+  witness_test: tools/integrity/src/literal_regex_contract.rs::literal_regex_contract_rejects_unjustified_or_dynamic_expect
   artifacts:
     - ART-DOCTOR
 - id: INV-TEST-PANIC-AS-ASSERTION
-  statement: "Test bodies under crates/core/tests/ use panic!, unwrap, and expect as the assertion style — when a test precondition, fixture setup, or invariant check fails, the panic is the test failure signal. File-level #![allow(clippy::unwrap_used, clippy::panic)] is the acceptable scope for this idiom. Tests using panic! for invariant failures and test-local FaultInjector impls that panic in writer threads must opt out of clippy::panic at module scope and document the exception in a leading \"justifies:\" comment."
+  statement: "Test bodies signal failure via assert!/assert!(matches!(..))/expect/expect_err/`#[test] -> Result`. panic! is not used as an assertion (use assert!), unwrap is not used (use expect). No file-level or item-level allow is permitted in tests."
+  witness_test: tools/integrity/src/structural_tests.rs::test_assertion_rigor_rejects_weak_negative_tests
   artifacts:
     - ART-TESTS
     - ART-FRONTIER-CHAOS-TESTS
 - id: INV-BUILD-FAIL-FAST
-  statement: "crates/core/build.rs halts the build on invariant violations with a cargo-parseable explanation. Panic sites are consolidated through the crate-private fail helper so the policy is expressed in one place; the file-level #![allow(clippy::panic)] attribute covers that single documented exit path."
+  statement: "crates/core/build.rs halts the build on invariant violations by returning Err from `fn main() -> Result<(), String>` with a cargo-parseable explanation (the crate-private `fail` helper builds the message). No allow attribute is used."
+  witness_test: tools/integrity/src/no_runtime_gate.rs::build_rs_sentinel_returns_err_not_warning
   artifacts:
     - ART-BUILD-RS
 - id: INV-TYPESTATE-OPEN-HAS-WRITER
   statement: "Store<Open> is only constructible by Store::open after the writer thread is initialized; Store::<Open>::writer_ref() is the single crate-private access point for the writer handle, and its expect is a typestate invariant assertion that cannot fail in reachable code."
+  witness_test: crates/core/tests/typestate_safety.rs::compile_fail_tests
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-LIFECYCLE
@@ -378,8 +577,10 @@
   statement: Public wire/event/id surfaces round-trip every valid generated value and reject malformed bytes or identifiers without partial decoding.
   artifacts:
     - ART-WIRE-FORMAT-TESTS
+  witness_test: crates/core/tests/wire_format.rs::coordinate_msgpack_round_trip
 - id: INV-PERFORMANCE-GATES-ENFORCED
   statement: Hardware-dependent performance gates remain explicit ignored tests and are runnable only through the repo-owned perf-gates command surface.
+  witness_test: tools/integrity/src/perf_gates_contract.rs::perf_contract_rejects_unignored_hardware_gate_and_missing_xtask_surface
   artifacts:
     - ART-PERF-GATES
     - ART-XTASK
@@ -387,28 +588,55 @@
   statement: Subscription delivery follows the open, receive, close state machine without fabricating events or hiding a closed producer.
   artifacts:
     - ART-SUBSCRIPTION-TESTS
+  witness_test: crates/core/tests/subscription_ops.rs::ops_recv_without_filters
 - id: INV-TYPELEVEL-COMBINATOR-LAWS
   statement: Public outcome and monadic combinators preserve their type-level success, retry, cancelled, and error law shapes under property tests.
   artifacts:
     - ART-COMBINATOR-LAW-TESTS
+  witness_test: crates/core/tests/monad_laws.rs::left_identity
+- id: INV-PROJECTION-FUSION-EQUIVALENCE
+  statement: Folding multiple catamorphisms in one fused banana-split traversal equals folding each fold separately, for any generated event stream and any fold pair or triple, while reading the stream exactly once.
+  artifacts:
+    - ART-PROJECTION-FUSION-LAW-TESTS
+  witness_test: crates/core/tests/projection_fusion_laws.rs::fused2_equals_separate
+- id: INV-HLC-JOIN-SEMILATTICE
+  statement: The hybrid logical clock merge forms a bounded join-semilattice that is commutative, associative, idempotent, and bottomed at ORIGIN, with the dual meet behaving symmetrically and the lexicographic tiebreak preserved.
+  artifacts:
+    - ART-HLC-SEMILATTICE-LAW-TESTS
+  witness_test: crates/core/tests/hlc_semilattice_laws.rs::join_commutative
+- id: INV-OUTCOME-FUNCTOR-COMPOSITION
+  statement: Outcome map distributes over function composition through every variant including the Batch arm, Batch concatenation is an associative monoid with the empty batch as unit, and zip selects the maximum-priority variant of its two inputs.
+  artifacts:
+    - ART-OUTCOME-EVENTKIND-LAW-TESTS
+  witness_test: crates/core/tests/outcome_eventkind_laws.rs::functor_composition
+- id: INV-EVENTKIND-PARSE-ROUNDTRIP
+  statement: Every value built by the fallible EventKind try_custom parser decomposes back to its originating category and type id, and try_custom accepts exactly the inputs the strict const constructor would accept without panicking.
+  artifacts:
+    - ART-OUTCOME-EVENTKIND-LAW-TESTS
+  witness_test: crates/core/tests/outcome_eventkind_laws.rs::eventkind_parse_roundtrip
 - id: INV-HASH-CHAIN-INTEGRITY
   statement: Hash-chain tests preserve append-order integrity by detecting reordered, missing, or mutated event payload links.
   artifacts:
     - ART-HASH-CHAIN-TESTS
+  witness_test: crates/core/tests/hash_chain.rs::verify_chain_accepts_valid
 - id: INV-OUTBOX-DROP-SAFETY
   statement: Dropping a producer outbox without flush cannot publish buffered events; only explicit flush/submit paths cross the writer boundary.
   artifacts:
     - ART-OUTBOX-TESTS
+  witness_test: crates/core/tests/outbox_drop_safety.rs::dropping_outbox_without_flush_commits_nothing
 - id: INV-COLD-START-ARTIFACTS
   statement: Clean close and restart paths produce and consume the expected checkpoint, mmap, and segment artifacts without trusting stale fast-start metadata.
   artifacts:
     - ART-COLD-START-RECOVERY-TESTS
+  witness_test: crates/core/tests/cold_start_recovery.rs::clean_close_writes_expected_artifacts_and_roundtrips
 - id: INV-INDEX-FILTER-COMPOSES
   statement: Index filter composition over kind, scope, entity, and topology overlays returns the same logical result set as the authoritative scan.
+  witness_test: crates/core/tests/index_filter_composition.rs::overlays_return_ground_truth_for_every_filter_shape
   artifacts:
     - ART-INDEX-FILTER-COMPOSITION-TESTS
 - id: INV-NO-DEAD-CODE-SILENCERS
   statement: "dead_code lint suppressions are banned in tracked Rust source. The AST walker in shared_checks::collect_dead_code_silencer_sites rejects #[allow(dead_code)], #[expect(dead_code)], crate-inner forms, lint-list forms containing dead_code, #[allow(unused)] and #[expect(unused)] (the `unused` group subsumes dead_code), and cfg_attr wrappers around any of those, including multi-line wrappers. The only escape hatch is an exact-site entry in traceability/dead_code_silencer_allowlist.yaml with non-empty reason + adr fields that resolve to a real ADR. The honest responses to a dead_code warning are #[cfg(test)] for test-only code, deletion for truly unused code, or restructuring (workspace crate, narrower module, finer-grained #[path] include) so the compilation unit matches actual ownership. See ADR-0012."
+  witness_test: tools/integrity/src/structural_tests.rs::zero_allow_ban_rejects_every_allow
   artifacts:
     - ART-BUILD-RS
     - ART-STRUCTURAL-CHECK
@@ -417,6 +645,7 @@
   statement: >-
     A journal is one Store root at one data_dir with one live owner; mutable and read-only opens
     both fail with StoreLocked while another owner holds the directory lock.
+  witness_test: crates/core/tests/store_locking.rs::mutable_open_holds_exclusive_lock_and_blocks_read_only_until_drop
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-LOCKING-TESTS
@@ -425,6 +654,7 @@
   statement: >-
     All committed events in one journal are serialized through the writer-owned commit path;
     Coordinate does not create an independent physical writer or global_sequence timeline.
+  witness_test: crates/core/tests/writer_command_flow.rs::mixed_append_and_batch_commands_complete_under_group_commit_drain
   artifacts:
     - ART-STORE-MOD
     - ART-STORE-WRITER
@@ -433,6 +663,7 @@
   statement: >-
     Coordinate names a logical context stream inside one journal; it provides logical
     ordering and addressing, not physical sharding or cross-directory consistency.
+  witness_test: crates/core/tests/lane_branches.rs::per_lane_chain_heads_do_not_alias
   artifacts:
     - ART-STORE-APPEND
     - ART-DX-DOCS
@@ -440,6 +671,7 @@
   statement: >-
     Cross-data_dir consistency is outside Store invariants; multi-journal systems compose by
     product-owned routing, observations, receipts, and local policy.
+  witness_test: tools/integrity/src/scope_exclusion_contract.rs::cross_directory_scope_contract_rejects_positive_store_overclaim
   artifacts:
     - ART-STORE-MOD
     - ART-DX-DOCS
@@ -448,7 +680,143 @@
     Projection and cache outputs are derived context views over append history; they are not an
     alternate source of truth and must not bypass journal receipts or frontier witnesses when proof
     is required.
+  witness_test: crates/core/tests/projection_cache_freshness.rs::consistent_replays_when_reopened_native_cache_row_is_stale
   artifacts:
     - ART-STORE-PROJECTION
     - ART-STORE-MOD
     - ART-DX-DOCS
+- id: INV-WORKSPACE-DAG-ACYCLIC
+  statement: >-
+    The intra-workspace crate dependency graph is a directed acyclic graph; the triangulation gate
+    cross-checks two independent edge derivations (cargo-metadata path dependencies and a direct
+    manifest scan) and fails on either an inter-oracle disagreement or an agreed dependency cycle,
+    so layering and incremental builds are never broken by a reverse or circular crate edge.
+  artifacts:
+    - ART-TRIANGULATION-SOURCE
+  witness_test: tools/integrity/src/triangulation_tests.rs::live_workspace_crate_graph_is_acyclic_and_oracles_agree
+- id: INV-DEPENDENCY-DIRECTION
+  statement: >-
+    Beyond acyclicity, every normal build-graph crate edge must go strictly DOWNWARD in the layer
+    order declared in traceability/dependency_direction.yaml: a crate may depend only on a strictly
+    more-foundational layer, and same-layer or upward edges are forbidden. A legal DAG can still
+    carry an edge in the wrong direction (a foundational crate reaching up into a consumer), which
+    acyclicity alone permits; the triangulation gate's direction check forbids it, and lockstep
+    requires every workspace member to be assigned a layer so a new crate cannot silently escape the
+    rule.
+  artifacts:
+    - ART-TRIANGULATION-SOURCE
+  witness_test: tools/integrity/src/triangulation_tests.rs::dependency_direction_rejects_upward_edge
+- id: INV-SEMANTIC-DIFF-EQUIVALENCE
+  statement: >-
+    Every pair of store configurations that claim to expose identical visible truth
+    (mmap<->scan, checkpoint<->rebuilt, fused<->unfused projection, cached<->uncached,
+    and reopened cold-start across those representations) produces byte-identical
+    observables — query results across every region shape, the visible HLC frontier,
+    and the global sequence — when fed the same seeded operation stream under a fixed
+    clock; any divergence between an equivalence-claiming pair is a hard finding.
+  witness_test: crates/core/tests/semantic_diff.rs::equivalence_claiming_configs_agree_on_visible_truth
+  artifacts:
+    - ART-SEMANTIC-DIFF-TESTS
+- id: INV-LINEARIZABILITY-SINGLE-WRITER
+  statement: >-
+    Because batpak commits through a single writer behind a gated visibility watermark,
+    the ordered visible history a reader returns is the single-writer linearization order:
+    a dense, strictly increasing global_sequence prefix (no gap below the visible
+    high-water and no premature visibility), reads are monotonic (a re-query never drops
+    or reorders a previously-visible event), two independent readers of the same store
+    converge on identical history, and there is no real-time/sequence inversion (if an
+    append returns before another is issued, its global_sequence is the smaller one); a
+    seeded operation stream against a real Store under a fixed clock witnesses this, and a
+    pure checker rejects inverted/gapped/duplicate histories so the property is not vacuous.
+  witness_test: crates/core/tests/linearizability.rs::live_store_history_is_linearizable
+  artifacts:
+    - ART-LINEARIZABILITY-TESTS
+- id: INV-DOCS-CATALOG-VIEW-CURRENT
+  statement: >-
+    03_INVARIANTS.md is a generated VIEW of traceability/invariants.yaml: the auto-generated catalog
+    block between the BEGIN/END INV-CATALOG markers lists every catalog id and its one-line
+    statement, the authored human prose stays above the block, and the docs-catalog gate folded into
+    structural-check fails on any drift so the published docs can never silently rot away from
+    machine law while the generator regenerates the block deterministically.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::live_catalog_block_matches_committed_invariants_md
+- id: INV-INVARIANT-WITNESS-TEST
+  statement: >-
+    Every catalog invariant that declares a witness_test names a path::fn that resolves to a real
+    declared test (a #[test] function or a proptest!-defined test) in the tree; the docs-catalog gate
+    fails when a declared witness names a missing file, a missing function, or a plain non-test
+    function, upgrading the weak header-string citation to a strong named-test citation for the
+    invariants that carry it.
+  artifacts:
+    - ART-DOCS-CATALOG-GATE
+  witness_test: tools/integrity/src/docs_catalog_tests.rs::witness_gate_rejects_non_test_fn
+- id: INV-GAUNTLET-FOLD-FUSION
+  statement: >-
+    The gauntlet's own fitness functions fold over ONE shared repo-IR column-store (binding AL
+    assignments, gate ownership, waiver ownership, the public-surface map, the mutation-seam map, and
+    docs traceability), and the fused single-traversal runner produces the identical finding set as
+    running each fitness in its own separate pass, so the integrity engine obeys the same
+    banana-split fold-fusion equivalence law it tests for event projections.
+  artifacts:
+    - ART-REPO-IR-SOURCE
+  witness_test: tools/integrity/src/repo_ir_tests.rs::run_fused_equals_run_separate
+- id: INV-DST-RECOVERY-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs filesystem backend, driven through the real
+    public append/append_batch/sync API, crashed at the durability boundary (writer abandoned without
+    a clean shutdown, then the unsynced tail truncated via SimFs::crash), and reopened over the
+    persisted (truncated) tree must recover a LEGAL state: a prefix of the appended op-log (no
+    invented or undead events), containing every acknowledged-durable commit (nothing lost that an
+    honored sync confirmed durable), with an intact hash chain across the recovered visible events;
+    and the same BATPAK_SEED must recover the identical state and op-trace digest (determinism). A
+    typed corruption refusal on reopen is a legal recovery outcome; an untyped failure is not.
+  artifacts:
+    - ART-DST-RECOVERY-SOURCE
+    - ART-DST-RECOVERY-TEST
+  witness_test: crates/core/tests/dst_recovery.rs::dst_recovery_is_legal_and_deterministic
+- id: INV-DST-CORPUS-CURRENCY
+  statement: >-
+    Every graduated row in `traceability/dst_corpus.yaml` replays through the real
+    Store+SimFs recovery oracle with the stored FNV-1a op-trace digest identity;
+    the structural ledger validates schema and non-emptiness, and this gate proves
+    digest replay currency under `dangerous-test-hooks`.
+  artifacts:
+    - ART-DST-CORPUS-TEST
+    - ART-DST-RECOVERY-SOURCE
+  witness_test: crates/core/tests/dst_corpus_currency.rs::dst_corpus_currency_replays_committed_corpus
+- id: INV-RECOVERY-ORACLE-LEGAL
+  statement: >-
+    A real Store opened over the fault-injecting SimFs backend (plus the
+    durability-boundary fault injector), driven through the real
+    append/append_batch/sync API, crashed under EACH hostile-fs fault mode SimFs
+    can model — honest-disk crash, lying-disk fsync-drop, and crash-before-fsync at
+    each durability boundary (single-append frame write, batch-commit marker,
+    post-fsync-before-publish, segment-rotation create) — and reopened over the
+    persisted (truncated) tree must recover a state that is EXACTLY one of
+    {CommittedPrefix | RolledBack | CanonicalRefusal} and LEGAL: a prefix of the
+    appended op-log (no invented or undead events) with an intact hash chain across
+    the recovered visible events; HONEST-disk modes never lose an
+    acknowledged-durable commit (the sacred rule); LYING-disk modes may legally lose
+    a dropped-fsync commit but the result must STILL be a prefix, undead-free, and
+    chain-intact (losing the dropped commit is the FS's fault, exposing an
+    undead/corrupt one is not); a typed corruption refusal on reopen is a legal
+    outcome, an untyped failure/panic is not. The same (BATPAK_SEED, fault mode)
+    recovers the identical classification and op-trace digest (determinism).
+  artifacts:
+    - ART-RECOVERY-ORACLE-SOURCE
+    - ART-RECOVERY-ORACLE-TEST
+  witness_test: crates/core/tests/recovery_oracle.rs::recovery_oracle_matrix_is_legal_and_deterministic
+- id: INV-COMPLEXITY-EXPONENT-BOUNDED
+  statement: >-
+    A real Store read operation's cost does not silently regress into a worse asymptotic class: the
+    ALLOCATION COUNT (measured by the process-wide CountingAlloc, never wall-clock nanoseconds) of
+    Store::query(Region::all()) is sampled at geometrically increasing input sizes, a least-squares
+    slope of log(cost) vs log(n) is fit, and that fitted complexity exponent must stay under a
+    linear-ish budget; additionally the worst observed per-op allocation COUNT over the declared input
+    distribution stays under a fixed count-based WCET budget. The slope is a ratio of logs and so is
+    hardware-independent and deterministic, and the gate is anti-vacuous because a planted quadratic
+    dataset is rejected by the same pure check_complexity logic.
+  artifacts:
+    - ART-COMPLEXITY-EXPONENT-TESTS
+  witness_test: crates/core/tests/complexity_exponent.rs::query_complexity_exponent_and_wcet_are_bounded

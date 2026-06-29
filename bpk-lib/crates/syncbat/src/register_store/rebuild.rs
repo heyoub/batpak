@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use batpak::coordinate::Coordinate;
 use batpak::coordinate::{KindFilter, Region};
 use batpak::event::DecodeTyped;
+use batpak::id::EntityIdType;
 use batpak::store::Store;
 
 use crate::register::Register;
@@ -18,7 +19,7 @@ use super::{validate_catalog_name, CatalogEntryState, TombstoneState};
 /// # Errors
 /// Returns [`StoreRegisterCatalogError`] when a matching row cannot be read,
 /// decoded, validated, or folded into a conflict-free register.
-pub fn rebuild_register_from_store<State>(
+pub fn rebuild_register_from_store<State: batpak::store::StoreState>(
     store: &Store<State>,
     coordinate: &Coordinate,
 ) -> Result<Register, StoreRegisterCatalogError> {
@@ -31,7 +32,7 @@ pub fn rebuild_register_from_store<State>(
     .map_err(StoreRegisterCatalogError::Register)
 }
 
-pub(super) fn fold_catalog_entries<State>(
+pub(super) fn fold_catalog_entries<State: batpak::store::StoreState>(
     store: &Store<State>,
     coordinate: &Coordinate,
 ) -> Result<BTreeMap<String, CatalogEntryState>, StoreRegisterCatalogError> {
@@ -43,12 +44,12 @@ pub(super) fn fold_catalog_entries<State>(
     hits.sort_by(|left, right| {
         left.global_sequence()
             .cmp(&right.global_sequence())
-            .then_with(|| left.event_id().cmp(&right.event_id()))
+            .then_with(|| left.event_id().as_u128().cmp(&right.event_id().as_u128()))
     });
 
     let mut entries = BTreeMap::<String, CatalogEntryState>::new();
     for hit in hits {
-        let stored = store.get(batpak::id::EventId::from(hit.event_id()))?;
+        let stored = store.get(hit.event_id())?;
         let row = stored.event.decode_typed::<RegisterOperationRowV1>()?;
         let action = row.action_kind()?;
         match action {

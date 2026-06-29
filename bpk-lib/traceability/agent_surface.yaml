@@ -9,8 +9,8 @@ tasks:
       - "raw dynamic EventKind unless the kind is computed at runtime"
       - "serde_json for durable typed payload identity"
     examples:
-      - "crates/core/examples/quickstart.rs"
-      - "crates/core/examples/cross_crate_payloads.rs"
+      - "crates/batpak-examples/src/bin/quickstart.rs"
+      - "crates/batpak-examples/src/bin/eight_jobs.rs"
     tests:
       - "crates/core/tests/event_payload_surface.rs"
       - "crates/core/tests/store_append_behavior.rs"
@@ -19,7 +19,7 @@ tasks:
       - "typed append preserves the EventKind declared by the payload"
     docs:
       - "cookbook/200_TYPED_EVENT_STORE.md"
-      - "EVENTS.md"
+      - "06_EVENTS.md"
     scaffold:
       - "typed-store"
 
@@ -33,7 +33,7 @@ tasks:
       - "new unbounded public read helpers"
       - "manual string-prefix filtering outside the Region API"
     examples:
-      - "crates/core/examples/read_only.rs"
+      - "crates/batpak-examples/src/bin/read_only.rs"
     tests:
       - "crates/core/tests/store_query_behavior.rs"
       - "crates/core/tests/scope_visibility.rs"
@@ -60,7 +60,7 @@ tasks:
       - "read evidence records selector, freshness intent, limit, and proof-ref scope deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
     scaffold:
       - "evidence-read"
 
@@ -74,8 +74,8 @@ tasks:
       - "cache success without replay correctness"
       - "projection logic that owns store ordering"
     examples:
-      - "crates/core/examples/raw_projection_counter.rs"
-      - "crates/core/examples/raw_projection_counter_derived.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter_derived.rs"
     tests:
       - "crates/core/tests/projection_cache.rs"
       - "crates/core/tests/store_projection_wiring.rs"
@@ -96,7 +96,8 @@ tasks:
       - "sleep-based freshness claims"
       - "max frontier when global applied requires the min across projections"
     examples:
-      - "crates/core/examples/lifecycle_observer.rs"
+      - "crates/batpak-examples/src/bin/eight_jobs.rs"
+      - "crates/batpak-examples/src/bin/raw_projection_counter.rs"
     tests:
       - "crates/core/tests/projection_run_evidence_report.rs"
       - "crates/core/tests/unified_watch_red.rs"
@@ -104,7 +105,7 @@ tasks:
       - "projection observations bind to the frontier the mechanism used"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   cursor_replay:
     problem: "Replay events through the at-least-once cursor canal."
@@ -116,8 +117,8 @@ tasks:
       - "lossy subscription when replay is required"
       - "manual event-id checkpoint files"
     examples:
-      - "crates/core/examples/cursor_worker.rs"
-      - "crates/core/examples/typed_reactor.rs"
+      - "crates/batpak-examples/src/bin/cursor_worker.rs"
+      - "crates/batpak-examples/src/bin/typed_reactor.rs"
     tests:
       - "crates/core/tests/cursor_at_least_once_witness.rs"
       - "crates/core/tests/store_cursor_behavior.rs"
@@ -125,7 +126,7 @@ tasks:
       - "cursor replay exposes at-least-once delivery and optional durable checkpoints"
     docs:
       - "cookbook/200_CURSOR_REPLAY.md"
-      - "TERMINALS.md"
+      - "05_TERMINALS.md"
     scaffold:
       - "reactor"
 
@@ -139,7 +140,7 @@ tasks:
       - "subscription for durable replay"
       - "unknown loss precision represented as observed loss"
     examples:
-      - "crates/core/examples/outbox.rs"
+      - "crates/batpak-examples/src/bin/outbox.rs"
     tests:
       - "crates/core/tests/store_subscription_behavior.rs"
       - "crates/core/tests/subscriber_frontier_observations.rs"
@@ -147,7 +148,7 @@ tasks:
       - "lossy delivery witnesses never fake exactness"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   schema_snapshot:
     problem: "Compare expected and observed schema/fixture hashes."
@@ -167,7 +168,7 @@ tasks:
       - "schema snapshots report structural drift without downstream policy"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   chain_walk_evidence:
     problem: "Prove chain continuity from a selected event."
@@ -187,7 +188,7 @@ tasks:
       - "chain evidence reports missing starts, truncation, and hash mismatches deterministically"
     docs:
       - "cookbook/200_READ_WALK_EVIDENCE.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   subscriber_frontier_evidence:
     problem: "Report subscriber frontier and loss observations."
@@ -199,7 +200,7 @@ tasks:
       - "loss findings for Unknown precision"
       - "subscription state as durable replay proof"
     examples:
-      - "crates/core/examples/outbox.rs"
+      - "crates/batpak-examples/src/bin/outbox.rs"
     tests:
       - "crates/core/tests/subscriber_frontier_observations.rs"
       - "crates/core/tests/evidence_report_family.rs"
@@ -207,7 +208,7 @@ tasks:
       - "subscriber evidence distinguishes known loss from unknown precision"
     docs:
       - "cookbook/200_LOSSY_SUBSCRIPTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
 
   projection_run_evidence:
     problem: "Report projection run boundary, freshness, cache, checkpoint, and output facts."
@@ -227,7 +228,7 @@ tasks:
       - "projection evidence binds report body identity to existing projection machinery"
     docs:
       - "cookbook/200_PROJECTION.md"
-      - "RECEIPTS.md"
+      - "07_RECEIPTS.md"
     scaffold:
       - "projection-cache"
 
@@ -359,24 +360,22 @@ tasks:
       - "opaque extension bytes for profile/spec cargo"
     avoid:
       - "product artifact APIs in BatPAK core"
-      - "Moonwalker route or graph semantics in substrate traversal"
-      - "PCP-Core validation without explicit codecs, tests, and traceability"
+      - "Downstream route or graph semantics in substrate traversal"
+      - "downstream profile validation without explicit codecs, tests, and traceability"
       - "role, workflow, studio, or delegated-mode vocabulary as public substrate API"
     examples:
-      - "bpk-ts/examples/heartbeat-spike"
-      - "bpk-ts/examples/audit-loop"
+      - "crates/netbat/tests/stream_runtime_event.rs"
+      - "crates/batpak-examples/src/bin/event_sourced_counter.rs"
     tests:
-      - "crates/hbat/tests/tcp_e2e.rs"
-      - "crates/hbat/tests/handlers.rs"
       - "crates/core/tests/read_api_pagination.rs"
     invariants:
       - "downstream layers decode semantic payloads above BatPAK after bounded traversal"
       - "BatPAK names stay true for many downstream representations"
     docs:
-      - "INTEGRATION.md"
-      - "CONFORMANCE.md"
-      - "EVENTS.md"
-      - "REPLAY.md"
+      - "11_INTEGRATION.md"
+      - "12_CONFORMANCE.md"
+      - "06_EVENTS.md"
+      - "09_REPLAY.md"
 
   idempotent_pass:
     problem: "Make a keyed append a durable, re-runnable no-op that survives retention compaction and cold-start."
@@ -388,7 +387,7 @@ tasks:
       - "treating for_operation as a payload content hash"
       - "assuming dedup only survives the event retention window"
     examples:
-      - "crates/core/examples/idempotent_pass.rs"
+      - "crates/batpak-examples/src/bin/idempotent_pass.rs"
     tests:
       - "crates/core/tests/idempotency_durable_store.rs"
       - "crates/core/tests/idempotency_window_priority.rs"
@@ -397,4 +396,4 @@ tasks:
       - "the durable idempotency sidecar survives compaction, cold-start, and snapshot"
     docs:
       - "cookbook/200_IDEMPOTENT_PASS.md"
-      - "EVENTS.md"
+      - "06_EVENTS.md"

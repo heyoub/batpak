@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-RECEIPT-SEALED; gate+pipeline tests in tests/gate_pipeline.rs use panic! to surface expected-failure paths when a gate fires or a Receipt is reused.
-#![allow(clippy::panic)]
 //! Gate and Pipeline integration tests.
 //! Registration order, fail-fast evaluation, Receipt TOCTOU guarantee, consumed-once.
 //!
@@ -7,9 +5,9 @@
 //! DEFENDS: FM-022 (Receipt Hollowing — Receipt is sealed, single-use)
 //! INVARIANTS: INV-FRONTIER-APPEND-GATE-HONORED (gate evaluation state machine), INV-RECEIPT-SEALED (Receipt seal)
 
+use batpak::id::EntityIdType;
 use batpak::pipeline::BypassReceipt;
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
 // --- Test gate implementations ---
 
@@ -79,26 +77,24 @@ fn single_deny_gate_fails() {
     let mut gates = GateSet::new();
     gates.push(AlwaysDeny { reason: "nope" });
     let proposal = Proposal::new(42);
-    let result = gates.evaluate(&(), proposal);
-    match result {
-        Err(denial) => {
-            assert_eq!(
-                denial.gate, "always_deny",
-                "DENIAL GATE NAME: denial.gate should be 'always_deny'.\n\
-                 Investigate: src/guard/mod.rs Denial::new gate field.\n\
-                 Common causes: gate name not propagated into Denial struct.\n\
-                 Run: cargo test --test gate_pipeline single_deny_gate_fails"
-            );
-            assert_eq!(
-                denial.message, "nope",
-                "DENIAL MESSAGE: denial.message should be 'nope'.\n\
-                 Investigate: src/guard/mod.rs Denial::new message field.\n\
-                 Common causes: message not propagated into Denial struct.\n\
-                 Run: cargo test --test gate_pipeline single_deny_gate_fails"
-            );
-        }
-        Ok(_) => panic!("Expected Err(Denial), gate should have denied"),
-    }
+    let denial = gates
+        .evaluate(&(), proposal)
+        .map(|_| ())
+        .expect_err("Expected Err(Denial), gate should have denied");
+    assert_eq!(
+        denial.gate, "always_deny",
+        "DENIAL GATE NAME: denial.gate should be 'always_deny'.\n\
+         Investigate: src/guard/mod.rs Denial::new gate field.\n\
+         Common causes: gate name not propagated into Denial struct.\n\
+         Run: cargo test --test gate_pipeline single_deny_gate_fails"
+    );
+    assert_eq!(
+        denial.message, "nope",
+        "DENIAL MESSAGE: denial.message should be 'nope'.\n\
+         Investigate: src/guard/mod.rs Denial::new message field.\n\
+         Common causes: message not propagated into Denial struct.\n\
+         Run: cargo test --test gate_pipeline single_deny_gate_fails"
+    );
 }
 
 // --- Fail-fast ---
@@ -110,11 +106,10 @@ fn fail_fast_stops_at_first_denial() {
     gates.push(AlwaysDeny { reason: "second" });
 
     let proposal = Proposal::new(42);
-    let result = gates.evaluate(&(), proposal);
-    let denial = match result {
-        Err(d) => d,
-        Ok(_) => panic!("Expected Err(Denial)"),
-    };
+    let denial = gates
+        .evaluate(&(), proposal)
+        .map(|_| ())
+        .expect_err("Expected Err(Denial)");
     assert_eq!(
         denial.message, "first",
         "FAIL-FAST VIOLATED: first denial should stop evaluation. \
@@ -223,10 +218,8 @@ fn pipeline_commit_with_receipt() {
     let committed: Committed<String> = pipeline
         .commit(receipt, |payload| {
             assert_eq!(payload, "data");
-            let metadata = match CommitMetadata::new(12345, 0, [0u8; 32]) {
-                Ok(metadata) => metadata,
-                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
-            };
+            let metadata = CommitMetadata::new(12345, 0, [0u8; 32])
+                .expect("test constructs known-valid commit metadata");
             Ok::<_, StoreError>(metadata)
         })
         .expect("commit should succeed");
@@ -240,7 +233,7 @@ fn pipeline_commit_with_receipt() {
          Run: cargo test --test gate_pipeline pipeline_commit_with_receipt"
     );
     assert_eq!(
-        committed.event_id(),
+        committed.event_id().as_u128(),
         12345,
         "PIPELINE COMMIT EVENT_ID: committed event_id should match what the closure returns.\n\
          Investigate: src/pipeline/mod.rs Pipeline::commit.\n\
@@ -267,15 +260,12 @@ fn context_gate_uses_context() {
 
     let proposal_fail = Proposal::new("fail");
     // Note: `Receipt<&str>` doesn't implement Debug (it carries an opaque
-    // sealed token), so `Result::expect_err` doesn't compile here.
-    // Match instead.
-    let denial = match gates.evaluate(&(-1), proposal_fail) {
-        Ok(_) => panic!(
-            "PROPERTY: non-positive context must be denied by ContextGate. \
-             Investigate: src/guard/mod.rs Gate::evaluate context usage."
-        ),
-        Err(d) => d,
-    };
+    // sealed token), so `expect_err` only compiles after we drop the Ok payload
+    // with `.map(|_| ())`.
+    let denial = gates.evaluate(&(-1), proposal_fail).map(|_| ()).expect_err(
+        "PROPERTY: non-positive context must be denied by ContextGate. \
+         Investigate: src/guard/mod.rs Gate::evaluate context usage.",
+    );
     assert_eq!(
         denial.gate, "context_gate",
         "PROPERTY: first failed gate must be 'context_gate', got {denial:?}"
@@ -483,10 +473,8 @@ fn commit_bypass_preserves_approved_by() {
     .with_approved_by("ops-42");
     let committed: Committed<String> =
         batpak::pipeline::Pipeline::<()>::commit_bypass(receipt, |_| {
-            let metadata = match CommitMetadata::new(7, 9, [0x11; 32]) {
-                Ok(metadata) => metadata,
-                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
-            };
+            let metadata = CommitMetadata::new(7, 9, [0x11; 32])
+                .expect("test constructs known-valid commit metadata");
             Ok::<_, StoreError>(metadata)
         })
         .expect("commit");
@@ -523,20 +511,15 @@ fn committed_accessors_expose_only_read_only_metadata() {
             &STRAGGLERS_TEST_BYPASS,
         ),
         |_| {
-            let metadata = match CommitMetadata::new(
-                0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0,
-                42,
-                [0xAA; 32],
-            ) {
-                Ok(metadata) => metadata,
-                Err(err) => panic!("test constructs known-valid commit metadata: {err:?}"),
-            };
+            let metadata =
+                CommitMetadata::new(0xDEAD_BEEF_CAFE_BABE_1234_5678_9ABC_DEF0, 42, [0xAA; 32])
+                    .expect("test constructs known-valid commit metadata");
             Ok::<_, StoreError>(metadata)
         },
     )
     .expect("commit");
     let payload = committed.payload();
-    let event_id = committed.event_id();
+    let event_id = committed.event_id().as_u128();
     let sequence = committed.sequence();
     let hash = committed.hash();
     let audit: &batpak::pipeline::BypassAudit = committed

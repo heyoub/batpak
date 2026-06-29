@@ -1,0 +1,5 @@
+error: category 0x100 exceeds u8 range; category must fit in 4 bits (0x1–0xF, excluding 0x0 and 0xD)
+  --> tests/ui/ep_category_overflows_u8.rs:11:21
+   |
+11 | #[batpak(category = 256, type_id = 1)]
+   |                     ^^^

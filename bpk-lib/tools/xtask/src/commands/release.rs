@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub(crate) fn quickstart() -> Result<()> {
-    cargo(["run", "--example", "quickstart"])
+    cargo(["run", "-p", "batpak-examples", "--bin", "quickstart"])
 }
 
 pub(crate) fn consumer_smoke() -> Result<()> {
@@ -115,6 +115,7 @@ pub(crate) fn consumer_smoke() -> Result<()> {
 }
 
 pub(crate) fn release(args: ReleaseArgs) -> Result<()> {
+    super::release_status_strict_active()?;
     ci()?;
     // semver-checks runs in STRICT mode in the release path.
     // Any breaking-change tripwire fails the release; advisory mode was

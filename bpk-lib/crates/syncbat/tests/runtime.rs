@@ -1,7 +1,6 @@
 //! PROVES: INV-SYNCBAT-DISPATCH-RECEIPTS
 //! CATCHES: duplicate/missing runtime receipts, unknown-operation receipt forgery, and receipt-sink fail-open regressions.
 //! SEEDED: deterministic in-memory handlers and receipt sinks.
-#![allow(clippy::panic)]
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -164,10 +163,10 @@ fn builder_mounts_module_data_and_invokes_handler() {
 fn builder_rejects_missing_handler() {
     let mut builder = Core::builder();
     builder.register_operation(ECHO).expect("register");
-    let err = match builder.build() {
-        Ok(_) => panic!("expected build to reject missing handler"),
-        Err(error) => error,
-    };
+    let err = builder
+        .build()
+        .map(|_| ())
+        .expect_err("expected build to reject missing handler");
 
     assert!(matches!(err, syncbat::BuildError::MissingHandler { name } if name == "echo"));
 }
@@ -178,10 +177,10 @@ fn invoke_maps_handler_failure_to_runtime_error() {
     builder.register(ECHO, FailingHandler).expect("register");
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("echo", Vec::new()) {
-        Ok(_) => panic!("expected handler failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("echo", Vec::new())
+        .map(|_| ())
+        .expect_err("expected handler failure");
 
     assert!(
         matches!(
@@ -218,10 +217,10 @@ fn failed_receipt_is_recorded_once() {
     builder.receipt_sink(sink.clone());
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("echo", b"bad".to_vec()) {
-        Ok(_) => panic!("expected handler failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("echo", b"bad".to_vec())
+        .map(|_| ())
+        .expect_err("expected handler failure");
 
     assert!(
         matches!(
@@ -261,10 +260,10 @@ fn unknown_operation_does_not_emit_receipt() {
     builder.receipt_sink(sink.clone());
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("missing", b"plain".to_vec()) {
-        Ok(_) => panic!("expected unknown operation"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("missing", b"plain".to_vec())
+        .map(|_| ())
+        .expect_err("expected unknown operation");
 
     assert!(matches!(err, RuntimeError::UnknownOperation { name } if name == "missing"));
     assert!(sink.envelopes().is_empty());
@@ -295,10 +294,10 @@ fn unknown_checkout_frame_does_not_emit_receipt() {
     builder.receipt_sink(sink.clone());
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.checkout_frame(CheckoutFrame::new("missing", b"plain".to_vec())) {
-        Ok(_) => panic!("expected unknown operation"),
-        Err(error) => error,
-    };
+    let err = core
+        .checkout_frame(CheckoutFrame::new("missing", b"plain".to_vec()))
+        .map(|_| ())
+        .expect_err("expected unknown operation");
 
     assert!(matches!(err, RuntimeError::UnknownOperation { name } if name == "missing"));
     assert!(sink.envelopes().is_empty());
@@ -361,10 +360,10 @@ fn register_resolved_checkout_records_failed_receipt_once() {
     let checkout = register
         .checkout("echo", b"bad".to_vec())
         .expect("checkout resolves");
-    let err = match core.checkout(checkout) {
-        Ok(_) => panic!("expected handler failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .checkout(checkout)
+        .map(|_| ())
+        .expect_err("expected handler failure");
 
     assert!(matches!(err, RuntimeError::Handler { .. }));
     let envelopes = sink.envelopes();
@@ -421,10 +420,10 @@ fn raw_byte_hash_policy_sets_only_input_hash_on_failure() {
     builder.receipt_hash_policy(ReceiptHashPolicy::raw_bytes(test_hash));
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("echo", b"hash".to_vec()) {
-        Ok(_) => panic!("expected handler failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("echo", b"hash".to_vec())
+        .map(|_| ())
+        .expect_err("expected handler failure");
 
     assert!(matches!(err, RuntimeError::Handler { .. }));
     let envelopes = sink.envelopes();
@@ -440,10 +439,10 @@ fn receipt_sink_failure_is_fail_closed() {
     builder.receipt_sink(FailingReceiptSink);
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("echo", b"hello".to_vec()) {
-        Ok(_) => panic!("expected receipt sink failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("echo", b"hello".to_vec())
+        .map(|_| ())
+        .expect_err("expected receipt sink failure");
 
     assert!(
         matches!(
@@ -465,10 +464,10 @@ fn failed_handler_plus_sink_failure_is_fail_closed() {
     builder.receipt_sink(FailingReceiptSink);
     let mut core = builder.build().expect("core builds");
 
-    let err = match core.invoke("echo", b"hello".to_vec()) {
-        Ok(_) => panic!("expected receipt sink failure"),
-        Err(error) => error,
-    };
+    let err = core
+        .invoke("echo", b"hello".to_vec())
+        .map(|_| ())
+        .expect_err("expected receipt sink failure");
 
     assert!(
         matches!(

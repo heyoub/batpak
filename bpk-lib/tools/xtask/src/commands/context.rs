@@ -1,4 +1,4 @@
-//! PCP-aligned handoff packet capture for agent/operator context.
+//! Portable context handoff packet capture for agent/operator context.
 //!
 //! Writes `target/context/latest.json` and `target/context/latest.md`.
 //! Read-only toward git and the factory ledger store.
@@ -19,9 +19,9 @@ use crate::ContextArgs;
 const SCHEMA_VERSION: u32 = 2;
 
 const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
-    ("factory/host-dev-profile", "factory/ordnance-cut"),
-    ("factory/audit-loop", "factory/host-dev-profile"),
-    ("factory/descriptor-inventory", "factory/audit-loop"),
+    ("factory/rust-host-profile", "factory/ordnance-cut"),
+    ("factory/runtime-proof-loop", "factory/rust-host-profile"),
+    ("factory/descriptor-inventory", "factory/runtime-proof-loop"),
     ("factory/factory-ledger", "factory/descriptor-inventory"),
     ("factory/host-proof-verbs", "factory/factory-ledger"),
     ("factory/context-packets", "factory/host-proof-verbs"),
@@ -29,13 +29,13 @@ const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
 ];
 
 const BOUNDARY_REMINDERS: &[&str] = &[
-    "Moonwalker graph law lives in a separate repo; not BatPAK substrate traversal.",
-    "PCP_SPEC is a separate spec; this packet is PCP-aligned handoff tooling, not PCP-Core.",
-    "BatPAK preserves opaque extension bytes; it does not validate PCP schemas at runtime.",
+    "A downstream product graph law lives in a separate repo; not BatPAK substrate traversal.",
+    "An external context-profile spec is separate; this packet is portable context handoff tooling, aligned to that spec, not its runtime.",
+    "BatPAK preserves opaque extension bytes; it does not validate that external profile's schemas at runtime.",
     "event.walk is hash-chain ancestry only; event.query is commit-order pagination.",
 ];
 
-const PROOF_COMMAND_MARKERS: &[&str] = &["host-dev", "host-loop", "inspect", "verify"];
+const PROOF_COMMAND_MARKERS: &[&str] = &["inspect", "verify"];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ContextPacket {
@@ -156,8 +156,8 @@ pub(crate) fn context(args: ContextArgs) -> Result<()> {
     let markdown = render_context_markdown(&packet);
     fs::write(&json_path, json).with_context(|| format!("write {}", json_path.display()))?;
     fs::write(&md_path, markdown).with_context(|| format!("write {}", md_path.display()))?;
-    println!("context: wrote {}", json_path.display());
-    println!("context: wrote {}", md_path.display());
+    outln!("context: wrote {}", json_path.display());
+    outln!("context: wrote {}", md_path.display());
     Ok(())
 }
 
@@ -461,11 +461,11 @@ fn gate_row_to_highlight(row: LedgerGateRow) -> GateHighlightRow {
 }
 
 pub(crate) fn render_context_markdown(packet: &ContextPacket) -> String {
-    let mut out = String::from("# BatPAK Context Packet (PCP-aligned handoff v0)\n\n");
+    let mut out = String::from("# BatPAK Context Packet (portable context handoff v0)\n\n");
     out.push_str(
         "Use this packet to hand work between agents or operators. \
          It captures git state, stacked-PR hints, factory-ledger tail, \
-         and boundary reminders. It is not PCP-Core and does not validate schemas.\n\n",
+         and boundary reminders. It does not implement that external profile and does not validate its schemas.\n\n",
     );
 
     out.push_str("## Git\n\n");
@@ -816,11 +816,11 @@ mod tests {
             untracked_warnings: Vec::new(),
             verification_summary: VerificationSummary {
                 recent_gates: vec![GateHighlightRow {
-                    gate: "host-dev".to_owned(),
+                    gate: "verify".to_owned(),
                     status: "ok".to_owned(),
                     head: "afb63dc".to_owned(),
                     duration_ms: 1234,
-                    summary: "host-dev ok @ afb63dc duration=1234ms".to_owned(),
+                    summary: "verify ok @ afb63dc duration=1234ms".to_owned(),
                 }],
                 ledger_tail: Vec::new(),
                 operator_notes: None,
@@ -833,7 +833,7 @@ mod tests {
         };
         let rendered = render_context_markdown(&packet);
         assert!(rendered.contains("## Recent gates"));
-        assert!(rendered.contains("host-dev ok @ afb63dc duration=1234ms"));
+        assert!(rendered.contains("verify ok @ afb63dc duration=1234ms"));
     }
 
     #[test]

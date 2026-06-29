@@ -75,7 +75,7 @@ fn point_after(store: &Store, sequence_offset: usize) -> HlcPoint {
 }
 
 fn append_one(store: &Store, coord: &Coordinate, kind: EventKind, i: usize) {
-    store
+    let _ = store
         .append(coord, kind, &serde_json::json!({ "i": i }))
         .expect("append benchmark event");
 }
@@ -301,10 +301,10 @@ fn bench_append_gate_waiters(c: &mut Criterion) {
                                             &coord,
                                             kind,
                                             &serde_json::json!({ "i": i }),
-                                            AppendOptions::new().with_gate(DurabilityGate {
-                                                kind: WatermarkKind::Durable,
-                                                timeout: WAIT_TIMEOUT,
-                                            }),
+                                            AppendOptions::new().with_gate(DurabilityGate::new(
+                                                WatermarkKind::Durable,
+                                                WAIT_TIMEOUT,
+                                            )),
                                         )
                                         .expect("durable gate append wakes")
                                 }));

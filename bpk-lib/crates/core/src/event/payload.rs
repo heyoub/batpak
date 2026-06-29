@@ -44,7 +44,7 @@ pub trait EventPayload: Serialize + DeserializeOwned {
     /// at the typed-append seam so a future decoder can tell which struct shape
     /// produced the stored bytes and run the registered [`Upcast`] chain when
     /// they differ. Defaults to `1`; bump it (and freeze a new fixture + add an
-    /// `Upcast`) whenever a non-additive change lands. See `EVENTS.md` →
+    /// `Upcast`) whenever a non-additive change lands. See `06_EVENTS.md` →
     /// "Schema Evolution".
     ///
     /// `0` is reserved as the legacy/untyped sentinel and is never a valid
@@ -57,6 +57,7 @@ pub trait EventPayload: Serialize + DeserializeOwned {
 
 /// How `Store::open` handles linked `EventPayload` kind collisions.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum EventPayloadValidation {
     /// Log a single process-wide warning if duplicate payload kinds are linked.
     #[default]
@@ -82,12 +83,12 @@ pub struct EventPayloadKindCollision {
 
 impl EventPayloadKindCollision {
     fn from_support(collision: batpak_macros_support::EventKindCollision) -> Self {
-        // justifies: ADR-0010, src/event/kind.rs; kind_bits upper nibble is at most 0xF by construction so narrowing into u8 cannot truncate
-        #[allow(clippy::cast_possible_truncation)]
-        let category = (collision.kind_bits >> 12) as u8;
+        // `category()`/`type_id()` narrow the packed nibbles behind EventKind's
+        // own invariant, so no unchecked cast is needed here.
+        let kind = EventKind::from_raw_u16(collision.kind_bits);
         Self {
-            category,
-            type_id: collision.kind_bits & 0x0FFF,
+            category: kind.category(),
+            type_id: kind.type_id(),
             first_type_name: collision.first_type_name,
             second_type_name: collision.second_type_name,
         }

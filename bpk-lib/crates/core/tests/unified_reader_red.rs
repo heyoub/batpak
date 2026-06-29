@@ -1,19 +1,14 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path reader tests in tests/unified_reader_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit within u32.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
 
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_test_coord.rs"]
-mod red_test_coord;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_test_coord;
 
 use red_kinds::*;
 use red_test_coord::*;
 
-mod support;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
-use support::prelude::*;
 use tempfile::TempDir;
 
 #[test]
@@ -23,13 +18,13 @@ fn sealed_segment_reads_via_mmap() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     let entries = store.by_entity("entity:test");
     let first = &entries[0];
     let event = store
-        .get(batpak::id::EventId::from(first.event_id()))
+        .get(first.event_id())
         .expect("get from sealed segment");
     assert_eq!(
         event.coordinate.entity(),
@@ -77,7 +72,7 @@ fn evict_mmap_before_compaction_delete() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     let result = store

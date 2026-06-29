@@ -9,6 +9,70 @@ impl Store<Open> {
         lifecycle::sync(self)
     }
 
+    /// Block until the named watermark reaches `point` or `timeout` elapses.
+    ///
+    /// This is the canonical wait entry point; the per-kind `wait_for_<kind>`
+    /// methods forward here. The single `match` over [`WatermarkKind`] is the
+    /// one source of truth mirroring the durability-gate dispatch.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if the watermark does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for(
+        &self,
+        kind: WatermarkKind,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        match kind {
+            WatermarkKind::Accepted => self.watermark_handle.wait_for_accepted(point, timeout),
+            WatermarkKind::Written => self.watermark_handle.wait_for_written(point, timeout),
+            WatermarkKind::Durable => self.watermark_handle.wait_for_durable(point, timeout),
+            WatermarkKind::Applied => self.watermark_handle.wait_for_applied(point, timeout),
+            WatermarkKind::Visible => self.watermark_handle.wait_for_visible(point, timeout),
+            WatermarkKind::Emitted => self.watermark_handle.wait_for_emitted(point, timeout),
+        }
+    }
+
+    /// Block until one lane's logical watermark reaches `point` or `timeout`.
+    ///
+    /// Canonical lane wait entry point; the per-kind `wait_for_<kind>_lane`
+    /// methods forward here.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's watermark does not
+    /// reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if
+    /// the writer panicked while the caller was waiting.
+    pub fn wait_for_on_lane(
+        &self,
+        kind: WatermarkKind,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        match kind {
+            WatermarkKind::Accepted => self
+                .watermark_handle
+                .wait_for_accepted_on_lane(lane, point, timeout),
+            WatermarkKind::Written => self
+                .watermark_handle
+                .wait_for_written_on_lane(lane, point, timeout),
+            WatermarkKind::Durable => self
+                .watermark_handle
+                .wait_for_durable_on_lane(lane, point, timeout),
+            WatermarkKind::Applied => self
+                .watermark_handle
+                .wait_for_applied_on_lane(lane, point, timeout),
+            WatermarkKind::Visible => self
+                .watermark_handle
+                .wait_for_visible_on_lane(lane, point, timeout),
+            WatermarkKind::Emitted => self
+                .watermark_handle
+                .wait_for_emitted_on_lane(lane, point, timeout),
+        }
+    }
+
     /// Block until the durable frontier reaches `point` or `timeout` elapses.
     ///
     /// # Errors
@@ -20,7 +84,80 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_durable(point, timeout)
+        self.wait_for(WatermarkKind::Durable, point, timeout)
+    }
+
+    /// Block until the accepted frontier reaches `point` or `timeout` elapses.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `accepted_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_accepted(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for(WatermarkKind::Accepted, point, timeout)
+    }
+
+    /// Block until one lane's logical accepted frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's accepted frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_accepted_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Accepted, lane, point, timeout)
+    }
+
+    /// Block until the written frontier reaches `point` or `timeout` elapses.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `written_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_written(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for(WatermarkKind::Written, point, timeout)
+    }
+
+    /// Block until one lane's logical written frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's written frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_written_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Written, lane, point, timeout)
+    }
+
+    /// Block until one lane's logical durable frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's durable frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_durable_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Durable, lane, point, timeout)
     }
 
     /// Block until the applied frontier reaches `point` or `timeout` elapses.
@@ -37,7 +174,22 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_applied(point, timeout)
+        self.wait_for(WatermarkKind::Applied, point, timeout)
+    }
+
+    /// Block until one lane's logical applied frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's applied frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_applied_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Applied, lane, point, timeout)
     }
 
     /// Block until the visible frontier reaches `point` or `timeout` elapses.
@@ -51,7 +203,51 @@ impl Store<Open> {
         point: HlcPoint,
         timeout: std::time::Duration,
     ) -> Result<(), StoreError> {
-        self.watermark_handle.wait_for_visible(point, timeout)
+        self.wait_for(WatermarkKind::Visible, point, timeout)
+    }
+
+    /// Block until one lane's logical visible frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's visible frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_visible_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Visible, lane, point, timeout)
+    }
+
+    /// Block until the emitted frontier reaches `point` or `timeout` elapses.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if `emitted_hlc` does not reach
+    /// `point` before `timeout`. Returns [`StoreError::WriterCrashed`] if the
+    /// writer panicked while the caller was waiting.
+    pub fn wait_for_emitted(
+        &self,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for(WatermarkKind::Emitted, point, timeout)
+    }
+
+    /// Block until one lane's logical emitted frontier reaches `point`.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::WaitTimeout`] if that lane's emitted frontier does
+    /// not reach `point` before `timeout`. Returns [`StoreError::WriterCrashed`]
+    /// if the writer panicked while the caller was waiting.
+    pub fn wait_for_emitted_lane(
+        &self,
+        lane: u32,
+        point: HlcPoint,
+        timeout: std::time::Duration,
+    ) -> Result<(), StoreError> {
+        self.wait_for_on_lane(WatermarkKind::Emitted, lane, point, timeout)
     }
 
     /// Snapshot the current index to a destination directory and return
@@ -73,6 +269,34 @@ impl Store<Open> {
     #[deprecated(note = "use snapshot_with_evidence; snapshot evidence is now first-class")]
     pub fn snapshot(&self, dest: &std::path::Path) -> Result<(), StoreError> {
         self.snapshot_with_evidence(dest).map(|_| ())
+    }
+
+    /// Fork the current store into a self-contained destination directory and
+    /// return deterministic fork evidence.
+    ///
+    /// The destination is not opened by this method. Callers that want to use
+    /// the fork should open it explicitly after this method returns, preserving
+    /// the copied directory without appending lifecycle events during the copy.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Io` if creating the destination, clearing stale
+    /// store artifacts, or copying/linking source files fails.
+    pub fn fork_with_evidence(
+        &self,
+        dest: &std::path::Path,
+        options: ForkOptions,
+    ) -> Result<ForkReport, StoreError> {
+        lifecycle::fork(self, dest, options)
+    }
+
+    /// Fork the current store with default [`ForkOptions`], dropping the
+    /// deterministic evidence report.
+    ///
+    /// # Errors
+    /// Returns any error surfaced by [`Store::fork_with_evidence`].
+    pub fn fork(&self, dest: &std::path::Path) -> Result<(), StoreError> {
+        self.fork_with_evidence(dest, ForkOptions::default())
+            .map(|_| ())
     }
 
     /// Compact: merge sealed segments, optionally filtering events.

@@ -1,9 +1,8 @@
 //! PROVES: INV-POSITION-HINT-PERSISTENCE.
 
-mod support;
 use batpak::store::cold_start::rebuild::OpenIndexPath;
+use batpak_testkit::prelude::*;
 use serde_json::json;
-use support::prelude::*;
 use tempfile::TempDir;
 
 fn test_coord() -> Coordinate {
@@ -167,7 +166,7 @@ fn idempotent_replay_preserves_original_position_hint() {
         .expect("idempotent replay");
 
     assert_eq!(replay.event_id, first.event_id);
-    assert_eq!(replay.sequence, first.sequence);
+    assert_eq!(replay.global_sequence, first.global_sequence);
 
     let stored = store
         .get(first.event_id)

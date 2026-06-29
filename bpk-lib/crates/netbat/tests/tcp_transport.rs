@@ -1,7 +1,6 @@
 //! PROVES: INV-NETBAT-LINE-PROTOCOL-STABLE, INV-NETBAT-BOUNDARY-THIN
 //! CATCHES: TCP listener response-shape drift, limit accounting regressions, and shutdown-loop ownership bugs.
 //! SEEDED: localhost listeners with fixed request frames.
-#![allow(clippy::panic)]
 
 use netbat as nb;
 use std::io::{self, BufRead, BufReader, Write};
@@ -56,8 +55,8 @@ fn spawn_server(
     thread::Builder::new()
         .name(name.to_owned())
         .spawn(move || {
-            let mut core = core_with_ping();
-            nb::serve_tcp_listener(listener, &mut core, &config, &shutdown).expect("serve listener")
+            let factory = || core_with_ping();
+            nb::serve_tcp_listener(listener, factory, &config, &shutdown).expect("serve listener")
         })
         .expect("spawn tcp test server")
 }
@@ -116,7 +115,13 @@ fn tcp_listener_enforces_request_limit_per_connection() {
         Ok(0) => true,
         Ok(_) => false,
         Err(error) if error.kind() == io::ErrorKind::ConnectionReset => true,
-        Err(error) => panic!("unexpected second-read error: {error}"),
+        Err(error) => {
+            assert!(
+                std::hint::black_box(false),
+                "unexpected second-read error: {error}"
+            );
+            unreachable!()
+        }
     };
 
     let stats = handle.join().expect("server thread joins");
@@ -478,4 +483,84 @@ fn peer_close_mid_response_does_not_kill_the_listener() {
     );
     assert_eq!(stats.malformed_requests, 0);
     assert_eq!(stats.runtime_failures, 0);
+}
+
+#[test]
+fn concurrent_accept_slow_client_does_not_block_fast_client(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // PROVES: NETBAT-TCP-CONCURRENT-ACCEPT — the accept loop must keep
+    // accepting while another connection is blocked mid-read on a partial
+    // request line. A sequential accept loop would leave the fast client
+    // waiting behind the slow one's read timeout.
+    let listener = localhost_listener();
+    let addr = listener.local_addr().map_err(io::Error::other)?;
+    let shutdown = nb::ShutdownHandle::new();
+    let server_shutdown = shutdown.clone();
+
+    let config = nb::TcpServerConfig::default()
+        .with_max_connections(2)
+        .with_idle_sleep(Duration::from_millis(1));
+    let handle = thread::Builder::new()
+        .name("netbat-tcp-concurrent".to_owned())
+        .spawn(move || {
+            let factory = || core_with_ping();
+            nb::serve_tcp_listener(listener, factory, &config, &server_shutdown)
+        })
+        .map_err(io::Error::other)?;
+
+    thread::sleep(Duration::from_millis(20));
+
+    let slow_addr = addr;
+    let slow_handle = thread::Builder::new()
+        .name("netbat-tcp-slow".to_owned())
+        .spawn(move || -> Result<(), io::Error> {
+            let mut slow = TcpStream::connect(slow_addr)?;
+            slow.write_all(b"NETBAT/1 CALL ping")?;
+            thread::sleep(Duration::from_millis(500));
+            Ok(())
+        })
+        .map_err(io::Error::other)?;
+
+    thread::sleep(Duration::from_millis(100));
+
+    let mut fast = TcpStream::connect(addr).map_err(io::Error::other)?;
+    fast.set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(io::Error::other)?;
+    fast.write_all(b"NETBAT/1 CALL ping 6869\n")
+        .map_err(io::Error::other)?;
+    let mut response = String::new();
+    BufReader::new(&fast)
+        .read_line(&mut response)
+        .map_err(io::Error::other)?;
+    if response != "OK 6869\n" {
+        return Err(io::Error::other(format!(
+            "PROPERTY: fast client must be served while slow client blocks; got {response:?}"
+        ))
+        .into());
+    }
+
+    shutdown.shutdown();
+    let _ = slow_handle.join();
+    let stats = match handle.join() {
+        Ok(Ok(stats)) => stats,
+        Ok(Err(error)) => {
+            return Err(io::Error::other(format!("server failed: {error:?}")).into());
+        }
+        Err(_) => {
+            return Err(io::Error::other("server thread panicked").into());
+        }
+    };
+    if stats.served_requests < 1 {
+        return Err(io::Error::other(format!(
+            "PROPERTY: fast client must be counted as served; stats={stats:?}"
+        ))
+        .into());
+    }
+    if stats.accepted_connections < 2 {
+        return Err(io::Error::other(format!(
+            "PROPERTY: both clients must be accepted; stats={stats:?}"
+        ))
+        .into());
+    }
+    Ok(())
 }

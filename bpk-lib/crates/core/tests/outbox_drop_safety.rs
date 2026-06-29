@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/outbox_drop_safety.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Outbox drop safety.
 //!
 //! [INV-OUTBOX-DROP-SAFETY] Dropping an `Outbox` without calling `.flush()` leaves the
@@ -7,12 +5,10 @@
 //! notification fires. Flushing an outbox after staging is atomic — all items
 //! land together.
 
-mod support;
 use batpak::store::Outbox;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 fn test_coord() -> Coordinate {
@@ -34,7 +30,7 @@ fn user_visible_events(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
 
 #[test]
 fn dropping_outbox_without_flush_commits_nothing() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("open small-segment store");
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 
@@ -79,7 +75,7 @@ fn dropping_outbox_without_flush_commits_nothing() {
 
 #[test]
 fn flushing_empty_outbox_is_a_noop_and_stays_empty() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("open small-segment store");
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 
@@ -113,14 +109,14 @@ fn flushing_empty_outbox_is_a_noop_and_stays_empty() {
         "PROPERTY: flushing an empty Outbox must not publish any user event"
     );
 
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"post_empty_flush": true}))
         .expect("append after empty outbox flush");
 }
 
 #[test]
 fn submit_flushing_empty_outbox_resolves_empty_without_visibility() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("open small-segment store");
     let mut outbox: Outbox<'_> = store.outbox();
 
     let ticket = outbox.submit_flush().expect("submit empty outbox");
@@ -141,7 +137,7 @@ fn submit_flushing_empty_outbox_resolves_empty_without_visibility() {
 
 #[test]
 fn flushed_outbox_lands_all_items_atomically() {
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("open small-segment store");
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 
@@ -169,7 +165,7 @@ fn flushed_outbox_lands_all_items_atomically() {
 fn re_staging_after_flush_stays_coherent() {
     // Ensures that draining the outbox on flush leaves it clean for reuse,
     // and a subsequent drop after re-stage still commits nothing.
-    let (_dir, store) = small_segment_store().unwrap();
+    let (_dir, store) = small_segment_store().expect("open small-segment store");
     let coord = test_coord();
     let kind = EventKind::custom(0xF, 1);
 

@@ -4,10 +4,9 @@
 //! CATCHES: Cache I/O downgrades and project_if_changed stale-generation shortcuts
 //! SEEDED: mutation-smoke gaps in NativeCache::get and project_inner generation checks
 
-mod support;
 use batpak::store::projection::{CacheMeta, NativeCache, ProjectionCache};
 use batpak::store::{Freshness, IndexTopology, Store, StoreConfig, StoreError};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 const GENERATION_KIND: EventKind = EventKind::custom(0xF, 0x51);
@@ -19,6 +18,8 @@ struct GenerationCounter {
 
 impl EventSourced for GenerationCounter {
     type Input = JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("projection-cache-generation-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         Some(Self {
@@ -32,6 +33,10 @@ impl EventSourced for GenerationCounter {
 
     fn relevant_event_kinds() -> &'static [EventKind] {
         &[GENERATION_KIND]
+    }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
     }
 }
 
@@ -179,10 +184,10 @@ fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
     let store = Store::open(config).expect("open store");
 
     let coord = Coordinate::new("entity:generation-watermark", "scope:test").expect("coord");
-    store
+    let _ = store
         .append(&coord, GENERATION_KIND, &serde_json::json!({"x": 1}))
         .expect("append relevant 1");
-    store
+    let _ = store
         .append(&coord, GENERATION_KIND, &serde_json::json!({"x": 2}))
         .expect("append relevant 2");
 
@@ -194,7 +199,7 @@ fn project_if_changed_replays_when_watermark_matches_but_generation_advances() {
         .entity_generation("entity:generation-watermark")
         .expect("baseline generation");
 
-    store
+    let _ = store
         .append(
             &coord,
             EventKind::custom(0xF, 9),

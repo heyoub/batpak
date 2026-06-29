@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- Retired the in-repo `bpk-ts` workspace and TypeScript client gates (`just
+  verify-ts`, `just verify-all`, `cargo xtask verify-ts`). The 0.9/1.0 line is
+  Rust-first; `hostbat::ClientManifest` is the live host-contract projection.
+
+### Migration
+- TypeScript/npm consumers must use an external archive of the retired `bpk-ts`
+  workspace or wait for the post-1.0 client line. In-repo host proof is
+  `cargo test -p hostbat`, `cargo test -p netbat`, and `just verify`.
+
+### Added
+- Added PR1 surfaces for the 0.9.0 line: `Store::fork_with_evidence` /
+  `Store::fork` materialize a self-contained store directory without opening
+  it, with deterministic fork evidence and CoW strategy reporting; immutable
+  sealed segments may be reflinked or hardlinked while the active segment and
+  mutable authorities (`index.idemp`, `visibility_ranges.fbv`) are deep-copied.
+- Added `Store::import_events` for store-to-store re-application using a
+  caller-supplied source namespace. Import preserves raw MessagePack payload
+  bytes and content hashes, regenerates destination identity and hash-chain
+  predecessors, clears causation, preserves correlation, and records import
+  provenance in receipt extensions.
+- Added property-law coverage for `DagPosition`, SIDX rows, lane-neutral
+  payload upcast, and raw import payload hashing, plus the `fork_cost`
+  Criterion bench with CoW and deep-copy baseline arms.
+
+## [0.8.3] - 2026-06-17
+
 ### Added
 - Event schema evolution (0.8.3): `#[derive(EventPayload)]` types carry a
   `PAYLOAD_VERSION` (set via `#[batpak(version = N)]`) stamped into a new
@@ -13,9 +40,9 @@ All notable changes to this project will be documented in this file.
   version runs a registered `Upcast` chain (in-memory over `rmpv::Value`, never
   rewriting stored bytes); a newer version is a hard `FutureVersion` error.
   Append-only frozen-bytes decode fixtures plus a structural lint back the
-  back-compat guarantee. The hbat manifest is now `manifestVersion` 2 with a
+  back-compat guarantee. The refbat manifest is now `manifestVersion` 2 with a
   per-event `payloadVersion`, and the TypeScript client decodes newer payload
-  versions tolerantly. See EVENTS.md ("Schema Evolution").
+  versions tolerantly. See 06_EVENTS.md ("Schema Evolution").
 - Durable idempotency (0.8.3): `AppendOptions::with_idempotency(key)` is now a
   durable correctness primitive. A dedicated `index.idemp` sidecar (magic
   `FBATID`, crc32fast CRC, atomic write) records the minimal tuple to
@@ -29,7 +56,7 @@ All notable changes to this project will be documented in this file.
   regardless of load; the soft cap may only ever trim out-of-window keys. Adds
   `IdempotencyKey::for_operation(domain, components)` (length-delimited blake3
   operation identity) and an additive `bank.commit` `idempotency_key_hex` wire
-  field. See EVENTS.md ("Durable idempotency") and cookbook recipe
+  field. See 06_EVENTS.md ("Durable idempotency") and cookbook recipe
   `200_IDEMPOTENT_PASS`.
 - TypeScript codegen (0.8.3): a Rust `#[serde(default)] Option<T>` field now
   generates an omittable TS input property (callers may omit it entirely) while
@@ -77,10 +104,10 @@ All notable changes to this project will be documented in this file.
   is now diff-scoped (`--in-diff`) and a non-blocking `coverage-baseline` CI job
   was added.
 - Synced factory docs with the full-system README: INTEGRATION/MODEL/BATTERIES/
-  CIRCUITS composition language, `hbat` crate README, bpk-ts test counts, and
+  CIRCUITS composition language, `refbat` crate README, bpk-ts test counts, and
   README artifact tally (119).
 - Rewrote the root README as a full-system front door: battery family table
-  (`batpak`, `syncbat`, `netbat`, `hbat`, `@batpak/sdk`), Rust and TypeScript
+  (`batpak`, `syncbat`, `netbat`, `refbat`, `@batpak/sdk`), Rust and TypeScript
   entry paths, multi-journal composition, and per-journal HLC frontier language.
 - Expanded `evidence.read_walk` wire request to full `Region` selector parity
   (`kind_category`/`kind_type_id`, `start_clock`/`end_clock`, `max_stale_ms`);
@@ -106,7 +133,7 @@ All notable changes to this project will be documented in this file.
   evidence behind the 0.x version number. The factory mental model now enters
   through a Rosetta table (factory word → Rust surface → plain meaning) and
   intent-based reading paths instead of a prerequisite reading order. Factory
-  docs themselves (`FACTORY.md`, `MODEL.md`) are unchanged.
+  docs themselves (`01_FACTORY.md`, `02_MODEL.md`) are unchanged.
 - Aligned every publishable Rust crate and `@batpak/*` npm package on
   `0.8.2`, catching npm up to the substrate evidence surface already in
   git from `0.8.1`.
@@ -119,7 +146,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Surfaced the substrate evidence-report family on the `NETBAT/1` wire as four
-  domain-neutral `evidence.*` operations in `hbat`, each a thin adapter over an
+  domain-neutral `evidence.*` operations in `refbat`, each a thin adapter over an
   existing `Store` evidence method (no new analysis):
   `evidence.chain_walk` (`Store::chain_walk_evidence`),
   `evidence.store_resource` (`Store::store_resource_evidence_report`),
@@ -130,7 +157,7 @@ All notable changes to this project will be documented in this file.
 - Added `batpak::store::ProjectionEvidenceRegistry`, a domain-neutral, embedder-
   populated dispatch from a projection id to a type-erased
   `Store::project_run_evidence` runner. It backs `evidence.projection_run` while
-  keeping the wire surface free of domain types; the reference `hbat` host
+  keeping the wire surface free of domain types; the reference `refbat` host
   registers no projections and answers every projection id with an
   unknown-projection error.
 - Extended the TypeScript codegen with the `option<blake3-32-hex>` field token.
@@ -294,9 +321,8 @@ All notable changes to this project will be documented in this file.
   `ReservationReconciliationReportBody`.
 - Removed the transitional `StateTransitionReport` alias; use
   `StateTransitionReportBody`.
-- Removed the in-workspace Rust `clawbat` kit crate and root `cb` layer doc;
-  ClawBat-shaped kit/agent surfaces are downstream consumers of batpak,
-  syncbat, and netbat.
+- Removed the in-workspace Rust downstream kit crate and root `cb` layer doc;
+  downstream kit/agent surfaces are consumers of batpak, syncbat, and netbat.
 - Removed the transitional `syncbat::InvokeResult` alias; use
   `CheckoutResult`.
 - Removed the transitional `syncbat::RegisterOperationPutV1` alias; use
@@ -381,8 +407,8 @@ All notable changes to this project will be documented in this file.
 - Added durable opaque receipt extensions for append and denial receipts.
   Extension bytes are persisted in `.fbat` frames, restored on cold start,
   preserved through idempotency replay, and covered by receipt signatures;
-  `pcp.*` and application namespaces are treated as uninterpreted substrate
-  cargo by `batpak` core.
+  external-profile and application namespaces are treated as uninterpreted
+  substrate cargo by `batpak` core.
 - Added a private store platform backend for target-sensitive fs/sync/lock/
   clock/mmap mechanics, descriptive platform evidence, admission summaries,
   and opt-in profile-verified open through

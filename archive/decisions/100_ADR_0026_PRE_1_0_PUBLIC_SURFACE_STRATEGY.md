@@ -74,6 +74,6 @@ structural checks are not acceptable.
 
 - This ADR does not make `batpak` a userland product surface. Core remains the
   substrate.
-- This ADR does not add PCP semantics to `batpak`.
+- This ADR does not add an external context-profile spec's semantics to `batpak`.
 - This ADR does not include deferred durability-waiter redesign or performance
   threshold calibration.

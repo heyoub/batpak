@@ -17,7 +17,7 @@ use crate::util::{repo_root, run};
 /// Run `cargo machete` over the workspace.
 pub(crate) fn unused_deps() -> Result<()> {
     if !is_machete_installed() {
-        eprintln!(
+        errln!(
             "xtask unused-deps: cargo-machete is not installed.\n\
              Install with: cargo xtask setup --install-tools"
         );

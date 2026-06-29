@@ -10,19 +10,46 @@ mod visibility;
 use self::columnar::ScanIndex;
 pub(crate) use self::entry::{ClockKey, QueryHit};
 pub use self::entry::{DiskPos, IndexEntry};
-use self::interner::StringInterner;
-pub(crate) use self::projection_bridge::{ProjectionCacheStoreStatus, ProjectionReplayPlan};
+use self::interner::{InternId, StringInterner};
+pub(crate) use self::projection_bridge::{
+    projection_kind_matches, ProjectionCacheStoreStatus, ProjectionReplayItem, ProjectionReplayPlan,
+};
 use self::restore::RestoreBase;
 pub(crate) use self::restore::{
     recommended_restore_chunk_count, restore_chunk_ranges, RoutingSummary,
 };
 use self::visibility::SequenceGate;
 use crate::store::config::IndexConfig;
+use crate::store::hidden_ranges::CancelledVisibilityRanges;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+struct LaneHeadKey {
+    entity_id: InternId,
+    lane: u32,
+}
+
+impl LaneHeadKey {
+    fn new(entity_id: InternId, lane: u32) -> Self {
+        Self { entity_id, lane }
+    }
+}
+
+fn lane_visible_from_entries(entries: &[Arc<IndexEntry>]) -> BTreeMap<u32, u64> {
+    let mut lanes = BTreeMap::new();
+    for entry in entries {
+        let visible = entry.global_sequence.saturating_add(1);
+        lanes
+            .entry(entry.dag_lane)
+            .and_modify(|current: &mut u64| *current = (*current).max(visible))
+            .or_insert(visible);
+    }
+    lanes
+}
 
 /// StoreIndex: in-memory 2D index + auxiliaries. Not persisted; rebuilt from segments on cold start.
 /// [DEP:dashmap::DashMap] — see DEPENDENCY SURFACE for deadlock warnings
@@ -63,8 +90,8 @@ pub(crate) struct StoreIndex {
     pub(crate) scan: ScanIndex,
     /// Point lookup: event_id -> entry. O(1) get by ID.
     by_id: DashMap<u128, Arc<IndexEntry>>,
-    /// Chain head: entity -> latest IndexEntry. For prev_hash in writer step 2.
-    latest: DashMap<Arc<str>, Arc<IndexEntry>>,
+    /// Chain head: (entity, lane) -> latest IndexEntry. For prev_hash in writer step 2.
+    latest: DashMap<LaneHeadKey, Arc<IndexEntry>>,
     /// Gated sequence counter: allocator + visibility watermark.
     /// Replaces the former bare `global_sequence: AtomicU64`.
     pub(crate) sequence: SequenceGate,
@@ -138,12 +165,18 @@ impl StoreIndex {
     }
 
     fn insert_inner(&self, entry: IndexEntry) {
-        let entity = entry.coord.entity_arc();
+        let lane = entry.dag_lane;
 
         // Intern entity and scope strings. IDs stored in IndexEntry for
         // compact checkpoint serialization and future InternId-only index.
-        debug_assert_eq!(entry.entity_id, self.interner.intern(entry.coord.entity()));
-        debug_assert_eq!(entry.scope_id, self.interner.intern(entry.coord.scope()));
+        debug_assert!(self
+            .interner
+            .intern(entry.coord.entity())
+            .is_ok_and(|id| id == entry.entity_id));
+        debug_assert!(self
+            .interner
+            .intern(entry.coord.scope())
+            .is_ok_and(|id| id == entry.scope_id));
 
         let key = ClockKey {
             wall_ms: entry.wall_ms,
@@ -153,6 +186,8 @@ impl StoreIndex {
 
         // Arc: one allocation, shared across all maps.
         let arc_entry = Arc::new(entry);
+        let entity = arc_entry.coord.entity_arc();
+        let entity_id = arc_entry.entity_id;
 
         // Primary index: entity -> BTreeMap
         // [DEP:dashmap::DashMap::entry] — holds write lock, release fast
@@ -169,7 +204,8 @@ impl StoreIndex {
             .insert(arc_entry.event_id, Arc::clone(&arc_entry));
 
         // Chain head
-        self.latest.insert(entity, arc_entry);
+        self.latest
+            .insert(LaneHeadKey::new(entity_id, lane), arc_entry);
 
         self.len.fetch_add(1, Ordering::Relaxed);
     }
@@ -193,6 +229,8 @@ impl StoreIndex {
         // depending on when they query relative to this loop.
         for arc_entry in &arc_entries {
             let entity = arc_entry.coord.entity_arc();
+            let lane = arc_entry.dag_lane;
+            let entity_id = arc_entry.entity_id;
             let key = ClockKey {
                 wall_ms: arc_entry.wall_ms,
                 clock: arc_entry.clock,
@@ -212,7 +250,8 @@ impl StoreIndex {
             self.by_id.insert(arc_entry.event_id, Arc::clone(arc_entry));
 
             // Chain head
-            self.latest.insert(entity, Arc::clone(arc_entry));
+            self.latest
+                .insert(LaneHeadKey::new(entity_id, lane), Arc::clone(arc_entry));
 
             // Global sequence already reserved during batch staging via reserve_sequences()
             self.len.fetch_add(1, Ordering::Relaxed);
@@ -227,8 +266,6 @@ impl StoreIndex {
     /// `entries` must be sorted ascending by `global_sequence`. The allocator is
     /// restored to `max(last_sequence + 1, allocator_hint)` and published only
     /// after every base map and overlay view has been rebuilt.
-    // justifies: src/store/index/restore.rs builds restore runs from u32-backed artifact coordinates, so these width checks are supported-target invariants.
-    #[allow(clippy::expect_used)]
     fn restore_sorted_entries_impl(
         &self,
         entries: Vec<IndexEntry>,
@@ -246,18 +283,16 @@ impl StoreIndex {
         let restored = RestoreBase::from_sorted_entries(entries, chunk_count, routing_hint);
         let mut by_id =
             HashMap::<u128, Arc<IndexEntry>>::with_capacity(restored.entries_by_sequence.len());
-        let mut latest =
-            HashMap::<Arc<str>, Arc<IndexEntry>>::with_capacity(restored.routing.entity_runs.len());
+        let mut latest = HashMap::<LaneHeadKey, Arc<IndexEntry>>::new();
 
         for run in &restored.routing.entity_runs {
-            let start = usize::try_from(run.start)
-                .expect("invariant: entity run index fits usize on any supported target");
-            let len = usize::try_from(run.len)
-                .expect("invariant: entity run length fits usize on any supported target");
-            let end = start
-                .checked_add(len)
-                .expect("invariant: entity run start+len fits usize on supported targets");
-            let slice = &restored.entries_by_entity[start..end];
+            let range = run.usize_range()?;
+            let slice = restored.entries_by_entity.get(range).ok_or_else(|| {
+                crate::store::StoreError::corrupt_segment_with_detail(
+                    0,
+                    "routing entity-run range out of bounds for restored entries",
+                )
+            })?;
             if slice.is_empty() {
                 continue;
             }
@@ -275,7 +310,12 @@ impl StoreIndex {
                     )
                 })
                 .collect();
-            latest.insert(Arc::clone(&entity), Arc::clone(&slice[slice.len() - 1]));
+            for entry in slice {
+                latest.insert(
+                    LaneHeadKey::new(entry.entity_id, entry.dag_lane),
+                    Arc::clone(entry),
+                );
+            }
             self.streams.insert(entity, stream);
         }
 
@@ -283,21 +323,22 @@ impl StoreIndex {
             &restored.entries_by_sequence,
             &restored.entries_by_entity,
             &restored.routing,
-        );
+        )?;
         for entry in &restored.entries_by_sequence {
             by_id.insert(entry.event_id, Arc::clone(entry));
         }
         for (event_id, entry) in by_id {
             self.by_id.insert(event_id, entry);
         }
-        for (entity, entry) in latest {
-            self.latest.insert(entity, entry);
+        for (key, entry) in latest {
+            self.latest.insert(key, entry);
         }
 
         self.len
             .store(restored.entries_by_sequence.len(), Ordering::Relaxed);
         before_publish(self);
 
+        let lane_visible = lane_visible_from_entries(&restored.entries_by_sequence);
         let next_sequence = restored
             .entries_by_sequence
             .last()
@@ -306,6 +347,7 @@ impl StoreIndex {
             .max(allocator_hint);
         self.sequence.restore_allocator(next_sequence);
         self.publish(next_sequence, "restore_sorted_entries")?;
+        self.sequence.restore_lane_visible(lane_visible);
         Ok(())
     }
 
@@ -356,6 +398,19 @@ impl StoreIndex {
             .collect()
     }
 
+    pub(crate) fn visible_entries(&self) -> Vec<IndexEntry> {
+        let _read_guard = self.swap_gate.read();
+        let visibility = self.sequence.snapshot();
+        self.by_id
+            .iter()
+            .filter(|r| {
+                let entry = r.value();
+                visibility.is_visible_on_lane(entry.global_sequence, entry.dag_lane)
+            })
+            .map(|r| r.value().as_ref().clone())
+            .collect()
+    }
+
     pub(crate) fn hlc_for_global_sequence(
         &self,
         global_sequence: u64,
@@ -392,6 +447,16 @@ impl StoreIndex {
         operation: &'static str,
     ) -> Result<(), crate::store::StoreError> {
         self.sequence.publish(up_to, operation)
+    }
+
+    pub(crate) fn publish_on_lanes(
+        &self,
+        global_up_to: u64,
+        lanes: impl IntoIterator<Item = (u32, u64)>,
+        operation: &'static str,
+    ) -> Result<(), crate::store::StoreError> {
+        self.sequence
+            .publish_on_lanes(global_up_to, lanes, operation)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -432,8 +497,6 @@ impl StoreIndex {
     ///   (no disk I/O), which is significantly faster than the previous
     ///   protocol of clearing the live index and replaying segments under
     ///   reader visibility.
-    // justifies: src/store/index/restore.rs builds the fresh index from u32-backed routing runs, so these width checks are supported-target invariants.
-    #[allow(clippy::expect_used)]
     pub(crate) fn replace_contents_from_fresh(
         &self,
         fresh: StoreIndex,
@@ -456,7 +519,7 @@ impl StoreIndex {
         // re-prepend the sentinel here (same shape cold-start uses).
         let mut interner_full = vec![String::new()];
         interner_full.extend(fresh.interner.to_snapshot());
-        self.interner.replace_from_full_snapshot(&interner_full);
+        self.interner.replace_from_full_snapshot(&interner_full)?;
 
         // Streams: drain fresh, insert into self.
         for (entity, stream) in fresh.streams.into_iter() {
@@ -465,8 +528,8 @@ impl StoreIndex {
         for (id, entry) in fresh.by_id.into_iter() {
             self.by_id.insert(id, entry);
         }
-        for (entity, latest) in fresh.latest.into_iter() {
-            self.latest.insert(entity, latest);
+        for (key, latest_entry) in fresh.latest.into_iter() {
+            self.latest.insert(key, latest_entry);
         }
 
         // Scan overlays: rebuild from the entries we just populated so the
@@ -483,9 +546,11 @@ impl StoreIndex {
         let fresh_allocated = fresh.sequence.allocated();
         let fresh_visible = fresh.sequence.visible();
         let fresh_cancelled = fresh.sequence.cancelled_ranges_snapshot();
+        let fresh_lane_visible = fresh.sequence.lane_visible_snapshot();
         self.sequence.restore_allocator(fresh_allocated);
         self.sequence
             .publish(fresh_visible, "replace_contents_from_fresh")?;
+        self.sequence.restore_lane_visible(fresh_lane_visible);
         self.sequence.restore_cancelled_ranges(fresh_cancelled);
 
         // Restore len. `fresh.len` is a snapshot of how many entries were
@@ -521,12 +586,14 @@ impl StoreIndex {
         self.sequence.active_fence_token()
     }
 
-    pub(crate) fn finish_visibility_fence(
+    pub(crate) fn finish_visibility_fence_on_lanes(
         &self,
         token: u64,
         publish_to: Option<u64>,
+        lanes: impl IntoIterator<Item = (u32, u64)>,
     ) -> Result<(), crate::store::StoreError> {
-        self.sequence.finish_fence(token, publish_to)
+        self.sequence
+            .finish_fence_on_lanes(token, publish_to, lanes)
     }
 
     pub(crate) fn note_visibility_fence_progress(
@@ -542,173 +609,29 @@ impl StoreIndex {
         &self,
         token: u64,
     ) -> Result<(), crate::store::StoreError> {
-        self.sequence.cancel_fence(token)
+        let mut lane_ranges = BTreeMap::<u32, Vec<(u64, u64)>>::new();
+        if let Some((start, end)) = self.sequence.active_fence_range() {
+            for entry in self.by_id.iter() {
+                let entry = entry.value();
+                if entry.global_sequence >= start && entry.global_sequence < end {
+                    lane_ranges.entry(entry.dag_lane).or_default().push((
+                        entry.global_sequence,
+                        entry.global_sequence.saturating_add(1),
+                    ));
+                }
+            }
+        }
+        self.sequence.cancel_fence(token, lane_ranges)
     }
 
-    pub(crate) fn cancelled_visibility_ranges(&self) -> Vec<(u64, u64)> {
+    pub(crate) fn cancelled_visibility_ranges(&self) -> CancelledVisibilityRanges {
         self.sequence.cancelled_ranges_snapshot()
     }
 
-    pub(crate) fn restore_cancelled_visibility_ranges(&self, ranges: Vec<(u64, u64)>) {
+    pub(crate) fn restore_cancelled_visibility_ranges(&self, ranges: CancelledVisibilityRanges) {
         self.sequence.restore_cancelled_ranges(ranges);
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::coordinate::{Coordinate, Region};
-    use crate::event::{EventKind, HashChain};
-
-    fn make_entry(seq: u64, entity: &str, scope: &str) -> IndexEntry {
-        let coord = Coordinate::new(entity, scope).expect("coord");
-        IndexEntry {
-            event_id: seq as u128 + 1,
-            correlation_id: seq as u128 + 1,
-            causation_id: None,
-            entity_id: self::interner::InternId::sentinel(),
-            scope_id: self::interner::InternId::sentinel(),
-            coord,
-            kind: EventKind::custom(0xF, 1),
-            wall_ms: seq,
-            clock: u32::try_from(seq).expect("small seq"),
-            dag_lane: 0,
-            dag_depth: 0,
-            hash_chain: HashChain::default(),
-            disk_pos: DiskPos {
-                segment_id: 0,
-                offset: seq * 16,
-                length: 16,
-            },
-            global_sequence: seq,
-            receipt_extensions: BTreeMap::new(),
-        }
-    }
-
-    #[test]
-    fn clock_key_orders_by_wall_then_clock_then_uuid() {
-        let mut keys = [
-            ClockKey {
-                wall_ms: 10,
-                clock: 3,
-                uuid: 9,
-            },
-            ClockKey {
-                wall_ms: 9,
-                clock: 99,
-                uuid: 1,
-            },
-            ClockKey {
-                wall_ms: 10,
-                clock: 2,
-                uuid: 99,
-            },
-            ClockKey {
-                wall_ms: 10,
-                clock: 3,
-                uuid: 4,
-            },
-        ];
-
-        keys.sort();
-
-        assert_eq!(
-            keys,
-            [
-                ClockKey {
-                    wall_ms: 9,
-                    clock: 99,
-                    uuid: 1,
-                },
-                ClockKey {
-                    wall_ms: 10,
-                    clock: 2,
-                    uuid: 99,
-                },
-                ClockKey {
-                    wall_ms: 10,
-                    clock: 3,
-                    uuid: 4,
-                },
-                ClockKey {
-                    wall_ms: 10,
-                    clock: 3,
-                    uuid: 9,
-                },
-            ],
-            "PROPERTY: ClockKey ordering must be wall_ms first, then clock, then uuid as the deterministic tiebreaker"
-        );
-    }
-
-    #[test]
-    fn bulk_restore_keeps_entries_invisible_until_publish() {
-        let index = StoreIndex::new();
-        let entity_id = index.interner.intern("entity:bulk");
-        let scope_id = index.interner.intern("scope:bulk");
-        let entries = (0..3)
-            .map(|seq| {
-                let mut entry = make_entry(seq, "entity:bulk", "scope:bulk");
-                entry.entity_id = entity_id;
-                entry.scope_id = scope_id;
-                entry
-            })
-            .collect();
-
-        index
-            .restore_sorted_entries_with_before_publish(entries, 3, |index| {
-                assert_eq!(
-                    index.visible_sequence(),
-                    0,
-                    "visibility watermark must not advance until every view is rebuilt"
-                );
-                assert!(
-                    index.query(&Region::all()).is_empty(),
-                    "PROPERTY: reads must observe neither base maps nor overlays before publish"
-                );
-            })
-            .expect("bulk restore publish must succeed");
-
-        assert_eq!(index.query(&Region::all()).len(), 3);
-        assert_eq!(index.visible_sequence(), 3);
-    }
-
-    #[test]
-    fn upgrade_with_visibility_snapshot_rejects_cancelled_ranges() {
-        let index = StoreIndex::new();
-        let entity_id = index.interner.intern("entity:visibility");
-        let scope_id = index.interner.intern("scope:visibility");
-        for seq in 0..3 {
-            let mut entry = make_entry(seq, "entity:visibility", "scope:visibility");
-            entry.entity_id = entity_id;
-            entry.scope_id = scope_id;
-            index.insert(entry);
-        }
-        index
-            .publish(3, "test-publish")
-            .expect("publish test entries");
-        index.restore_cancelled_visibility_ranges(vec![(1, 2)]);
-
-        let hidden = QueryHit {
-            event_id: 2,
-            global_sequence: 1,
-            disk_pos: DiskPos::new(0, 16, 16),
-            kind: EventKind::custom(0xF, 1),
-            clock: 1,
-        };
-        let (hits, visibility) = index.query_hits_with_snapshot(&Region::all());
-
-        assert_eq!(
-            hits.iter()
-                .map(|hit| hit.global_sequence)
-                .collect::<Vec<_>>(),
-            vec![0, 2],
-            "PROPERTY: query-hit collection must skip cancelled hidden ranges below the visible watermark"
-        );
-        assert!(
-            index
-                .upgrade_hit_with_visibility(hidden, &visibility)
-                .is_none(),
-            "PROPERTY: hit upgrade must use the same hidden-range visibility predicate as query collection"
-        );
-    }
-}
+mod tests;

@@ -2,7 +2,7 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
-use std::io;
+use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -219,7 +219,8 @@ impl FlakeyDevice {
 impl Drop for FlakeyDevice {
     fn drop(&mut self) {
         if let Err(err) = self.teardown() {
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr(),
                 "warning: dm-flakey teardown for {} was incomplete: {err}",
                 self.device_name
             );

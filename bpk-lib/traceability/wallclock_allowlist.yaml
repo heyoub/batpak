@@ -1,0 +1,30 @@
+# Wall-clock-in-correctness-tests allowlist (GAUNT-FLAKE-7, slug
+# no-wallclock-asserts). Each entry pins a CURRENT correctness test that
+# pairs Instant::now() with an elapsed/Duration assertion (a flake source).
+# The list only shrinks: convert each to an injected-Clock logical assertion
+# (or move it to a perf_gates*.rs lane) and remove its entry. Anti-rot: a pin
+# matching no live offender fails the gate.
+- key: "crates/core/tests/atomic_batch.rs::batch_publish_atomicity_concurrent_reader_sees_zero_or_all"
+- key: "crates/core/tests/config_propagation.rs::store_config_all_fields_overridable"
+- key: "crates/core/tests/control_plane_surface_pressure.rs::try_submit_batch_returns_retry_under_pressure"
+- key: "crates/core/tests/control_plane_surface_pressure.rs::try_submit_returns_retry_under_pressure"
+- key: "crates/core/tests/control_plane_surface_ticket.rs::scan_fold_converges_to_project_count"
+- key: "crates/core/tests/control_plane_surface_ticket.rs::wait_until_ticket_receiver_has_value"
+- key: "crates/core/tests/cursor_worker_restart.rs::cursor_worker_restarts_from_last_committed_checkpoint_after_panic"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_applied_blocks_until_lagging_projection_advances"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_applied_returns_immediately_when_already_past"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_durable_blocks_then_returns_after_advance"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_durable_returns_immediately_when_already_past"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_durable_returns_timeout_when_target_unreachable"
+- key: "crates/core/tests/durable_frontier_waits.rs::wait_for_visible_returns_immediately_when_already_past"
+- key: "crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_applied_gate_blocks_until_min_projection_advances"
+- key: "crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_durable_gate_blocks_until_synced"
+- key: "crates/core/tests/durable_frontier_waits_append_gate.rs::append_with_visible_gate_returns_after_publish"
+- key: "crates/core/tests/durable_frontier_waits_append_gate.rs::append_without_gate_returns_immediately"
+- key: "crates/core/tests/durable_frontier_waits_append_gate.rs::batch_per_item_gate_ignored"
+- key: "crates/core/tests/store_locking.rs::wait_for_mutable_open_after_release"
+- key: "crates/core/tests/store_locking.rs::wait_for_read_only_open_after_release"
+- key: "crates/core/tests/store_reactive_behavior.rs::react_loop_spawns_and_processes"
+- key: "crates/core/tests/store_restart_policy.rs::writer_restart_bounded_respects_limit"
+- key: "crates/core/tests/store_restart_policy.rs::writer_restart_once_gives_up_after_second_panic"
+- key: "crates/core/tests/store_snapshot_compaction.rs::snapshot_waits_for_in_flight_compaction"

@@ -205,11 +205,12 @@ impl BatchAppendItem {
 /// AppendReceipt: witness that an event was persisted.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+#[must_use]
 pub struct AppendReceipt {
     /// Unique ID of the persisted event.
     pub event_id: EventId,
     /// Global sequence number assigned at commit time.
-    pub sequence: u64,
+    pub global_sequence: u64,
     /// Location of the event frame on disk.
     pub(crate) disk_pos: DiskPos,
     /// Blake3 hash of the committed payload bytes.
@@ -225,11 +226,12 @@ pub struct AppendReceipt {
 /// Receipt returned when a denial trace is persisted as `SYSTEM_DENIAL`.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
+#[must_use]
 pub struct DenialReceipt {
     /// Unique ID of the persisted denial event.
     pub event_id: EventId,
     /// Global sequence number assigned at commit time.
-    pub sequence: u64,
+    pub global_sequence: u64,
     /// Location of the denial frame on disk.
     pub(crate) disk_pos: DiskPos,
     /// Blake3 hash of the denial payload bytes.
@@ -240,6 +242,31 @@ pub struct DenialReceipt {
     pub signature: Option<[u8; 64]>,
     /// Typed side-data attached to the denial receipt envelope.
     pub extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+}
+
+/// Inputs for [`Store::append_denial`](crate::store::Store::append_denial): the
+/// gate denial to persist as a normal per-entity chain event (a `SYSTEM_DENIAL`
+/// audit receipt).
+///
+/// Bundling the inputs into one request keeps the public denial-append surface a
+/// single self-describing argument instead of a positional argument list.
+/// Borrowed fields keep the call zero-copy; owned fields (`pipeline_id`,
+/// `options`) are moved into the request.
+pub struct DenialRequest<'a, Ctx> {
+    /// Per-entity coordinate the denial event is appended to.
+    pub coord: &'a Coordinate,
+    /// The kind the rejected write proposed (recorded in the denial payload).
+    pub proposed_kind: EventKind,
+    /// The gate set that produced the denial; used to build the denial trace.
+    pub gate_set: &'a crate::guard::GateSet<Ctx>,
+    /// The specific gate denial being recorded.
+    pub failing: &'a crate::guard::Denial,
+    /// Optional content hash of the rejected payload, if it was computed.
+    pub proposed_content_hash: Option<[u8; 32]>,
+    /// Optional pipeline identifier the rejected write flowed through.
+    pub pipeline_id: Option<String>,
+    /// Append options (e.g. extensions, durability gate) for the denial event.
+    pub options: AppendOptions,
 }
 
 /// Encoded extension payload bytes.
@@ -497,14 +524,30 @@ impl ExtensionKey {
 pub struct AppendPositionHint {
     /// Parallel branch index within the DAG.
     pub lane: u32,
-    /// Branch depth within the DAG.
+    /// Branch depth within the DAG, or the parent depth when
+    /// [`branch_root`](Self::branch_root) is `true`.
     pub depth: u32,
+    /// Whether this append starts a new branch at `depth + 1`.
+    pub branch_root: bool,
 }
 
 impl AppendPositionHint {
     /// Create a new DAG lane/depth hint for append operations.
     pub const fn new(lane: u32, depth: u32) -> Self {
-        Self { lane, depth }
+        Self {
+            lane,
+            depth,
+            branch_root: false,
+        }
+    }
+
+    /// Create a hint for the first event on a forked lane.
+    pub const fn branch_root(lane: u32, parent_depth: u32) -> Self {
+        Self {
+            lane,
+            depth: parent_depth,
+            branch_root: true,
+        }
     }
 }
 
@@ -549,6 +592,7 @@ impl AppendOptions {
     }
 
     /// Set expected sequence for compare-and-swap (CAS) check.
+    #[must_use]
     pub fn with_cas(mut self, seq: u32) -> Self {
         self.expected_sequence = Some(seq);
         self
@@ -558,12 +602,14 @@ impl AppendOptions {
     ///
     /// Accepts the typed [`IdempotencyKey`] newtype; pass `IdempotencyKey::from(raw_u128)`
     /// if a wire-decode path holds the value as a raw integer.
+    #[must_use]
     pub fn with_idempotency(mut self, key: IdempotencyKey) -> Self {
         self.idempotency_key = Some(key);
         self
     }
 
     /// Set EventHeader flags (bitwise OR of FLAG_REQUIRES_ACK, FLAG_TRANSACTIONAL, FLAG_REPLAY).
+    #[must_use]
     pub fn with_flags(mut self, flags: u8) -> Self {
         self.flags = flags;
         self
@@ -572,6 +618,7 @@ impl AppendOptions {
     /// Set custom correlation ID. The typed newtype makes it structurally
     /// impossible to pass (e.g.) an [`crate::id::EventId`] where a
     /// correlation id was intended.
+    #[must_use]
     pub fn with_correlation(mut self, id: CorrelationId) -> Self {
         self.correlation_id = Some(id);
         self
@@ -580,6 +627,7 @@ impl AppendOptions {
     /// Set custom causation ID. Passing a [`CausationId`] wrapping `0` is a
     /// no-op — 0 is the wire sentinel for "no causation" and is treated
     /// identically to not calling this method.
+    #[must_use]
     pub fn with_causation(mut self, id: CausationId) -> Self {
         use crate::id::EntityIdType;
         if id.as_u128() != 0 {
@@ -589,12 +637,14 @@ impl AppendOptions {
     }
 
     /// Set the DAG lane/depth hint while leaving HLC and sequence to the writer.
+    #[must_use]
     pub fn with_position_hint(mut self, hint: AppendPositionHint) -> Self {
         self.position_hint = Some(hint);
         self
     }
 
     /// Set an append-time durability gate.
+    #[must_use]
     pub fn with_gate(mut self, gate: DurabilityGate) -> Self {
         self.gate = Some(gate);
         self
@@ -694,60 +744,5 @@ impl SigningDowngradeBody {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn with_causation_zero_is_noop() {
-        let opts = AppendOptions::default().with_causation(CausationId::from(0u128));
-        assert_eq!(
-            opts.causation_id, None,
-            "0 is the wire sentinel — must not become Some(0)"
-        );
-    }
-
-    #[test]
-    fn with_causation_nonzero_is_recorded() {
-        let opts = AppendOptions::default().with_causation(CausationId::from(42u128));
-        assert_eq!(opts.causation_id, Some(CausationId::from(42u128)));
-    }
-
-    #[test]
-    fn causation_ref_absolute_zero_resolves_to_none() {
-        let result = CausationRef::Absolute(0).resolve(None, 0, |_| unreachable!());
-        assert_eq!(
-            result.expect("resolve must not error"),
-            None,
-            "Absolute(0) must resolve to None"
-        );
-    }
-
-    #[test]
-    fn causation_ref_absolute_nonzero_resolves_to_some() {
-        let result = CausationRef::Absolute(99).resolve(None, 0, |_| unreachable!());
-        assert_eq!(result.expect("resolve must not error"), Some(99));
-    }
-
-    #[test]
-    fn extension_key_reserved_constructor_allows_batpak_namespace() {
-        let key = ExtensionKey::reserved("batpak.signing.downgrade");
-        assert_eq!(key.as_str(), "batpak.signing.downgrade");
-    }
-
-    #[test]
-    fn extension_key_rejects_keys_over_max_length() {
-        let too_long = format!("acme.{}", "a".repeat(252));
-        assert_eq!(ExtensionKey::new(too_long), Err(ExtensionKeyError::TooLong));
-    }
-
-    #[test]
-    fn extension_key_error_preserves_display_and_error_trait() {
-        fn assert_error_trait<E: std::error::Error>() {}
-
-        assert_error_trait::<ExtensionKeyError>();
-        assert_eq!(
-            ExtensionKeyError::InvalidNamespaceFormat.to_string(),
-            "extension key must have exactly one non-empty namespace separator"
-        );
-    }
-}
+#[path = "append_tests.rs"]
+mod tests;

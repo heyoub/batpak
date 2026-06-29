@@ -8,7 +8,7 @@ Accepted for the 0.7.6 correction cut.
 
 R4 hardened `batpak` core into the substrate boundary: durable event storage,
 visibility, receipts, evidence, clocks, and delivery canals are owned by core.
-After retiring the in-workspace Rust `clawbat` kit crate, `syncbat` is the
+After retiring the in-workspace Rust downstream kit crate, `syncbat` is the
 runtime layer between application code and the substrate.
 
 `syncbat` is intentionally small, sync, and explicit. Callers register
@@ -30,7 +30,7 @@ through batpak-owned append surfaces.
 - deterministic catalog rebuild from batpak store sequence order
 
 `syncbat` does not own network framing, async runtimes, application kit
-vocabulary, PCP, MCP, browser, agent semantics, or native batpak store internals
+vocabulary, an external context-profile spec, MCP, browser, agent semantics, or native batpak store internals
 beyond public API calls.
 
 ## Build Contract

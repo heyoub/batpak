@@ -1,12 +1,9 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, ADR-0010; this file uses panic-on-error test assertions for registry contract failures.
-#![allow(clippy::panic)]
 //! PROVES: EventPayload registry validation exposes clean, warn, fail-fast, and explicit revalidation policy.
 //! CATCHES: registry validator cache, error, and StoreConfig policy regressions.
 //! SEEDED: deterministic / no randomness.
 
-mod support;
 use batpak::store::Store;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
 #[test]
 fn public_payload_registry_validator_reports_clean_registry() {
@@ -55,4 +52,27 @@ fn store_open_accepts_explicit_payload_validation_policy_when_registry_is_clean(
     )
     .expect("clean registry opens in fail-fast mode");
     store.close().expect("close store");
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, EventPayload)]
+#[batpak(category = 0xF, type_id = 0x120)]
+struct StartupPayload {
+    value: u64,
+}
+
+#[test]
+fn startup_validate_event_payload_registry_before_fail_fast_open(
+) -> Result<(), Box<dyn std::error::Error>> {
+    validate_event_payload_registry().map_err(std::io::Error::other)?;
+    let dir = tempfile::tempdir()?;
+    let store = Store::open(
+        StoreConfig::new(dir.path())
+            .with_event_payload_validation(EventPayloadValidation::FailFast),
+    )?;
+    let coord = Coordinate::new("entity:registry-startup", "scope:payloads")?;
+    let receipt = store.append_typed(&coord, &StartupPayload { value: 1 })?;
+    let stored = store.get(receipt.event_id)?;
+    assert_eq!(stored.event.event_kind(), StartupPayload::KIND);
+    store.close()?;
+    Ok(())
 }

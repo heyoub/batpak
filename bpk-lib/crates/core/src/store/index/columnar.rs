@@ -33,14 +33,14 @@
 //! SIMD intrinsics; that specialization is not yet implemented.
 
 mod aosoa;
-mod aosoa64simd;
 mod projection_fast_paths;
 mod routing;
 mod soa;
 mod soaos;
 
 use crate::event::EventKind;
-use crate::store::index::{ClockKey, DiskPos, IndexEntry, QueryHit, RoutingSummary};
+use crate::store::index::{ClockKey, IndexEntry, QueryHit, RoutingSummary};
+use crate::store::StoreError;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashSet};
@@ -49,23 +49,13 @@ use std::sync::Arc;
 use aosoa::AoSoAInner;
 #[cfg(test)]
 use aosoa::Tile;
-use aosoa64simd::AoSoA64SimdInner;
 #[cfg(test)]
 use routing::{ProjectionSupport, ScanCapabilities, ScanRoute};
 use soa::SoAInner;
 pub(crate) use soaos::CachedProjectionSlot;
 use soaos::SoAoSInner;
 
-type ProjectionCandidates = (u64, u64, Vec<(u64, DiskPos)>);
-
-/// Reconstruct the raw `u16` wire value from an `EventKind`.
-///
-/// Delegates to [`EventKind::as_raw_u16`], the canonical
-/// `(category << 12) | type_id` encoding.
-#[inline]
-fn event_kind_raw(kind: EventKind) -> u16 {
-    kind.as_raw_u16()
-}
+type ProjectionCandidates = (u64, u64, Vec<QueryHit>);
 
 /// Post-filter, sort, and truncate for non-SoA bounded-scan fallback.
 ///
@@ -115,13 +105,6 @@ enum ColumnarVariant {
     /// the next lever — implement only after benchmarking confirms the tile
     /// structure earns the route on target hardware.
     AoSoA64(RwLock<AoSoAInner<64>>),
-    /// Experimental mixed-kind 64-element tiles with inline `[u16; 64]` kinds array.
-    ///
-    /// Unlike `AoSoA64` (kind-homogeneous tiles + tile-skip), this variant packs
-    /// any kind into a tile and scans with a two-pass auto-vectorizable loop.
-    /// Benchmarked head-to-head against `AoSoA64` and `SoA` on sorted and
-    /// interleaved corpora. Not default-routed until it clears the 15% threshold.
-    AoSoA64Simd(RwLock<AoSoA64SimdInner>),
     /// Hybrid AoS-outer (entity groups), SoA-inner (parallel arrays per entity).
     SoAoS(RwLock<SoAoSInner>),
 }
@@ -176,13 +159,6 @@ impl ColumnarIndex {
         }
     }
 
-    /// Create a new experimental AoSoA64Simd index (mixed-kind, inline kinds array).
-    pub(crate) fn new_aosoa64_simd() -> Self {
-        Self {
-            inner: ColumnarVariant::AoSoA64Simd(RwLock::new(AoSoA64SimdInner::new())),
-        }
-    }
-
     /// Create a new SoAoS (hybrid AoS-outer, SoA-inner) index.
     pub(crate) fn new_soaos() -> Self {
         Self {
@@ -203,7 +179,6 @@ impl ColumnarIndex {
             #[cfg(test)]
             ColumnarVariant::AoSoA16(lock) => lock.write().push(entry),
             ColumnarVariant::AoSoA64(lock) => lock.write().push(entry),
-            ColumnarVariant::AoSoA64Simd(lock) => lock.write().push(entry),
             ColumnarVariant::SoAoS(lock) => lock.write().push(entry),
         }
     }
@@ -213,7 +188,7 @@ impl ColumnarIndex {
         entries_by_sequence: &[Arc<IndexEntry>],
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,
-    ) {
+    ) -> Result<(), StoreError> {
         match &self.inner {
             ColumnarVariant::SoA(lock) => {
                 *lock.write() = SoAInner::from_entries(entries_by_sequence)
@@ -229,20 +204,17 @@ impl ColumnarIndex {
             ColumnarVariant::AoSoA64(lock) => {
                 *lock.write() = AoSoAInner::<64>::from_entries(entries_by_sequence)
             }
-            ColumnarVariant::AoSoA64Simd(lock) => {
-                *lock.write() = AoSoA64SimdInner::from_entries(entries_by_sequence)
-            }
             ColumnarVariant::SoAoS(lock) => {
-                *lock.write() = SoAoSInner::from_restore_base(entries_by_entity, routing)
+                *lock.write() = SoAoSInner::from_restore_base(entries_by_entity, routing)?
             }
         }
+        Ok(())
     }
 
     fn query_hits_sorted(&self, query: EntryQuery<'_>) -> Vec<QueryHit> {
         let mut results = match &self.inner {
             ColumnarVariant::SoA(lock) => lock.read().hits_candidates(&query),
             ColumnarVariant::AoSoA64(lock) => lock.read().hits_candidates(&query),
-            ColumnarVariant::AoSoA64Simd(lock) => lock.read().hits_candidates(&query),
             ColumnarVariant::SoAoS(lock) => lock.read().hits_candidates(&query),
             #[cfg(test)]
             ColumnarVariant::AoSoA8(lock) => lock.read().hits_candidates(&query),
@@ -276,11 +248,6 @@ impl ColumnarIndex {
                     .hits_candidates_after(&query, after_seq, started, limit)
             }
             ColumnarVariant::AoSoA64(lock) => {
-                let mut v = lock.read().hits_candidates(&query);
-                apply_after_bounds(&mut v, after_seq, started, limit);
-                v
-            }
-            ColumnarVariant::AoSoA64Simd(lock) => {
                 let mut v = lock.read().hits_candidates(&query);
                 apply_after_bounds(&mut v, after_seq, started, limit);
                 v
@@ -365,10 +332,9 @@ impl ColumnarIndex {
     fn with_tile8<R>(&self, idx: usize, f: impl FnOnce(&Tile<8>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA8(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_)
-            | ColumnarVariant::SoAoS(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) | ColumnarVariant::SoAoS(_) => {
+                None
+            }
             #[cfg(test)]
             ColumnarVariant::AoSoA16(_) => None,
         }
@@ -380,10 +346,9 @@ impl ColumnarIndex {
     fn with_tile16<R>(&self, idx: usize, f: impl FnOnce(&Tile<16>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA16(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64(_)
-            | ColumnarVariant::AoSoA64Simd(_)
-            | ColumnarVariant::SoAoS(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::AoSoA64(_) | ColumnarVariant::SoAoS(_) => {
+                None
+            }
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) => None,
         }
@@ -395,9 +360,7 @@ impl ColumnarIndex {
     fn with_tile64<R>(&self, idx: usize, f: impl FnOnce(&Tile<64>) -> R) -> Option<R> {
         match &self.inner {
             ColumnarVariant::AoSoA64(lock) => lock.read().with_tile(idx, f),
-            ColumnarVariant::SoA(_)
-            | ColumnarVariant::AoSoA64Simd(_)
-            | ColumnarVariant::SoAoS(_) => None,
+            ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => None,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => None,
         }
@@ -412,7 +375,6 @@ impl ColumnarIndex {
             #[cfg(test)]
             ColumnarVariant::AoSoA16(lock) => lock.write().clear(),
             ColumnarVariant::AoSoA64(lock) => lock.write().clear(),
-            ColumnarVariant::AoSoA64Simd(lock) => lock.write().clear(),
             ColumnarVariant::SoAoS(lock) => lock.write().clear(),
         }
     }
@@ -421,7 +383,6 @@ impl ColumnarIndex {
     pub(crate) fn tile_count(&self) -> usize {
         match &self.inner {
             ColumnarVariant::AoSoA64(lock) => lock.read().tiles.len(),
-            ColumnarVariant::AoSoA64Simd(lock) => lock.read().tiles.len(),
             ColumnarVariant::SoA(_) | ColumnarVariant::SoAoS(_) => 0,
             #[cfg(test)]
             ColumnarVariant::AoSoA8(_) | ColumnarVariant::AoSoA16(_) => 0,
@@ -445,8 +406,6 @@ pub(crate) struct ScanIndex {
     entity_groups: Option<ColumnarIndex>,
     /// Tiled replay/scanning overlay (kind-homogeneous, tile-skip).
     tiles64: Option<ColumnarIndex>,
-    /// Experimental tiled overlay (mixed-kind, inline kinds array, auto-vectorizable).
-    tiles64_simd: Option<ColumnarIndex>,
 }
 
 impl ScanIndex {
@@ -455,7 +414,6 @@ impl ScanIndex {
         let soa = config.topology.soa_enabled();
         let entity_groups = config.topology.entity_groups_enabled();
         let tiles64 = config.topology.tiles64_enabled();
-        let tiles64_simd = config.topology.tiles64_simd_enabled();
 
         Self {
             by_fact: DashMap::new(),
@@ -463,7 +421,6 @@ impl ScanIndex {
             soa: soa.then(ColumnarIndex::new_soa),
             entity_groups: entity_groups.then(ColumnarIndex::new_soaos),
             tiles64: tiles64.then(ColumnarIndex::new_aosoa64),
-            tiles64_simd: tiles64_simd.then(ColumnarIndex::new_aosoa64_simd),
         }
     }
 
@@ -500,9 +457,6 @@ impl ScanIndex {
         if let Some(idx) = &self.tiles64 {
             idx.insert(entry);
         }
-        if let Some(idx) = &self.tiles64_simd {
-            idx.insert(entry);
-        }
     }
 
     pub(crate) fn rebuild_from_restore_base(
@@ -510,7 +464,7 @@ impl ScanIndex {
         entries_by_sequence: &[Arc<IndexEntry>],
         entries_by_entity: &[Arc<IndexEntry>],
         routing: &RoutingSummary,
-    ) {
+    ) -> Result<(), StoreError> {
         self.by_fact.clear();
         self.scope_entities.clear();
 
@@ -542,17 +496,15 @@ impl ScanIndex {
         }
 
         if let Some(idx) = &self.soa {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
         if let Some(idx) = &self.entity_groups {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
         if let Some(idx) = &self.tiles64 {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
+            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing)?;
         }
-        if let Some(idx) = &self.tiles64_simd {
-            idx.rebuild_from_restore_base(entries_by_sequence, entries_by_entity, routing);
-        }
+        Ok(())
     }
 
     /// Return the set of entity strings registered under `scope` (Maps variant only).
@@ -576,9 +528,6 @@ impl ScanIndex {
             idx.clear();
         }
         if let Some(idx) = &self.tiles64 {
-            idx.clear();
-        }
-        if let Some(idx) = &self.tiles64_simd {
             idx.clear();
         }
     }

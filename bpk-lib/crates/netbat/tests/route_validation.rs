@@ -1,7 +1,6 @@
 //! PROVES: INV-NETBAT-BOUNDARY-THIN
 //! CATCHES: invalid routes, duplicate server exposures, and syncbat operation-name grammar drift at the boundary.
 //! SEEDED: fixed module and endpoint descriptors.
-#![allow(clippy::panic)]
 
 use netbat as nb;
 use syncbat::{EffectClass, Module, OperationDescriptor};
@@ -51,10 +50,9 @@ fn route_constructors_accept_stable_boundary_shapes() {
 
 #[test]
 fn endpoint_rejects_bad_operation_names() {
-    let err = match nb::Endpoint::new("", "/api/ping") {
-        Ok(_) => panic!("expected operation-name rejection for empty name"),
-        Err(error) => error,
-    };
+    let err = nb::Endpoint::new("", "/api/ping")
+        .map(|_| ())
+        .expect_err("expected operation-name rejection for empty name");
     assert_eq!(
         err,
         nb::RouteValidationError::InvalidOperationName {
@@ -71,10 +69,9 @@ fn endpoint_rejects_bad_operation_names() {
         "ping?x",
         "ping x",
     ] {
-        let err = match nb::Endpoint::new(name, "/api/ping") {
-            Ok(_) => panic!("expected operation-name rejection for {name:?}"),
-            Err(error) => error,
-        };
+        let err = nb::Endpoint::new(name, "/api/ping")
+            .map(|_| ())
+            .expect_err(&format!("expected operation-name rejection for {name:?}"));
 
         assert!(
             matches!(err, nb::RouteValidationError::InvalidOperationName { .. }),
@@ -98,10 +95,9 @@ fn endpoint_rejects_bad_paths() {
         "/api/ping x",
         "/api\\ping",
     ] {
-        let err = match nb::Endpoint::new("ping", path) {
-            Ok(_) => panic!("expected path rejection for {path:?}"),
-            Err(error) => error,
-        };
+        let err = nb::Endpoint::new("ping", path)
+            .map(|_| ())
+            .expect_err(&format!("expected path rejection for {path:?}"));
 
         assert!(
             matches!(err, nb::RouteValidationError::InvalidPath { .. }),
@@ -115,10 +111,9 @@ fn route_rejects_bad_method_labels() {
     let endpoint = nb::Endpoint::new("ping", "/api/ping").expect("endpoint validates");
 
     for method in ["", "call", "CALL POST", "CALL/POST"] {
-        let err = match nb::Route::new(method, endpoint.clone()) {
-            Ok(_) => panic!("expected method rejection for {method:?}"),
-            Err(error) => error,
-        };
+        let err = nb::Route::new(method, endpoint.clone())
+            .map(|_| ())
+            .expect_err(&format!("expected method rejection for {method:?}"));
 
         assert!(
             matches!(err, nb::RouteValidationError::InvalidMethod { .. }),
@@ -140,10 +135,9 @@ fn server_module_exposure_rejects_bad_base_paths() {
         "api\\v1",
     ] {
         let module = Module::from_operations("health", [PING]).expect("module builds");
-        let err = match nb::ServerModule::expose(module, base_path) {
-            Ok(_) => panic!("expected base path rejection for {base_path:?}"),
-            Err(error) => error,
-        };
+        let err = nb::ServerModule::expose(module, base_path)
+            .map(|_| ())
+            .expect_err(&format!("expected base path rejection for {base_path:?}"));
 
         assert!(
             matches!(err, nb::RouteValidationError::InvalidPath { .. }),
@@ -161,11 +155,10 @@ fn server_rejects_duplicate_method_path_pairs_across_modules() {
         .mount(nb::ServerModule::expose(first, "/api").expect("first exposes"))
         .expect("first mounts");
 
-    let err = match server.mount(nb::ServerModule::expose(second, "/api").expect("second exposes"))
-    {
-        Ok(_) => panic!("expected duplicate route rejection"),
-        Err(error) => error,
-    };
+    let err = server
+        .mount(nb::ServerModule::expose(second, "/api").expect("second exposes"))
+        .map(|_| ())
+        .expect_err("expected duplicate route rejection");
 
     assert_eq!(
         err,

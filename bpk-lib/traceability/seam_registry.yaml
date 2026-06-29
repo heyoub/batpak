@@ -1,0 +1,133 @@
+# seam_registry.yaml — authoritative critical mutation seam map (Thread #64-D).
+#
+# Single source listing every slug behind `critical_mutation_seams()` smoke coverage,
+# its assurance level, and the repo-relative globs cargo-mutants grades. Kept in
+# lockstep with `tools/integrity/src/assurance.rs::CRITICAL_SEAM_MUTANT_GLOBS`
+# by `assurance::check_seam_registry_lockstep`.
+#
+# Schema — one entry per seam slug:
+#   slug:             str   — `critical_mutation_seams()` slug
+#   assurance_level:  str   — L0..L4 from traceability/assurance_levels.yaml
+#   dst_coverage:     bool  — whether the graduated DST corpus targets this seam today
+#   globs:            list  — repo-relative mutation globs for the seam
+
+- slug: writer-commit
+  assurance_level: L4
+  dst_coverage: true
+  globs:
+    - crates/core/src/store/write/**/*.rs
+    - crates/core/src/store/write/control/**/*.rs
+
+- slug: cursor-delivery
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/delivery/cursor.rs
+    - crates/core/src/store/delivery/observation.rs
+    - crates/core/src/store/reactor_typed.rs
+
+- slug: projection-flow
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/projection/flow/**/*.rs
+    - crates/core/src/store/projection/registry.rs
+    - crates/core/src/store/projection/mod.rs
+    - crates/core/src/store/projection/watch.rs
+
+- slug: segment-scan
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/segment/scan/**/*.rs
+
+- slug: hash-chain-replay
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/ancestry/by_hash.rs
+    - crates/core/src/store/cold_start/rebuild.rs
+    - crates/core/src/store/chain_walk.rs
+    - crates/core/src/store/read_walk.rs
+
+- slug: frontier-wait-durable
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/write/writer.rs
+
+- slug: frontier-append-gate
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/gate.rs
+
+- slug: event-payload-registry-validator
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/event/payload.rs
+    - crates/core/src/store/config.rs
+    - crates/core/src/store/mod.rs
+
+- slug: platform-backend
+  assurance_level: L4
+  dst_coverage: false
+  globs:
+    - crates/core/src/store/platform/**/*.rs
+    - crates/core/src/store/config.rs
+    - crates/core/src/store/mod.rs
+
+- slug: testing-ledger-structural-lint
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - tools/integrity/src/harness_lints.rs
+
+- slug: syncbat-runtime-dispatch
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/syncbat/src/builder.rs
+    - crates/syncbat/src/core.rs
+    - crates/syncbat/src/error.rs
+    - crates/syncbat/src/handler.rs
+    - crates/syncbat/src/operation.rs
+    - crates/syncbat/src/receipt.rs
+    - crates/syncbat/src/store_sink.rs
+
+- slug: syncbat-register-catalog
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/syncbat/src/register.rs
+    - crates/syncbat/src/register_store/**/*.rs
+
+- slug: syncbat-subscription-runtime
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/syncbat/src/subscription_runtime/**/*.rs
+    - crates/syncbat/src/operation_status.rs
+    - crates/syncbat/src/operation_status_sink.rs
+
+- slug: netbat-boundary-protocol
+  assurance_level: L3
+  dst_coverage: false
+  globs:
+    - crates/netbat/src/lib.rs
+    - crates/netbat/src/route.rs
+    - crates/netbat/src/transport/**/*.rs
+
+- slug: fork-isolation
+  assurance_level: L4
+  dst_coverage: true
+  globs:
+    - crates/core/src/store/file_classification.rs
+    - crates/core/src/store/fork_report.rs
+
+- slug: import-reapply
+  assurance_level: L4
+  dst_coverage: true
+  globs:
+    - crates/core/src/store/import.rs

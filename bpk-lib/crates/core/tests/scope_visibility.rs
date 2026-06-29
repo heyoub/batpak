@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; tests in tests/scope_visibility.rs rely on expect/panic on unreachable failures; clippy::unwrap_used and clippy::panic are the standard harness allowances for integration tests.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Scope query visibility + filter composition across index overlays.
 //!
 //! [INV-COORDINATE-IS-LOGICAL-STREAM] `Region::scope(...)` returns only events whose
@@ -8,14 +6,13 @@
 //! post-filter). Exercised across every public overlay topology so any
 //! overlay that forgets the scope gate surfaces as a fan-out delta.
 
-use batpak::coordinate::{KindFilter, Region};
+use batpak::coordinate::{ClockRange, KindFilter, Region};
 use batpak::event::EventKind;
 use batpak::prelude::Coordinate;
 use batpak::store::{Cursor, IndexTopology, Store, StoreConfig, StoreError};
 use tempfile::TempDir;
 
-#[path = "support/bounded_writer_reply.rs"]
-mod bounded_writer_reply;
+use batpak_testkit::bounded_writer_reply;
 use bounded_writer_reply::writer_reply;
 
 fn topologies() -> Vec<(&'static str, IndexTopology)> {
@@ -24,7 +21,6 @@ fn topologies() -> Vec<(&'static str, IndexTopology)> {
         ("scan", IndexTopology::scan()),
         ("entity-local", IndexTopology::entity_local()),
         ("tiled", IndexTopology::tiled()),
-        ("tiled_simd", IndexTopology::tiled_simd()),
         ("all", IndexTopology::all()),
     ]
 }
@@ -44,7 +40,7 @@ const KIND_B: EventKind = EventKind::custom(0xC, 2);
 fn seed(store: &Store, entity: &str, scope: &str, kind: EventKind, count: u32) {
     let coord = Coordinate::new(entity, scope).expect("valid coord");
     for i in 0..count {
-        store
+        let _ = store
             .append(&coord, kind, &serde_json::json!({"i": i}))
             .expect("append");
     }
@@ -141,7 +137,10 @@ fn run_matrix(label: &str, store: &Store) {
 
     // Scope + clock_range: (0..=2) is 3 clocks per entity-scope stream.
     // scope:A contains two streams (alpha, beta), so expect 6 entries.
-    let scope_a_clocked = store.query(&Region::scope("scope:A").with_clock_range((0, 2)));
+    let scope_a_clocked = store.query(
+        &Region::scope("scope:A")
+            .with_clock_range(ClockRange::new(0, 2).expect("valid clock range")),
+    );
     assert_eq!(
         scope_a_clocked.len(),
         6,
@@ -186,7 +185,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
     let store = open_store(&dir, IndexTopology::all());
     let coord = Coordinate::new("entity:scope-gap", "scope:gap").expect("valid coord");
 
-    store
+    let _ = store
         .append(&coord, KIND_A, &serde_json::json!({"baseline": true}))
         .expect("append baseline");
 
@@ -202,10 +201,9 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
         .collect();
     fence.cancel().expect("cancel visibility fence");
     for ticket in hidden_tickets {
-        let err = match writer_reply(ticket.receiver(), "writer ticket") {
-            Ok(_) => panic!("PROPERTY: cancelled fence ticket must not resolve as visible success"),
-            Err(err) => err,
-        };
+        let err = writer_reply(ticket.receiver(), "writer ticket")
+            .map(|_| ())
+            .expect_err("PROPERTY: cancelled fence ticket must not resolve as visible success");
         assert!(
             matches!(err, StoreError::VisibilityFenceCancelled),
             "PROPERTY: cancelled fence work must surface VisibilityFenceCancelled, got {err:?}"
@@ -234,7 +232,7 @@ fn bounded_scope_cursor_skips_hidden_gap_and_reaches_later_visible_event() {
     );
     assert_eq!(
         second[0].event_id(),
-        u128::from(visible_after_gap.event_id),
+        visible_after_gap.event_id,
         "PROPERTY: bounded scope cursor must advance past hidden entries instead of stalling on an empty batch"
     );
 

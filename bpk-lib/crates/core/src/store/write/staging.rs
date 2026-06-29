@@ -75,7 +75,9 @@ pub(crate) struct PreparedBatchBuilder {
     total_bytes: usize,
     entity_pool: HashMap<String, Arc<str>>,
     scope_pool: HashMap<String, Arc<str>>,
+    #[cfg(test)]
     unique_entities: Vec<Arc<str>>,
+    #[cfg(test)]
     unique_scopes: Vec<Arc<str>>,
 }
 
@@ -87,7 +89,9 @@ impl PreparedBatchBuilder {
             total_bytes: 0,
             entity_pool: HashMap::new(),
             scope_pool: HashMap::new(),
+            #[cfg(test)]
             unique_entities: Vec::new(),
+            #[cfg(test)]
             unique_scopes: Vec::new(),
         }
     }
@@ -139,7 +143,9 @@ impl PreparedBatchBuilder {
         Ok(PreparedBatch {
             items: self.items,
             total_bytes: self.total_bytes,
+            #[cfg(test)]
             unique_entities: self.unique_entities,
+            #[cfg(test)]
             unique_scopes: self.unique_scopes,
         })
     }
@@ -150,6 +156,7 @@ impl PreparedBatchBuilder {
         }
         self.entity_pool
             .insert(entity.to_string(), Arc::clone(&entity));
+        #[cfg(test)]
         self.unique_entities.push(Arc::clone(&entity));
         entity
     }
@@ -160,6 +167,7 @@ impl PreparedBatchBuilder {
         }
         self.scope_pool
             .insert(scope.to_string(), Arc::clone(&scope));
+        #[cfg(test)]
         self.unique_scopes.push(Arc::clone(&scope));
         scope
     }
@@ -168,7 +176,9 @@ impl PreparedBatchBuilder {
 pub(crate) struct PreparedBatch {
     items: Vec<PreparedBatchItem>,
     total_bytes: usize,
+    #[cfg(test)]
     unique_entities: Vec<Arc<str>>,
+    #[cfg(test)]
     unique_scopes: Vec<Arc<str>>,
 }
 
@@ -203,47 +213,28 @@ impl PreparedBatch {
         self.unique_scopes.len()
     }
 
-    pub(crate) fn interned_ids(&self, index: &StoreIndex) -> PreparedBatchInternedIds {
-        let entity_ids = self
-            .unique_entities
+    /// Intern every item's entity and scope strings, in `items()` order, into a
+    /// per-item [`CommitIds`]. Returning one `CommitIds` per item (rather than a
+    /// keyed map) makes the "item with no interned id" state unrepresentable: no
+    /// map, no lookup, no fallible `expect`.
+    pub(crate) fn interned_ids(&self, index: &StoreIndex) -> Result<Vec<CommitIds>, StoreError> {
+        self.items
             .iter()
-            .map(|entity| (Arc::clone(entity), index.interner.intern(entity)))
-            .collect();
-        let scope_ids = self
-            .unique_scopes
-            .iter()
-            .map(|scope| (Arc::clone(scope), index.interner.intern(scope)))
-            .collect();
-        PreparedBatchInternedIds {
-            entity_ids,
-            scope_ids,
-        }
+            .map(|item| {
+                Ok(CommitIds {
+                    entity_id: index.interner.intern(item.entity_arc())?,
+                    scope_id: index.interner.intern(item.scope_arc())?,
+                })
+            })
+            .collect()
     }
 }
 
-pub(crate) struct PreparedBatchInternedIds {
-    entity_ids: HashMap<Arc<str>, InternId>,
-    scope_ids: HashMap<Arc<str>, InternId>,
-}
-
-impl PreparedBatchInternedIds {
-    // justifies: src/store/write/staging.rs builds PreparedBatchInternedIds from the exact batch items, so absence here indicates an internal bug.
-    #[allow(clippy::expect_used)]
-    pub(crate) fn entity_id(&self, item: &PreparedBatchItem) -> InternId {
-        *self
-            .entity_ids
-            .get(item.entity_arc())
-            .expect("prepared batch entity dedupe must include every item entity")
-    }
-
-    // justifies: src/store/write/staging.rs builds PreparedBatchInternedIds from the exact batch items, so absence here indicates an internal bug.
-    #[allow(clippy::expect_used)]
-    pub(crate) fn scope_id(&self, item: &PreparedBatchItem) -> InternId {
-        *self
-            .scope_ids
-            .get(item.scope_arc())
-            .expect("prepared batch scope dedupe must include every item scope")
-    }
+/// The interned entity/scope ids for a single prepared batch item, in `items()`
+/// order. Positionally zipped against [`PreparedBatch::items`] at commit time.
+pub(crate) struct CommitIds {
+    pub(crate) entity_id: InternId,
+    pub(crate) scope_id: InternId,
 }
 
 #[derive(Clone)]

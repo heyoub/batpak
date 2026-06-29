@@ -1,12 +1,12 @@
 use super::{ensure, relative};
-use crate::source_cache::SourceCache;
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<()> {
+pub(super) fn check(repo_root: &Path) -> Result<()> {
     check_project_layout_contract(repo_root)?;
+    check_supply_chain_boundary(repo_root)?;
     check_no_mdbook_dependency(repo_root)?;
     check_testing_doc_renames_stay_current(repo_root)?;
     check_justfile_stays_thin(repo_root)?;
@@ -17,7 +17,6 @@ pub(super) fn check(repo_root: &Path, source_cache: &mut SourceCache) -> Result<
     check_core_feature_cfg_contract(repo_root)?;
     check_xtask_surface_contract(repo_root)?;
     check_syncbat_is_explicitly_gated(repo_root)?;
-    check_hbat_manifest_wiring_contract(repo_root, source_cache)?;
     Ok(())
 }
 
@@ -33,18 +32,18 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
 
     for path in [
         "README.md",
-        "FACTORY.md",
-        "MODEL.md",
-        "INVARIANTS.md",
-        "BATTERIES.md",
-        "TERMINALS.md",
-        "EVENTS.md",
-        "RECEIPTS.md",
-        "CIRCUITS.md",
-        "REPLAY.md",
-        "PROJECTIONS.md",
-        "INTEGRATION.md",
-        "CONFORMANCE.md",
+        "01_FACTORY.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "04_BATTERIES.md",
+        "05_TERMINALS.md",
+        "06_EVENTS.md",
+        "07_RECEIPTS.md",
+        "08_CIRCUITS.md",
+        "09_REPLAY.md",
+        "10_PROJECTIONS.md",
+        "11_INTEGRATION.md",
+        "12_CONFORMANCE.md",
         "CONTRIBUTING.md",
         "archive/decisions/099_DECISION_INDEX.md",
         "bpk-lib/traceability/testing_ledger.yaml",
@@ -58,6 +57,36 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
             format!("project layout contract requires `{path}`"),
         )?;
     }
+    check_root_markdown_allowlist(project_root)?;
+    check_no_unprefixed_factory_docs(project_root)?;
+    ensure(
+        !project_root.join("deny.toml").exists(),
+        "deny.toml belongs under bpk-lib/ (cargo deny runs from the workspace root)",
+    )?;
+    ensure(
+        !project_root.join("clippy.toml").exists(),
+        "clippy.toml belongs under bpk-lib/ (Cargo workspace root)",
+    )?;
+    ensure(
+        repo_root.join("deny.toml").is_file(),
+        "project layout contract requires bpk-lib/deny.toml",
+    )?;
+    ensure(
+        repo_root.join("clippy.toml").is_file(),
+        "project layout contract requires bpk-lib/clippy.toml",
+    )?;
+    ensure(
+        !project_root.join("sgconfig.yml").exists(),
+        "sgconfig.yml belongs under bpk-lib/tools/ast-grep/",
+    )?;
+    ensure(
+        !project_root.join("ast-grep").exists(),
+        "ast-grep calipers belong under bpk-lib/tools/ast-grep/",
+    )?;
+    ensure(
+        repo_root.join("tools/ast-grep/sgconfig.yml").is_file(),
+        "project layout contract requires bpk-lib/tools/ast-grep/sgconfig.yml",
+    )?;
 
     for path in [
         "Cargo.toml",
@@ -100,6 +129,160 @@ fn check_project_layout_contract(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn check_root_markdown_allowlist(project_root: &Path) -> Result<()> {
+    let allowed: BTreeSet<&str> = [
+        "AGENTS.md",
+        "04_BATTERIES.md",
+        "CHANGELOG.md",
+        "08_CIRCUITS.md",
+        "CODE_OF_CONDUCT.md",
+        "12_CONFORMANCE.md",
+        "CONTRIBUTING.md",
+        "06_EVENTS.md",
+        "01_FACTORY.md",
+        "11_INTEGRATION.md",
+        "03_INVARIANTS.md",
+        "02_MODEL.md",
+        "10_PROJECTIONS.md",
+        "README.md",
+        "07_RECEIPTS.md",
+        "09_REPLAY.md",
+        "SUPPORT.md",
+        "05_TERMINALS.md",
+    ]
+    .into_iter()
+    .collect();
+
+    for entry in fs::read_dir(project_root).context("read project root")? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        ensure(
+            allowed.contains(name),
+            format!(
+                "root markdown `{name}` is not canonical; move planning/debt docs under archive/legacy-docs or machine truth under bpk-lib/traceability"
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn check_no_unprefixed_factory_docs(project_root: &Path) -> Result<()> {
+    for legacy in [
+        "FACTORY.md",
+        "MODEL.md",
+        "INVARIANTS.md",
+        "BATTERIES.md",
+        "TERMINALS.md",
+        "EVENTS.md",
+        "RECEIPTS.md",
+        "CIRCUITS.md",
+        "REPLAY.md",
+        "PROJECTIONS.md",
+        "INTEGRATION.md",
+        "CONFORMANCE.md",
+    ] {
+        ensure(
+            !project_root.join(legacy).exists(),
+            format!(
+                "unprefixed factory doc `{legacy}` must not exist at repo root; use numbered canonical names (01_FACTORY.md … 12_CONFORMANCE.md)"
+            ),
+        )?;
+    }
+    Ok(())
+}
+
+fn check_supply_chain_boundary(repo_root: &Path) -> Result<()> {
+    let project_root = project_root(repo_root);
+    check_workflow_authority_surface(project_root)?;
+    Ok(())
+}
+
+fn check_workflow_authority_surface(project_root: &Path) -> Result<()> {
+    let workflow_root = project_root.join(".github/workflows");
+    if !workflow_root.exists() {
+        return Ok(());
+    }
+
+    for path in files_with_extension(&workflow_root, "yml")
+        .into_iter()
+        .chain(files_with_extension(&workflow_root, "yaml"))
+    {
+        let rel = relative(project_root, &path);
+        let content = fs::read_to_string(&path).with_context(|| format!("read {rel}"))?;
+        for finding in workflow_authority_findings(&content) {
+            ensure(false, format!("supply-chain boundary: {rel}: {finding}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn workflow_authority_findings(content: &str) -> Vec<String> {
+    let mut findings = Vec::new();
+    for (index, line) in content.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if line_declares_workflow_trigger(trimmed, "pull_request_target") {
+            findings.push(format!(
+                "line {line_number}: `pull_request_target` may run untrusted PR code with privileged context"
+            ));
+        }
+        if line_declares_workflow_trigger(trimmed, "workflow_run") {
+            findings.push(format!(
+                "line {line_number}: `workflow_run` may bridge untrusted workflow output into privileged context"
+            ));
+        }
+        if let Some(action) = workflow_uses_value(trimmed) {
+            if let Some(reason) = external_action_pin_violation(action) {
+                findings.push(format!("line {line_number}: {reason}"));
+            }
+        }
+    }
+    findings
+}
+
+fn line_declares_workflow_trigger(line: &str, trigger: &str) -> bool {
+    line == trigger
+        || line == format!("- {trigger}")
+        || line.starts_with(&format!("{trigger}:"))
+        || line.starts_with(&format!("- {trigger}:"))
+}
+
+fn workflow_uses_value(line: &str) -> Option<&str> {
+    let after = line
+        .strip_prefix("uses:")
+        .or_else(|| line.strip_prefix("- uses:"))?;
+    Some(after.trim().trim_matches('"').trim_matches('\''))
+}
+
+fn external_action_pin_violation(action: &str) -> Option<String> {
+    if action.starts_with("./") || action.starts_with("../") {
+        return None;
+    }
+    let action = action.split('#').next().unwrap_or(action).trim();
+    let Some((name, reference)) = action.rsplit_once('@') else {
+        return Some(format!(
+            "external action `{action}` must be pinned by full 40-character commit SHA"
+        ));
+    };
+    let reference = reference.split_whitespace().next().unwrap_or(reference);
+    if reference.len() == 40 && reference.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!(
+        "external action `{name}` is pinned to `{reference}`, not a full 40-character commit SHA"
+    ))
+}
+
 fn check_testing_doc_renames_stay_current(repo_root: &Path) -> Result<()> {
     let harness_lints = fs::read_to_string(repo_root.join("tools/integrity/src/harness_lints.rs"))
         .context("read harness_lints.rs")?;
@@ -128,10 +311,10 @@ fn check_no_mdbook_dependency(repo_root: &Path) -> Result<()> {
         project_root.join(".github/workflows/ci.yml"),
         project_root.join(".github/workflows/perf.yml"),
         project_root.join("README.md"),
-        project_root.join("FACTORY.md"),
-        project_root.join("MODEL.md"),
-        project_root.join("INVARIANTS.md"),
-        project_root.join("CONFORMANCE.md"),
+        project_root.join("01_FACTORY.md"),
+        project_root.join("02_MODEL.md"),
+        project_root.join("03_INVARIANTS.md"),
+        project_root.join("12_CONFORMANCE.md"),
         project_root.join("CONTRIBUTING.md"),
         project_root.join("AGENTS.md"),
         project_root.join("justfile"),
@@ -178,19 +361,13 @@ fn check_justfile_stays_thin(repo_root: &Path) -> Result<()> {
             current_recipe = trimmed.split(':').next();
         }
         if line.starts_with(' ') || line.starts_with('\t') {
-            let is_escape_hatch = matches!(
-                current_recipe,
-                Some("cargo +args") | Some("pnpm +args") | Some("npm +args")
-            );
+            let is_escape_hatch = matches!(current_recipe, Some("cargo +args"));
             ensure(
                 trimmed.starts_with("cd bpk-lib; cargo xtask ")
                     || trimmed.starts_with("cd bpk-lib && cargo xtask ")
                     || trimmed.starts_with("cargo xtask ")
                     || trimmed.starts_with("just ")
-                    || (is_escape_hatch
-                        && (trimmed.starts_with("cd bpk-lib; cargo ")
-                            || trimmed.starts_with("pnpm ")
-                            || trimmed.starts_with("npm "))),
+                    || (is_escape_hatch && trimmed.starts_with("cd bpk-lib; cargo ")),
                 format!(
                     "justfile command at line {} must stay a thin alias over cargo xtask or just",
                     index + 1
@@ -340,7 +517,7 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
     for dir in [
         "crates/core/src",
         "crates/core/tests",
-        "crates/core/examples",
+        "crates/batpak-examples/src/bin",
         "crates/core/benches",
         "crates/core/fixtures",
         "crates/syncbat/src",
@@ -349,12 +526,8 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         "crates/netbat/src",
         "crates/netbat/tests",
         "crates/netbat/benches",
-        "crates/hbat/src",
-        "crates/hbat/tests",
-        "crates/hbat/benches",
         "crates/macros/src",
         "crates/macros-support/src",
-        "crates/syncbat-macros/src",
         "crates/bench-support/src",
     ] {
         ensure(
@@ -372,29 +545,50 @@ fn check_crate_layout_contract(repo_root: &Path) -> Result<()> {
         )?;
     }
 
-    for crate_name in ["syncbat", "netbat"] {
-        let crate_root = repo_root.join("crates").join(crate_name);
-        for dir in ["examples", "fixtures"] {
-            ensure(
-                !crate_root.join(dir).exists(),
-                format!(
-                    "`crates/{crate_name}/{dir}` would blur ownership; companion crate demos belong in root docs/cookbook or explicit tests; benchmarks belong in `crates/{crate_name}/benches`"
-                ),
-            )?;
+    ensure(
+        !repo_root.join("crates/examples").exists(),
+        "legacy `crates/examples` path retired; demos live in `crates/batpak-examples/src/bin/`",
+    )?;
+
+    // Demos live ONLY in the family-wide `crates/batpak-examples` crate — no per-crate
+    // `examples/` folder anywhere else (locks the examples-out-of-core hoist).
+    // Generalized over every crate so a future `crates/<x>/examples/` is caught.
+    if let Ok(entries) = fs::read_dir(repo_root.join("crates")) {
+        for entry in entries.flatten() {
+            if entry.path().join("examples").is_dir() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                ensure(
+                    false,
+                    format!(
+                        "`crates/{name}/examples` blurs ownership; demos live in the family-wide `crates/batpak-examples` crate"
+                    ),
+                )?;
+            }
         }
     }
 
-    for (macro_crate, owner) in [
-        ("crates/macros", "crates/core/tests/ui"),
-        ("crates/syncbat-macros", "crates/syncbat/tests/ui"),
-    ] {
+    // syncbat/netbat must not grow their own fixtures; a crate's genuinely-owned
+    // cross-crate inputs live under that crate (e.g. `crates/core/fixtures`).
+    for crate_name in ["syncbat", "netbat"] {
         ensure(
-            repo_root.join(owner).is_dir(),
+            !repo_root
+                .join("crates")
+                .join(crate_name)
+                .join("fixtures")
+                .exists(),
             format!(
-                "`{macro_crate}` does not need its own integration-test folder, but `{owner}` must exist as its compile-fail owner"
+                "`crates/{crate_name}/fixtures` would blur ownership; companion-crate cross-crate inputs belong under their owning crate or as explicit tests"
             ),
         )?;
     }
+
+    let (macro_crate, owner) = ("crates/macros", "crates/core/tests/ui");
+    ensure(
+        repo_root.join(owner).is_dir(),
+        format!(
+            "`{macro_crate}` does not need its own integration-test folder, but `{owner}` must exist as its compile-fail owner"
+        ),
+    )?;
 
     Ok(())
 }
@@ -674,13 +868,13 @@ fn check_xtask_surface_contract(repo_root: &Path) -> Result<()> {
     ensure(
         coverage_content.contains("if !args.json {")
             && coverage_content
-                .contains("println!(\"Running tests with coverage instrumentation...\");")
+                .contains("outln!(\"Running tests with coverage instrumentation...\");")
             && coverage_content
-                .contains("println!(\"Coverage export written to {}\", coverage_json.display());"),
+                .contains("outln!(\"Coverage export written to {}\", coverage_json.display());"),
         "xtask coverage banners must stay out of JSON mode",
     )?;
     ensure(
-        coverage_content.contains("print!(\"{json_text}\");"),
+        coverage_content.contains("out!(\"{json_text}\");"),
         "xtask coverage JSON mode must print only the exported JSON payload",
     )?;
     ensure(
@@ -835,148 +1029,6 @@ fn check_syncbat_is_explicitly_gated(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_hbat_manifest_wiring_contract(
-    repo_root: &Path,
-    source_cache: &mut SourceCache,
-) -> Result<()> {
-    let hbat_src = repo_root.join("crates/hbat/src");
-    if !hbat_src.is_dir() {
-        return Ok(());
-    }
-
-    let main = source_cache
-        .rust_file("crates/hbat/src/main.rs")?
-        .text
-        .clone();
-
-    for relative in source_cache.rust_files_under("crates/hbat/src")? {
-        let source = source_cache.rust_file(&relative)?;
-        let rel = display_path(&source.relative_path);
-        let module = source
-            .relative_path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .context("hbat source file has UTF-8 stem")?;
-        let content = source.text.as_ref();
-
-        for descriptor in hbat_operation_descriptors(content) {
-            let Some(prefix) = descriptor.strip_suffix("_DESCRIPTOR") else {
-                ensure(
-                    false,
-                    format!(
-                        "hbat operation descriptor `{descriptor}` in {rel} must use *_DESCRIPTOR naming"
-                    ),
-                )?;
-                continue;
-            };
-            let helper_name = format!("{}_descriptor", prefix.to_lowercase());
-            ensure(
-                count_occurrences(&content, &format!("descriptor: {helper_name}")) == 1,
-                format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} must have exactly one OperationDescriptorRegistration inventory::submit! referencing it"
-                ),
-            )?;
-            ensure(
-                content.contains(&format!("&{descriptor}_STORAGE")),
-                format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} must be referenced by its manifest inventory helper"
-                ),
-            )?;
-            ensure(
-                main.contains(&format!("hbat::{descriptor}.clone()")),
-                format!(
-                    "hbat operation descriptor `{descriptor}` in {rel} is not registered by hbat main::build_core"
-                ),
-            )?;
-        }
-
-        for payload in hbat_event_payload_structs(content) {
-            let rust_type = format!("hbat::{module}::{payload}");
-            let manual_rust_type =
-                count_occurrences(&content, &format!("rust_type: \"{rust_type}\""));
-            let manual_ts_name = count_occurrences(&content, &format!("ts_name: \"{payload}\""));
-            let manual_kind_bits = count_occurrences(
-                &content,
-                &format!("kind_bits: {payload}::KIND.as_raw_u16()"),
-            );
-            let macro_type = count_occurrences(&content, &format!("type = {payload},"));
-            let macro_ts_name = count_occurrences(&content, &format!("ts_name = \"{payload}\""));
-
-            let manual = manual_rust_type == 1 && manual_ts_name == 1 && manual_kind_bits == 1;
-            let via_macro = macro_type == 1 && macro_ts_name == 1;
-
-            ensure(
-                manual || via_macro,
-                format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must register exactly once via \
-                     `hbat_event_descriptor!` (type/ts_name) or EventDescriptorRegistration \
-                     (rust_type/ts_name/kind_bits)"
-                ),
-            )?;
-            ensure(
-                !(manual && via_macro),
-                format!(
-                    "hbat EventPayload `{rust_type}` in {rel} must not register via both \
-                     `hbat_event_descriptor!` and manual EventDescriptorRegistration"
-                ),
-            )?;
-        }
-    }
-
-    Ok(())
-}
-
-fn hbat_operation_descriptors(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let after_pub_const = trimmed.strip_prefix("pub const ")?;
-            let (name, rest) = after_pub_const.split_once(':')?;
-            rest.contains("OperationDescriptor")
-                .then(|| name.trim().to_owned())
-        })
-        .collect()
-}
-
-fn hbat_event_payload_structs(content: &str) -> Vec<String> {
-    let mut structs = Vec::new();
-    let mut pending_event_payload_derive = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("#[derive(") && trimmed.contains("EventPayload") {
-            pending_event_payload_derive = true;
-            continue;
-        }
-        if !pending_event_payload_derive {
-            continue;
-        }
-        if let Some(after_struct) = trimmed.strip_prefix("pub struct ") {
-            let name = after_struct
-                .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-                .next()
-                .unwrap_or_default();
-            if !name.is_empty() {
-                structs.push(name.to_owned());
-            }
-            pending_event_payload_derive = false;
-        } else if trimmed.starts_with("#[") {
-            continue;
-        } else {
-            pending_event_payload_derive = false;
-        }
-    }
-    structs
-}
-
-fn count_occurrences(haystack: &str, needle: &str) -> usize {
-    haystack.match_indices(needle).count()
-}
-
-fn display_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
     if !root.exists() {
         return Vec::new();
@@ -992,7 +1044,9 @@ fn files_with_extension(root: &Path, extension: &str) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::excluded_crate_target_dirs;
+    use super::{
+        excluded_crate_target_dirs, external_action_pin_violation, workflow_authority_findings,
+    };
 
     #[test]
     fn excluded_crate_target_dirs_exempts_workspace_excludes() {
@@ -1024,5 +1078,50 @@ resolver = "2"
     fn excluded_crate_target_dirs_empty_when_no_exclude_list() {
         let manifest = "[workspace]\nmembers = [\"crates/core\"]\nresolver = \"2\"\n";
         assert!(excluded_crate_target_dirs(manifest).is_empty());
+    }
+
+    #[test]
+    fn supply_chain_boundary_detects_dangerous_workflow_triggers() {
+        let workflow = r#"
+on:
+  pull_request_target:
+  workflow_run:
+jobs:
+  test:
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+"#;
+        let findings = workflow_authority_findings(workflow);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.contains("pull_request_target")),
+            "expected pull_request_target finding, got {findings:?}"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.contains("workflow_run")),
+            "expected workflow_run finding, got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn supply_chain_boundary_requires_external_action_sha_pins() {
+        assert!(
+            external_action_pin_violation("actions/checkout@v6").is_some(),
+            "tag-pinned external actions must be rejected"
+        );
+        assert!(
+            external_action_pin_violation(
+                "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"
+            )
+            .is_none(),
+            "full SHA-pinned external actions must pass"
+        );
+        assert!(
+            external_action_pin_violation("./.github/actions/setup-devcontainer").is_none(),
+            "local composite actions are repo-owned and do not need external SHA pins"
+        );
     }
 }

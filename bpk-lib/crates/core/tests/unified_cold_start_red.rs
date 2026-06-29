@@ -1,18 +1,15 @@
 //! Red-path tests keep the `unified_*_red` names for cross-surface edge cases
 //! that should fail fast or prove defensive behavior across the unified store.
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST; unified red-path cold-start tests in tests/unified_cold_start_red.rs use unwrap/panic as assertion style and narrow bounded test counters that fit u32/u16.
-#![allow(clippy::unwrap_used, clippy::cast_possible_truncation, clippy::panic)]
+//!
+//! PROVES: INV-TEST-PANIC-AS-ASSERTION, INV-MACRO-BOUNDED-CAST
 
-#[path = "support/red_kinds.rs"]
-mod red_kinds;
-#[path = "support/red_test_coord.rs"]
-mod red_test_coord;
+use batpak_testkit::red_kinds;
+use batpak_testkit::red_test_coord;
 
 use red_kinds::*;
 use red_test_coord::*;
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
 #[test]
@@ -22,7 +19,7 @@ fn sidx_cold_start_uses_footer() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     store.close().expect("close");
@@ -44,7 +41,7 @@ fn checkpoint_write_load_roundtrip() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..100 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     store.close().expect("close writes checkpoint");
@@ -66,7 +63,7 @@ fn stale_checkpoint_falls_back_to_full_rebuild() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..20 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     store.close().expect("close");
@@ -94,7 +91,7 @@ fn post_compact_checkpoint_valid() {
     let store = Store::open(config).expect("open");
     let coord = test_coord();
     for i in 0u32..50 {
-        store.append(&coord, kind_a(), &payload(i)).expect("append");
+        let _ = store.append(&coord, kind_a(), &payload(i)).expect("append");
     }
     store.sync().expect("sync");
     let (_result, _report) = store
@@ -121,7 +118,7 @@ fn interner_roundtrip() {
     let dir = TempDir::new().expect("temp dir");
     let store = Store::open(StoreConfig::new(dir.path())).expect("open");
     let coord = Coordinate::new("intern:entity", "intern:scope").expect("coord");
-    store.append(&coord, kind_a(), &payload(0)).expect("append");
+    let _ = store.append(&coord, kind_a(), &payload(0)).expect("append");
     let entries = store.by_entity("intern:entity");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].coord().entity(), "intern:entity");

@@ -10,12 +10,14 @@
 //! `OBS-DURABLE-HLC-INCLUDES-OS-PRESERVED-DATA`.
 
 use crate::chaos::dm_flakey::FlakeyDevice;
+use batpak::id::EntityIdType;
 use batpak::prelude::{Coordinate, EventKind, Region};
 use batpak::store::{
     AppendOptions, AppendReceipt, BatchAppendItem, CausationRef, HlcPoint, Store, StoreConfig,
     StoreError,
 };
 use std::collections::HashSet;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -100,7 +102,10 @@ fn recovered_entries(store: &Store) -> Vec<batpak::store::index::IndexEntry> {
 }
 
 fn event_ids(entries: &[batpak::store::index::IndexEntry]) -> HashSet<u128> {
-    entries.iter().map(|entry| entry.event_id()).collect()
+    entries
+        .iter()
+        .map(|entry| entry.event_id().as_u128())
+        .collect()
 }
 
 fn assert_durable_covers_recovered(store: &Store) {
@@ -146,7 +151,10 @@ fn reopen_existing_device(backing: &Path) -> FlakeyDevice {
 #[test]
 fn durable_frontier_covers_recovered_state_after_batch_device_failure_cadence_1000() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged batch torn-tail proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged batch torn-tail proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -191,7 +199,10 @@ fn durable_frontier_covers_recovered_state_after_batch_device_failure_cadence_10
 #[test]
 fn batch_append_surfaces_io_error_after_device_failure_cadence_1000() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged batch IO proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged batch IO proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -205,10 +216,9 @@ fn batch_append_surfaces_io_error_after_device_failure_cadence_1000() {
     let _pre_failure_durable_hlc = store.frontier().durable_hlc;
 
     device.flip_to_error().expect("flip device to error target");
-    let err = match store.append_batch(batch_items("after-flip", 3)) {
-        Ok(_) => panic!("PROPERTY: batch append after dm-flakey error target must not succeed"),
-        Err(err) => err,
-    };
+    let err = store
+        .append_batch(batch_items("after-flip", 3))
+        .expect_err("PROPERTY: batch append after dm-flakey error target must not succeed");
     assert!(
         is_device_failure_surface(&err),
         "PROPERTY: device failure must surface as IO or writer crash, \
@@ -219,7 +229,8 @@ fn batch_append_surfaces_io_error_after_device_failure_cadence_1000() {
 #[test]
 fn post_fsync_batches_survive_device_failure_durability_floor() {
     if !chaos_enabled() {
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "skipping privileged batch durability-floor proof; set BATPAK_RUN_CHAOS=1 to run it"
         );
         return;
@@ -249,7 +260,8 @@ fn post_fsync_batches_survive_device_failure_durability_floor() {
 #[test]
 fn mixed_single_and_batch_durable_floor_survives_device_failure() {
     if !chaos_enabled() {
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "skipping privileged mixed durability-floor proof; set BATPAK_RUN_CHAOS=1 to run it"
         );
         return;
@@ -289,7 +301,10 @@ fn mixed_single_and_batch_durable_floor_survives_device_failure() {
 #[test]
 fn partial_batch_writeback_durable_hlc_remains_monotonic() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged partial-batch proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged partial-batch proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -321,7 +336,10 @@ fn partial_batch_writeback_durable_hlc_remains_monotonic() {
 #[test]
 fn batch_append_surfaces_io_error_after_device_failure_cadence_1() {
     if !chaos_enabled() {
-        eprintln!("skipping privileged cadence=1 batch IO proof; set BATPAK_RUN_CHAOS=1 to run it");
+        let _ = writeln!(
+            std::io::stderr(),
+            "skipping privileged cadence=1 batch IO proof; set BATPAK_RUN_CHAOS=1 to run it"
+        );
         return;
     }
 
@@ -331,10 +349,9 @@ fn batch_append_surfaces_io_error_after_device_failure_cadence_1() {
     let store = open_store_on_device(&device, 1);
 
     device.flip_to_error().expect("flip device to error target");
-    let err = match store.append_batch(batch_items("cadence1-after-flip", 3)) {
-        Ok(_) => panic!("PROPERTY: cadence=1 batch append after device failure must not succeed"),
-        Err(err) => err,
-    };
+    let err = store
+        .append_batch(batch_items("cadence1-after-flip", 3))
+        .expect_err("PROPERTY: cadence=1 batch append after device failure must not succeed");
     assert!(
         is_device_failure_surface(&err),
         "PROPERTY: device failure must surface as IO or writer crash, \

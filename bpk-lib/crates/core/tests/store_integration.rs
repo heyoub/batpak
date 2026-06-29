@@ -1,5 +1,3 @@
-// justifies: INV-CONCURRENCY-SCHEDULE-PROOF; integration tests in tests/store_integration.rs spawn concurrent writer threads via std::thread::spawn and pass borrows shaped by the fixture's generic helpers.
-#![allow(clippy::disallowed_methods, clippy::needless_borrows_for_generic_args)]
 //! Integration tests for Store lifecycle.
 //! Append/get/query, segment rotation, cold start index rebuild, concurrent r/w.
 //!
@@ -14,13 +12,11 @@
 //! (regression coverage for the missing `serde 'rc'` feature flag that broke
 //! `Coordinate` deserialization) through round-trip persistence.
 
-mod support;
 use batpak::store::{Freshness, Store, StoreConfig};
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 use tempfile::TempDir;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -72,7 +68,7 @@ fn append_multiple_events_same_entity() {
 
     for i in 0..10 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let stats = store.stats();
@@ -123,11 +119,11 @@ fn query_by_entity_prefix() {
     for i in 0..5 {
         let coord =
             Coordinate::new(format!("user:{i}").as_str(), "scope:test").expect("valid coord");
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     // And some non-matching entities
     let coord = Coordinate::new("order:1", "scope:test").expect("valid coord");
-    store.append(&coord, kind, &payload).expect("append");
+    let _ = store.append(&coord, kind, &payload).expect("append");
 
     let region = Region::entity("user");
     let results = store.query(&region);
@@ -190,9 +186,9 @@ fn query_by_scope() {
     let coord_a = Coordinate::new("entity:1", "scope:a").expect("valid coord");
     let coord_b = Coordinate::new("entity:2", "scope:b").expect("valid coord");
 
-    store.append(&coord_a, kind, &payload).expect("append");
-    store.append(&coord_a, kind, &payload).expect("append");
-    store.append(&coord_b, kind, &payload).expect("append");
+    let _ = store.append(&coord_a, kind, &payload).expect("append");
+    let _ = store.append(&coord_a, kind, &payload).expect("append");
+    let _ = store.append(&coord_b, kind, &payload).expect("append");
 
     let region = Region::scope("scope:a");
     let results = store.query(&region);
@@ -265,9 +261,9 @@ fn by_scope_wrapper_matches_exact_scope_results() {
     let coord_a2 = Coordinate::new("entity:scope:2", "scope:wrapper").expect("valid coord");
     let coord_b = Coordinate::new("entity:scope:other", "scope:other").expect("valid coord");
 
-    store.append(&coord_a1, kind, &payload).expect("append a1");
-    store.append(&coord_a2, kind, &payload).expect("append a2");
-    store.append(&coord_b, kind, &payload).expect("append b");
+    let _ = store.append(&coord_a1, kind, &payload).expect("append a1");
+    let _ = store.append(&coord_a2, kind, &payload).expect("append a2");
+    let _ = store.append(&coord_b, kind, &payload).expect("append b");
 
     let wrapped = store.by_scope("scope:wrapper");
     let queried = store.query(&Region::scope("scope:wrapper"));
@@ -311,9 +307,9 @@ fn query_by_fact() {
     let kind_b = EventKind::custom(0xF, 2);
     let payload = serde_json::json!({"x": 1});
 
-    store.append(&coord, kind_a, &payload).expect("append");
-    store.append(&coord, kind_a, &payload).expect("append");
-    store.append(&coord, kind_b, &payload).expect("append");
+    let _ = store.append(&coord, kind_a, &payload).expect("append");
+    let _ = store.append(&coord, kind_a, &payload).expect("append");
+    let _ = store.append(&coord, kind_b, &payload).expect("append");
 
     let results = store.by_fact(kind_a);
     assert_eq!(
@@ -374,7 +370,7 @@ fn cold_start_rebuilds_index() {
         let store = Store::open(config).expect("open store");
         let coord = Coordinate::new("entity:1", "scope:test").expect("valid coord");
         for _ in 0..20 {
-            store.append(&coord, kind, &payload).expect("append");
+            let _ = store.append(&coord, kind, &payload).expect("append");
         }
         store.sync().expect("sync");
         store.close().expect("close");
@@ -459,7 +455,7 @@ fn segment_rotation_on_size() {
     let payload = serde_json::json!({"data": "some payload to fill segments quickly"});
 
     for _ in 0..50 {
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
     store.sync().expect("sync");
 
@@ -505,7 +501,7 @@ fn concurrent_append_and_query() {
         .spawn(move || {
             for i in 0..100 {
                 let payload = serde_json::json!({"i": i});
-                store_w.append(&coord_w, kind, &payload).expect("append");
+                let _ = store_w.append(&coord_w, kind, &payload).expect("append");
             }
         })
         .expect("spawn thread");
@@ -566,7 +562,7 @@ fn append_with_cas_success() {
     let payload = serde_json::json!({"x": 1});
 
     // First append — no CAS needed (sequence starts at 0)
-    store.append(&coord, kind, &payload).expect("first append");
+    let _ = store.append(&coord, kind, &payload).expect("first append");
 
     // CAS with correct expected sequence (clock starts at 0, first event gets clock=0)
     let opts = batpak::store::AppendOptions {
@@ -611,6 +607,8 @@ struct Counter {
 
 impl EventSourced for Counter {
     type Input = batpak::prelude::JsonValueInput;
+    const STATE_CONTRACT: ProjectionStateContract =
+        ProjectionStateContract::single_entity("store-integration-counter");
 
     fn from_events(events: &[Event<serde_json::Value>]) -> Option<Self> {
         if events.is_empty() {
@@ -631,6 +629,10 @@ impl EventSourced for Counter {
         static KINDS: [EventKind; 1] = [EventKind::custom(0xF, 1)];
         &KINDS
     }
+
+    fn state_extent(&self) -> StateExtent {
+        StateExtent::single_entity()
+    }
 }
 
 #[test]
@@ -641,7 +643,7 @@ fn projection_replays_events() {
 
     for i in 0..5 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let counter: Option<Counter> = store

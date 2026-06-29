@@ -21,6 +21,26 @@ impl HlcPoint {
         wall_ms: 0,
         global_sequence: 0,
     };
+
+    pub(crate) fn covers_sequence(self, target: Self) -> bool {
+        self.global_sequence >= target.global_sequence
+    }
+
+    pub(crate) fn max_by_sequence(self, other: Self) -> Self {
+        match self.global_sequence.cmp(&other.global_sequence) {
+            Ordering::Less => other,
+            Ordering::Greater => self,
+            Ordering::Equal => self.max(other),
+        }
+    }
+
+    pub(crate) fn min_by_sequence(self, other: Self) -> Self {
+        match self.global_sequence.cmp(&other.global_sequence) {
+            Ordering::Less => self,
+            Ordering::Greater => other,
+            Ordering::Equal => self.min(other),
+        }
+    }
 }
 
 impl Ord for HlcPoint {
@@ -41,20 +61,29 @@ impl PartialOrd for HlcPoint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[must_use]
 pub enum WatermarkKind {
+    /// The accepted watermark.
+    Accepted,
+    /// The written watermark.
+    Written,
     /// The durable watermark.
     Durable,
     /// The applied watermark.
     Applied,
     /// The visible watermark.
     Visible,
+    /// The emitted watermark.
+    Emitted,
 }
 
 impl WatermarkKind {
     pub(crate) fn current(self, snapshot: WatermarkSnapshot) -> HlcPoint {
         match self {
+            Self::Accepted => snapshot.accepted_hlc,
+            Self::Written => snapshot.written_hlc,
             Self::Durable => snapshot.durable_hlc,
             Self::Applied => snapshot.applied_hlc,
             Self::Visible => snapshot.visible_hlc,
+            Self::Emitted => snapshot.emitted_hlc,
         }
     }
 }
@@ -93,8 +122,30 @@ impl Default for WatermarkSnapshot {
     }
 }
 
-/// Operator-facing frontier view with the current internal watermark surface.
+/// Per-lane operator-facing frontier view.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub struct LaneFrontierView {
+    /// Opaque DAG lane id.
+    pub lane: u32,
+    /// Highest HLC whose ordering coordinate has been assigned on this lane.
+    pub accepted_hlc: HlcPoint,
+    /// Highest HLC whose frame write returned successfully on this lane.
+    pub written_hlc: HlcPoint,
+    /// Highest lane HLC covered by the global physical durable point.
+    pub durable_hlc: HlcPoint,
+    /// Highest HLC currently visible to lane-scoped query readers.
+    pub visible_hlc: HlcPoint,
+    /// Highest HLC consumed by registered in-process projections for this lane.
+    pub applied_hlc: HlcPoint,
+    /// Highest HLC for which broadcast artifacts were attempted on this lane.
+    pub emitted_hlc: HlcPoint,
+    /// Signed sequence-unit gap between visible and durable at snapshot time.
+    pub visible_minus_durable_seq: i64,
+}
+
+/// Operator-facing frontier view with the current internal watermark surface.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
 pub struct FrontierView {
     /// Highest HLC whose ordering coordinate has been assigned.
@@ -111,8 +162,18 @@ pub struct FrontierView {
     pub emitted_hlc: HlcPoint,
     /// Signed sequence-unit gap between visible and durable at snapshot time.
     pub visible_minus_durable_seq: i64,
+    /// Per-lane logical frontier views, sorted by lane id.
+    pub lanes: Vec<LaneFrontierView>,
     /// Real elapsed age of the oldest currently undurable write, if any.
     pub oldest_pending_write_age_ms: Option<u64>,
+}
+
+impl FrontierView {
+    /// Return the logical frontier for one exact DAG lane.
+    #[must_use]
+    pub fn lane(&self, lane: u32) -> Option<LaneFrontierView> {
+        self.lanes.iter().copied().find(|view| view.lane == lane)
+    }
 }
 
 /// Lightweight runtime statistics snapshot for the store.
@@ -347,6 +408,7 @@ pub enum MmapAdmissionSummary {
 /// Detailed diagnostic snapshot of the store's internal configuration and state.
 #[derive(Clone, Debug)]
 #[must_use]
+#[non_exhaustive]
 pub struct StoreDiagnostics {
     /// Total number of events currently held in the in-memory index.
     pub event_count: usize,
@@ -368,7 +430,7 @@ pub struct StoreDiagnostics {
     /// Narrow frontier observability view.
     pub frontier: FrontierView,
     /// Active scan topology label (`aos`, `scan`, `entity-local`, `tiled`,
-    /// `tiled-simd`, `all`, or `hybrid`).
+    /// `all`, or `hybrid`).
     pub index_topology: &'static str,
     /// Number of tiles in the columnar index (0 for non-tiled layouts).
     pub tile_count: usize,

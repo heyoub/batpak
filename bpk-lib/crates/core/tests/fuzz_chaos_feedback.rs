@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; fuzz+chaos feedback policy harness in tests/fuzz_chaos_feedback.rs reports shrink traces to stderr and uses unwrap/panic as assertion style while evaluating proptest-bounded gate metrics.
-#![allow(clippy::panic, clippy::print_stderr, clippy::unwrap_used)]
 //! Fuzz + Chaos Feedback Loop: the library uses its guard primitives as a
 //! reusable harness to evaluate fuzz and chaos testing results.
 //! Harness pattern: Property Harness (feedback gate lane).
@@ -22,15 +20,15 @@
 //!
 //! Run with: cargo test --test fuzz_chaos_feedback --all-features --release -- --ignored
 
-#[path = "support/fuzz_chaos_feedback.rs"]
-mod fcf_support;
-mod support;
+use batpak_testkit::fuzz_chaos_feedback as fcf_support;
 
+use std::io::Write;
+
+use batpak_testkit::prelude::*;
 use fcf_support::{
     ChaosIntegrityGate, ChaosSubscriptionGate, ChaosWriteGate, FuzzChaosContext, FuzzPanicGate,
     FuzzThroughputGate,
 };
-use support::prelude::*;
 
 // ============================================================
 // PHASE 4: The feedback loop test
@@ -39,27 +37,28 @@ use support::prelude::*;
 #[test]
 #[ignore = "long-running fuzz+chaos integration loop (~minutes). Run on demand via `cargo test --test fuzz_chaos_feedback -- --ignored` or via the dedicated chaos CI job. Excluded from `cargo xtask ci` to keep the inner loop under 30 seconds."]
 fn fuzz_chaos_feedback_loop() {
-    eprintln!("\n  ========================================");
-    eprintln!("  FUZZ + CHAOS FEEDBACK LOOP (Phase 1)");
-    eprintln!("  ========================================");
+    let mut err = std::io::stderr();
+    let _ = writeln!(err, "\n  ========================================");
+    let _ = writeln!(err, "  FUZZ + CHAOS FEEDBACK LOOP (Phase 1)");
+    let _ = writeln!(err, "  ========================================");
 
     // --- Run fuzz probes ---
     let (frame_ops, wire_ops, combinator_ops, fuzz_panics) = fcf_support::run_fuzz_probes();
-    eprintln!("  Fuzz: frame_decode   {frame_ops:.0} ops/sec");
-    eprintln!("  Fuzz: wire roundtrip {wire_ops:.0} ops/sec");
-    eprintln!("  Fuzz: combinators    {combinator_ops:.0} ops/sec");
-    eprintln!("  Fuzz: panics         {fuzz_panics}");
+    let _ = writeln!(err, "  Fuzz: frame_decode   {frame_ops:.0} ops/sec");
+    let _ = writeln!(err, "  Fuzz: wire roundtrip {wire_ops:.0} ops/sec");
+    let _ = writeln!(err, "  Fuzz: combinators    {combinator_ops:.0} ops/sec");
+    let _ = writeln!(err, "  Fuzz: panics         {fuzz_panics}");
 
     // --- Run chaos probes ---
     let (write_tp, write_err, cas_ok, integrity_ok, rot_loss, sub_rate, cursor_ok) =
         fcf_support::run_chaos_probes();
-    eprintln!("  Chaos: write throughput  {write_tp:.0} events/sec");
-    eprintln!("  Chaos: write errors      {write_err}");
-    eprintln!("  Chaos: CAS correct       {cas_ok}");
-    eprintln!("  Chaos: integrity ok      {integrity_ok}");
-    eprintln!("  Chaos: rotation loss     {rot_loss}");
-    eprintln!("  Chaos: sub delivery      {:.1}%", sub_rate * 100.0);
-    eprintln!("  Chaos: cursor complete   {cursor_ok}");
+    let _ = writeln!(err, "  Chaos: write throughput  {write_tp:.0} events/sec");
+    let _ = writeln!(err, "  Chaos: write errors      {write_err}");
+    let _ = writeln!(err, "  Chaos: CAS correct       {cas_ok}");
+    let _ = writeln!(err, "  Chaos: integrity ok      {integrity_ok}");
+    let _ = writeln!(err, "  Chaos: rotation loss     {rot_loss}");
+    let _ = writeln!(err, "  Chaos: sub delivery      {:.1}%", sub_rate * 100.0);
+    let _ = writeln!(err, "  Chaos: cursor complete   {cursor_ok}");
 
     let ctx = FuzzChaosContext {
         frame_decode_fuzz_ops_per_sec: frame_ops,
@@ -95,22 +94,23 @@ fn fuzz_chaos_feedback_loop() {
     let denials = gates.evaluate_all(&ctx);
 
     if denials.is_empty() {
-        eprintln!("  Result: ALL FUZZ+CHAOS GATES PASSED");
-        eprintln!("  ========================================");
-        eprintln!("  Launching EXTENDED load fuzz + chaos...");
-        eprintln!("  ========================================");
+        let _ = writeln!(err, "  Result: ALL FUZZ+CHAOS GATES PASSED");
+        let _ = writeln!(err, "  ========================================");
+        let _ = writeln!(err, "  Launching EXTENDED load fuzz + chaos...");
+        let _ = writeln!(err, "  ========================================");
 
         // PHASE 2: Extended runs — only when Phase 1 passes
         fcf_support::run_extended_fuzz_chaos();
     } else {
-        eprintln!("  Result: {} GATES FAILED:", denials.len());
+        let _ = writeln!(err, "  Result: {} GATES FAILED:", denials.len());
         for d in &denials {
-            eprintln!("    [{gate}] {msg}", gate = d.gate, msg = d.message);
+            let _ = writeln!(err, "    [{gate}] {msg}", gate = d.gate, msg = d.message);
             for (k, v) in &d.context {
-                eprintln!("      {k} = {v}");
+                let _ = writeln!(err, "      {k} = {v}");
             }
         }
-        panic!(
+        assert!(
+            denials.is_empty(),
             "FUZZ+CHAOS FEEDBACK LOOP FAILED: {} gate(s) denied.\n\
              Fix the issues above, then re-run. Extended fuzz+chaos will \
              NOT launch until all gates pass.",

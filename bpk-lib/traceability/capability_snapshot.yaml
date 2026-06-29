@@ -1,0 +1,179 @@
+# capability_snapshot.yaml — the anti-nerf capability FLOOR (GAUNT-CAPSNAP).
+# GENERATED: an exact mirror of each backend's `support_matrix()` best-case table
+# plus the witnessed-invariant set. Do NOT hand-edit; run
+# `cargo xtask capability-snapshot` (or `cargo run -p batpak-integrity -- capability-snapshot`).
+# A weakening diff here (enforcement lowered, a row/evidence claim removed, a witness
+# un-proved) is a CAPABILITY DOWNGRADE the meta-gate blocks without two-person approval
+# or a typed CapabilityDowngrade waiver.
+aspiration_floor:
+  - { backend: linux, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
+  - { backend: linux, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: linux, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: linux, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: linux, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: linux, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: ExposePath, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }
+  - { backend: linux, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
+  - { backend: linux, kind: LaunchWorkload, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
+  - { backend: linux, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: linux, kind: NetworkAllowList, enforcement: Unsupported, evidence: [] }
+  - { backend: linux, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
+  - { backend: linux, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
+  - { backend: macos, kind: ChildSpawnAllowDescendants, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: ChildSpawnDenyNewTasks, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: macos, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: macos, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: ExposePath, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: Filesystem, enforcement: Mediated, evidence: [DeniedAttempts, FilesystemDelta] }
+  - { backend: macos, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: macos, kind: Kill, enforcement: Mediated, evidence: [TerminalOutcome] }
+  - { backend: macos, kind: LaunchWorkload, enforcement: Enforced, evidence: [TerminalOutcome] }
+  - { backend: macos, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: macos, kind: NetworkAllowList, enforcement: Unsupported, evidence: [] }
+  - { backend: macos, kind: NetworkDenyAll, enforcement: Mediated, evidence: [DeniedAttempts] }
+  - { backend: macos, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: wasm, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
+  - { backend: wasm, kind: ChildSpawnAllowDescendants, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: ChildSpawnDenyNewTasks, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: wasm, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: wasm, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: wasm, kind: ExposePath, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, FilesystemDelta, MechanismAttestation] }
+  - { backend: wasm, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: wasm, kind: InheritedFdsOnly, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: Kill, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: LaunchWorkload, enforcement: Enforced, evidence: [TerminalOutcome] }
+  - { backend: wasm, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: wasm, kind: NetworkAllowList, enforcement: Unsupported, evidence: [] }
+  - { backend: wasm, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
+  - { backend: wasm, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: CaptureStreams, enforcement: Enforced, evidence: [CapturedStreams] }
+  - { backend: windows, kind: ChildSpawnAllowDescendants, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: ChildSpawnAllowThreads, enforcement: Unsupported, evidence: [] }
+  - { backend: windows, kind: ChildSpawnDenyNewTasks, enforcement: Enforced, evidence: [ProcessTree] }
+  - { backend: windows, kind: CommitArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: windows, kind: DiscardArtifact, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: windows, kind: Environment, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: ExposePath, enforcement: Mediated, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: Filesystem, enforcement: Enforced, evidence: [AllowedActions, DeniedAttempts, FilesystemDelta, MechanismAttestation] }
+  - { backend: windows, kind: InheritedFdsNone, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: InheritedFdsOnly, enforcement: Enforced, evidence: [MechanismAttestation] }
+  - { backend: windows, kind: Kill, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
+  - { backend: windows, kind: LaunchWorkload, enforcement: Enforced, evidence: [ProcessTree, TerminalOutcome] }
+  - { backend: windows, kind: ListOutputs, enforcement: Enforced, evidence: [ArtifactLineage] }
+  - { backend: windows, kind: NetworkAllowList, enforcement: Mediated, evidence: [DeniedAttempts, NetworkActivity] }
+  - { backend: windows, kind: NetworkDenyAll, enforcement: Enforced, evidence: [DeniedAttempts] }
+  - { backend: windows, kind: TempRoot, enforcement: Enforced, evidence: [MechanismAttestation] }
+split_manifest:
+witnesses:
+  - { id: INV-ALLOW-IS-DESIGN, witnessed: true }
+  - { id: INV-BATCH-ATOMIC-VISIBILITY, witnessed: true }
+  - { id: INV-BATCH-CRASH-RECOVERY, witnessed: true }
+  - { id: INV-BIDIRECTIONAL-SUBSTRATE-LANE, witnessed: true }
+  - { id: INV-BUILD-FAIL-FAST, witnessed: true }
+  - { id: INV-CACHE-CAPABILITIES-EXPLICIT, witnessed: true }
+  - { id: INV-CANONICAL-CONTAINER-CI, witnessed: true }
+  - { id: INV-CANONICAL-PATCH-STABILITY, witnessed: true }
+  - { id: INV-CHAOS-LINUX-ONLY, witnessed: true }
+  - { id: INV-CHECKPOINT-V2-INTERNED, witnessed: true }
+  - { id: INV-CLOCK-NOW-US-LIVE, witnessed: true }
+  - { id: INV-COLD-START-ARTIFACTS, witnessed: true }
+  - { id: INV-COLUMNAR-REPLACES-DASHMAP, witnessed: true }
+  - { id: INV-COMPLEXITY-EXPONENT-BOUNDED, witnessed: true }
+  - { id: INV-CONCURRENCY-SCHEDULE-PROOF, witnessed: true }
+  - { id: INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY, witnessed: true }
+  - { id: INV-COORDINATE-IS-LOGICAL-STREAM, witnessed: true }
+  - { id: INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED, witnessed: true }
+  - { id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT, witnessed: true }
+  - { id: INV-DELIVERY-AT-LEAST-ONCE-WITNESS, witnessed: true }
+  - { id: INV-DEPENDENCY-DIRECTION, witnessed: true }
+  - { id: INV-DOCS-CATALOG-VIEW-CURRENT, witnessed: true }
+  - { id: INV-DST-CORPUS-CURRENCY, witnessed: true }
+  - { id: INV-DST-RECOVERY-LEGAL, witnessed: true }
+  - { id: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT, witnessed: true }
+  - { id: INV-EVENTKIND-PARSE-ROUNDTRIP, witnessed: true }
+  - { id: INV-EXAMPLES-OBSERVABLE-OUTPUT, witnessed: true }
+  - { id: INV-EXTERNAL-REPLAY-NO-SIDECAR-TRUTH, witnessed: true }
+  - { id: INV-FAULT-INJECT-GATED, witnessed: true }
+  - { id: INV-FENCE-CANCELLED-STAYS-HIDDEN, witnessed: true }
+  - { id: INV-FORK-CRASH-ATOMIC, witnessed: true }
+  - { id: INV-FORK-HOSTILE-FS-REFUSAL, witnessed: true }
+  - { id: INV-FORK-ISOLATION, witnessed: true }
+  - { id: INV-FRONTIER-APPEND-GATE-HONORED, witnessed: true }
+  - { id: INV-FRONTIER-APPLIED-MIN, witnessed: true }
+  - { id: INV-FRONTIER-DURABLE-COVERS-RECOVERED, witnessed: true }
+  - { id: INV-FRONTIER-FAULT-ORDINALS, witnessed: true }
+  - { id: INV-FRONTIER-MONOTONIC, witnessed: true }
+  - { id: INV-FRONTIER-OPEN-MONOTONIC, witnessed: true }
+  - { id: INV-FRONTIER-ORDERING, witnessed: true }
+  - { id: INV-FRONTIER-TORN-FREE, witnessed: true }
+  - { id: INV-FRONTIER-WAIT-MONOTONIC, witnessed: true }
+  - { id: INV-GAUNTLET-FOLD-FUSION, witnessed: true }
+  - { id: INV-GENERATED-WITNESS-PIN, witnessed: true }
+  - { id: INV-GROUP-COMMIT-IDEMPOTENCY, witnessed: true }
+  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: true }
+  - { id: INV-HLC-JOIN-SEMILATTICE, witnessed: true }
+  - { id: INV-IDEMPOTENCY-DURABLE-WINDOW, witnessed: true }
+  - { id: INV-IMPORT-CONTENT-ISOMORPHISM, witnessed: true }
+  - { id: INV-IMPORT-CRASH-IDEMPOTENT, witnessed: true }
+  - { id: INV-IMPORT-NO-RUNAWAY, witnessed: true }
+  - { id: INV-INDEX-FILTER-COMPOSES, witnessed: true }
+  - { id: INV-INVARIANT-WITNESS-TEST, witnessed: true }
+  - { id: INV-JOURNAL-SINGLE-LIVE-OWNER, witnessed: true }
+  - { id: INV-JOURNAL-WRITER-SERIALIZES-COMMITS, witnessed: true }
+  - { id: INV-LANE-BRANCH-ISOLATION, witnessed: true }
+  - { id: INV-LINEARIZABILITY-SINGLE-WRITER, witnessed: true }
+  - { id: INV-LITERAL-REGEX-UNWRAP-SAFE, witnessed: true }
+  - { id: INV-MACRO-BOUNDED-CAST, witnessed: true }
+  - { id: INV-MMAP-SEALED-READS, witnessed: true }
+  - { id: INV-MULTI-VIEW-PUBLISH-AFTER-VIEW-SYNC, witnessed: true }
+  - { id: INV-NATIVE-DELETE-IDEMPOTENT, witnessed: true }
+  - { id: INV-NETBAT-BOUNDARY-THIN, witnessed: true }
+  - { id: INV-NETBAT-LINE-PROTOCOL-STABLE, witnessed: true }
+  - { id: INV-NO-DEAD-CODE-SILENCERS, witnessed: true }
+  - { id: INV-NO-TOKIO-PROD, witnessed: true }
+  - { id: INV-OBSERVABILITY-FAILURE-PATHS, witnessed: true }
+  - { id: INV-ONDISK-FORWARD-COMPAT-CANONICAL, witnessed: true }
+  - { id: INV-OPEN-REPORT-RECEIPT, witnessed: true }
+  - { id: INV-OUTBOX-DROP-SAFETY, witnessed: true }
+  - { id: INV-OUTCOME-FUNCTOR-COMPOSITION, witnessed: true }
+  - { id: INV-PAYLOAD-LENGTH-EXACT, witnessed: true }
+  - { id: INV-PAYLOAD-VERSION-NONZERO, witnessed: true }
+  - { id: INV-PER-LANE-FRONTIER, witnessed: true }
+  - { id: INV-PERFORMANCE-GATES-ENFORCED, witnessed: true }
+  - { id: INV-PLATFORM-EVIDENCE-NOT-MEANING, witnessed: true }
+  - { id: INV-POSITION-HINT-PERSISTENCE, witnessed: true }
+  - { id: INV-PREPARED-BATCH-STAGING-EQUIVALENCE, witnessed: true }
+  - { id: INV-PROJECTION-FUSION-EQUIVALENCE, witnessed: true }
+  - { id: INV-PROJECTION-FUSION-EQUIVALENT, witnessed: true }
+  - { id: INV-RECEIPT-SEALED, witnessed: true }
+  - { id: INV-RECOVERY-ORACLE-LEGAL, witnessed: true }
+  - { id: INV-REPLAY-LANE-SELECTION, witnessed: true }
+  - { id: INV-SCHEMA-VERSION-ISOLATION, witnessed: true }
+  - { id: INV-SEMANTIC-DIFF-EQUIVALENCE, witnessed: true }
+  - { id: INV-SIDX-TIMESTAMP-US-APPROXIMATION, witnessed: true }
+  - { id: INV-STORE-ERROR-TAXONOMY, witnessed: true }
+  - { id: INV-STORE-ISOMORPHISM-LAWS, witnessed: true }
+  - { id: INV-STORE-LIFECYCLE-HONESTY, witnessed: true }
+  - { id: INV-STORE-SYNC-ONLY, witnessed: true }
+  - { id: INV-SUBSCRIPTION-STATE-MACHINE, witnessed: true }
+  - { id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL, witnessed: true }
+  - { id: INV-SYNCBAT-DISPATCH-RECEIPTS, witnessed: true }
+  - { id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT, witnessed: true }
+  - { id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC, witnessed: true }
+  - { id: INV-TEST-PANIC-AS-ASSERTION, witnessed: true }
+  - { id: INV-TRACEABILITY-COMPLETE, witnessed: true }
+  - { id: INV-TYPELEVEL-COMBINATOR-LAWS, witnessed: true }
+  - { id: INV-TYPESTATE-OPEN-HAS-WRITER, witnessed: true }
+  - { id: INV-WIRE-ROUNDTRIP-TOTALITY, witnessed: true }
+  - { id: INV-WORKSPACE-DAG-ACYCLIC, witnessed: true }

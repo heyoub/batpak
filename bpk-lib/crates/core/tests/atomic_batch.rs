@@ -1,14 +1,11 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; atomic batch tests use explicit panic branches as assertion failures for Store result error paths.
-#![allow(clippy::panic)]
 //! Atomic batch append tests.
 //! PROVES: INV-BATCH-ATOMIC-VISIBILITY, INV-BATCH-CRASH-RECOVERY.
 
-#[path = "support/default_store.rs"]
-mod default_store;
-mod support;
+use batpak::id::EntityIdType;
+use batpak_testkit::default_store;
+use batpak_testkit::prelude::*;
 use default_store::default_temp_store;
 use std::collections::HashSet;
-use support::prelude::*;
 
 fn strip_open_completed(
     entries: Vec<batpak::store::index::IndexEntry>,
@@ -228,13 +225,13 @@ fn batch_oversized_item_no_partial_visibility() {
         )
         .expect("store usable after failed batch");
     assert_eq!(
-        post_failure.sequence, 1,
+        post_failure.global_sequence, 1,
         "PROPERTY: the first event after a failed batch must occupy \
          sequence 0 — the failed batch must not have burned any sequence \
          slots that would shift the next append's sequence. Got sequence \
          {}. Investigate: src/store/write/writer.rs validate_batch ordering \
          relative to reserve_sequences.",
-        post_failure.sequence
+        post_failure.global_sequence
     );
 }
 
@@ -271,9 +268,9 @@ fn batch_atomicity_full_visibility_on_success() {
 
     for receipt in &receipts {
         assert!(
-            found.contains(&u128::from(receipt.event_id)),
+            found.contains(&receipt.event_id),
             "event {} should be visible",
-            u128::from(receipt.event_id)
+            receipt.event_id
         );
     }
 }
@@ -343,7 +340,7 @@ fn batch_intra_batch_causation() {
 
     let first_id = entries[0].event_id();
     let second_causation = entries[1].causation_id();
-    assert_eq!(second_causation, Some(first_id));
+    assert_eq!(second_causation, Some(first_id.as_u128()));
 }
 
 /// Test: batch respects size limits.
@@ -368,13 +365,10 @@ fn batch_size_limits() {
         .collect();
 
     let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: a batch exceeding batch_max_size must fail. \
-             Investigate: src/store/write/writer.rs validate_batch size check."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: a batch exceeding batch_max_size must fail. \
+         Investigate: src/store/write/writer.rs validate_batch size check.",
+    );
     assert!(
         matches!(err, StoreError::BatchFailed { item_index: 0, .. }),
         "PROPERTY: batch size violation must surface as BatchFailed on the \
@@ -427,13 +421,10 @@ fn batch_restart_recovery_discards_incomplete_after_begin() {
 
     // Batch append should fail due to fault injection at the BatchBeginWritten point.
     let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: fault injection at BatchBeginWritten must propagate as a \
-             BatchFailed or FaultInjected error."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: fault injection at BatchBeginWritten must propagate as a \
+         BatchFailed or FaultInjected error.",
+    );
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -503,13 +494,10 @@ fn batch_restart_recovery_discards_incomplete_mid_items() {
 
     // Batch append should fail due to fault injection after first item.
     let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: fault injection mid-batch must propagate as a BatchFailed \
-             or FaultInjected error."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: fault injection mid-batch must propagate as a BatchFailed \
+         or FaultInjected error.",
+    );
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -616,14 +604,11 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
 
     // Fault during fsync.
     let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: a fault injected during BatchFsync must propagate as an \
-             error. Investigate: src/store/write/writer.rs handle_append_batch fsync \
-             site fault injection point."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: a fault injected during BatchFsync must propagate as an \
+         error. Investigate: src/store/write/writer.rs handle_append_batch fsync \
+         site fault injection point.",
+    );
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -646,7 +631,7 @@ fn batch_fsync_ambiguity_discards_uncommitted() {
     );
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-established event after fsync ambiguity")
             .event
             .payload["pre"],
@@ -714,7 +699,7 @@ fn batch_recovery_system_remains_coherent() {
         1,
         "entity_a should have only committed event"
     );
-    assert_eq!(entries_a[0].global_sequence(), receipt_a1.sequence);
+    assert_eq!(entries_a[0].global_sequence(), receipt_a1.global_sequence);
 
     let mut cursor_b = store.cursor_guaranteed(&Region::entity(coord_b.entity()));
     let entries_b = cursor_b.poll_batch(10);
@@ -729,7 +714,7 @@ fn batch_recovery_system_remains_coherent() {
         .append(&coord_a, EventKind::DATA, &serde_json::json!({"seq": 3}))
         .expect("append post-recovery entity_a event");
     assert!(
-        receipt_new.sequence > receipt_a1.sequence,
+        receipt_new.global_sequence > receipt_a1.global_sequence,
         "sequence should continue monotonically after recovery"
     );
 
@@ -770,7 +755,12 @@ fn batch_recovery_system_remains_coherent() {
                 store.cursor_guaranteed(&Region::entity(entry.coord().entity()));
             let entity_entries = entity_cursor.poll_batch(10);
             for (i, e) in entity_entries.iter().enumerate() {
-                assert_eq!(e.clock() as usize, i, "entity clock should be contiguous");
+                assert_eq!(
+                    usize::try_from(e.clock())
+                        .expect("entity clock fits in usize for a bounded recovery test"),
+                    i,
+                    "entity clock should be contiguous"
+                );
             }
         }
     }
@@ -812,7 +802,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     let store =
         Store::open(config.clone()).expect("open baseline store for subscription atomicity");
     let sub = store.subscribe_lossy(&Region::all());
-    store
+    let _ = store
         .append(&coord, EventKind::DATA, &serde_json::json!({"pre": 1}))
         .expect("append pre-crash subscription event");
     let pre_crash_count = drain(&sub);
@@ -857,13 +847,16 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     ];
 
     let result = store.append_batch(items);
-    let _err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: batch with after_batch_items(1) fault must fail. If this \
-             passes, fault injection is silently swallowed."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: batch with after_batch_items(1) fault must fail. If this \
+         passes, fault injection is silently swallowed.",
+    );
+    assert!(
+        err.to_string().contains("injected")
+            || err.to_string().contains("fault")
+            || err.to_string().contains("Fault"),
+        "PROPERTY: batch failure must surface the injected fault, got: {err}"
+    );
 
     let notifications_received = drain(&sub);
     drop(store);
@@ -888,7 +881,7 @@ fn batch_subscription_atomicity_no_partial_visibility() {
     assert_eq!(entries.len(), 1, "only pre-established event visible");
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-established subscription event")
             .event
             .payload["pre"],
@@ -997,7 +990,7 @@ fn batch_cross_segment_fault_recovery() {
         )
         .expect("append event after cross-segment recovery");
     assert!(
-        new_receipt.sequence > 0,
+        new_receipt.global_sequence > 0,
         "new appends should work after cross-segment recovery"
     );
 }
@@ -1045,15 +1038,11 @@ fn single_append_fault_at_segment_rotation_recovers() {
         EventKind::DATA,
         &serde_json::json!({"phase": 2, "pad": "y".repeat(300)}),
     );
-    match result {
-        Err(batpak::store::StoreError::FaultInjected(_)) => {}
-        Err(other) => panic!("expected FaultInjected during rotation, got {other:?}"),
-        Ok(receipt) => panic!(
-            "second append must rotate-and-fault, but it succeeded (seq {}); \
-             increase the Phase-1 payload size or lower segment_max_bytes",
-            receipt.sequence
-        ),
-    }
+    assert!(
+        matches!(result, Err(batpak::store::StoreError::FaultInjected(_))),
+        "second append must rotate-and-fault with FaultInjected (increase the \
+         Phase-1 payload size or lower segment_max_bytes if it succeeded), got {result:?}"
+    );
     drop(store);
 
     // Phase 3: reopen clean. Only the pre-rotation event must survive.
@@ -1068,7 +1057,7 @@ fn single_append_fault_at_segment_rotation_recovers() {
     );
     assert_eq!(
         store
-            .get(batpak::id::EventId::from(entries[0].event_id()))
+            .get(entries[0].event_id())
             .expect("load recovered pre-rotation event")
             .event
             .payload["phase"],
@@ -1085,7 +1074,7 @@ fn single_append_fault_at_segment_rotation_recovers() {
         )
         .expect("append after segment-rotation recovery");
     assert!(
-        after_receipt.sequence > pre_receipt.sequence,
+        after_receipt.global_sequence > pre_receipt.global_sequence,
         "appends after segment-rotation recovery must be monotonic"
     );
 }
@@ -1173,15 +1162,12 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         EventKind::DATA,
         &serde_json::json!({"phase": 2, "pad": "y".repeat(300)}),
     );
-    match result {
-        Err(batpak::store::StoreError::FaultInjected(_)) => {}
-        Err(other) => panic!("expected FaultInjected at new-segment create, got {other:?}"),
-        Ok(receipt) => panic!(
-            "second append must rotate-and-fault at new-segment create, but it \
-             succeeded (seq {}); lower segment_max_bytes or grow the Phase-1 payload",
-            receipt.sequence
-        ),
-    }
+    assert!(
+        matches!(result, Err(batpak::store::StoreError::FaultInjected(_))),
+        "second append must rotate-and-fault at new-segment create with \
+         FaultInjected (lower segment_max_bytes or grow the Phase-1 payload if it \
+         succeeded), got {result:?}"
+    );
 
     // The one-shot injector is now spent. PROPERTY: the writer was left
     // CONSISTENT, not half-rotated. A subsequent in-process append must succeed
@@ -1195,7 +1181,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         )
         .expect("append after rotation-create fault must succeed on a consistent writer");
     assert!(
-        post_fault.sequence > pre_receipt.sequence,
+        post_fault.global_sequence > pre_receipt.global_sequence,
         "appends after a rotation-create fault must be monotonic — proves the \
          writer was not left half-rotated"
     );
@@ -1218,7 +1204,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         .iter()
         .map(|e| {
             store
-                .get(batpak::id::EventId::from(e.event_id()))
+                .get(e.event_id())
                 .expect("load recovered event after rotation-create fault")
                 .event
                 .payload["phase"]
@@ -1240,7 +1226,7 @@ fn segment_rotation_new_segment_create_fault_leaves_writer_consistent() {
         )
         .expect("append after rotation-create reopen");
     assert!(
-        after.sequence > post_fault.sequence,
+        after.global_sequence > post_fault.global_sequence,
         "appends after rotation-create reopen must be monotonic"
     );
 }
@@ -1301,13 +1287,10 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
 
     // The batch should fail because BatchPrePublish injects a fault.
     let result = store.append_batch(items);
-    let err = match result {
-        Ok(_) => panic!(
-            "PROPERTY: a batch with a BatchPrePublish fault injection must fail. \
-             If this passes, fault injection is being silently swallowed."
-        ),
-        Err(err) => err,
-    };
+    let err = result.expect_err(
+        "PROPERTY: a batch with a BatchPrePublish fault injection must fail. \
+         If this passes, fault injection is being silently swallowed.",
+    );
     assert!(
         matches!(err, StoreError::BatchFailed { .. })
             || matches!(err, StoreError::FaultInjected(_)),
@@ -1332,7 +1315,7 @@ fn batch_publish_atomicity_no_partial_read_during_insert() {
     );
     assert_eq!(
         entries[0].event_id(),
-        u128::from(pre.event_id),
+        pre.event_id,
         "the single visible entry must be the pre-batch baseline event"
     );
 }
@@ -1371,7 +1354,7 @@ fn batch_publish_atomicity_concurrent_reader_sees_zero_or_all() {
     // pre_count + k * batch_size.
     let pre_count: usize = 3;
     for i in 0..pre_count {
-        store
+        let _ = store
             .append(&coord, EventKind::DATA, &serde_json::json!({"pre": i}))
             .expect("append baseline event");
     }
@@ -1696,7 +1679,7 @@ fn batch_survives_unclean_shutdown_without_sidx_footer() {
         .iter()
         .filter_map(|e| {
             store
-                .get(batpak::id::EventId::from(e.event_id()))
+                .get(e.event_id())
                 .ok()
                 .and_then(|stored| stored.event.payload["step"].as_i64())
         })
@@ -1719,7 +1702,7 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
     {
         let config = StoreConfig::new(&data_dir).with_segment_max_bytes(512);
         let store = Store::open(config).expect("open store");
-        store
+        let _ = store
             .append(
                 &coord,
                 EventKind::DATA,
@@ -1758,11 +1741,11 @@ fn oversized_batch_reopens_with_sidx_entries_pointing_to_correct_segment() {
 
     for (entry, expected_item) in entries.iter().skip(1).zip(expected) {
         let stored = reopened
-            .get(batpak::id::EventId::from(entry.event_id()))
+            .get(entry.event_id())
             .expect("SIDX disk position reads committed batch frame");
         assert_eq!(
             stored.event.header.event_id,
-            batpak::id::EventId::from(entry.event_id()),
+            entry.event_id(),
             "PROPERTY: SIDX row must point to the segment containing this event frame, not a later batch segment"
         );
         assert_eq!(

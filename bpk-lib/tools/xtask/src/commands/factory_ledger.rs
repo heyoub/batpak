@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Context, Result};
-use batpak::id::EventId;
+use batpak::id::EntityIdType;
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -116,7 +116,7 @@ fn record_command(args: FactoryLedgerRecordArgs) -> Result<()> {
 fn list_command(args: &FactoryLedgerListArgs) -> Result<()> {
     let store = open_ledger_store()?;
     for line in collect_list_lines(&store, args.limit)? {
-        println!("{line}");
+        outln!("{line}");
     }
     store.close().context("close factory ledger store")?;
     Ok(())
@@ -340,7 +340,7 @@ fn append_started(store: &mut Store, args: FactoryLedgerRecordStartedArgs) -> Re
         head: args.head.unwrap_or_else(default_head),
         started_ms: args.started_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.started")?;
     Ok(())
@@ -355,7 +355,7 @@ fn append_completed(store: &mut Store, args: FactoryLedgerRecordCompletedArgs) -
         duration_ms: args.duration_ms,
         completed_ms: args.completed_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.completed")?;
     Ok(())
@@ -371,7 +371,7 @@ fn append_failed(store: &mut Store, args: FactoryLedgerRecordFailedArgs) -> Resu
         stderr_tail: cap_stderr_tail(args.stderr_tail),
         completed_ms: args.completed_ms.unwrap_or_else(now_ms),
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.command.failed")?;
     Ok(())
@@ -393,7 +393,7 @@ fn append_gate_completed(
         head: args.head.unwrap_or_else(default_head),
         summary: args.summary,
     };
-    store
+    let _ = store
         .append_typed(&coord, &payload)
         .context("append factory.gate.completed")?;
     Ok(())
@@ -434,8 +434,8 @@ fn collect_gate_rows_from_store(store: &Store, limit: usize) -> Result<Vec<Ledge
     for entry in entries {
         let event_id = entry.event_id();
         let stored = store
-            .read_raw(EventId::from(event_id))
-            .with_context(|| format!("read ledger event {event_id:032x}"))?;
+            .read_raw(event_id)
+            .with_context(|| format!("read ledger event {:032x}", event_id.as_u128()))?;
         if let Some(gate) = stored
             .event
             .route_typed::<FactoryGateCompleted>()
@@ -466,8 +466,8 @@ pub(crate) fn collect_list_lines(store: &Store, limit: usize) -> Result<Vec<Stri
     for entry in entries {
         let event_id = entry.event_id();
         let stored = store
-            .read_raw(EventId::from(event_id))
-            .with_context(|| format!("read ledger event {event_id:032x}"))?;
+            .read_raw(event_id)
+            .with_context(|| format!("read ledger event {:032x}", event_id.as_u128()))?;
         let seq = entry.global_sequence();
         if let Some(started) = stored
             .event
@@ -663,9 +663,7 @@ mod tests {
             .into_iter()
             .next()
             .expect("one entry");
-        let stored = store
-            .read_raw(EventId::from(entry.event_id()))
-            .expect("read");
+        let stored = store.read_raw(entry.event_id()).expect("read");
         let failed = stored
             .event
             .route_typed::<FactoryCommandFailed>()
@@ -827,14 +825,14 @@ mod tests {
             &mut store,
             FactoryLedgerRecordGateCompletedArgs {
                 run_id: "0123456789abcdef0123456789abcdef".to_owned(),
-                gate: "host-dev".to_owned(),
-                command: "cargo xtask host-dev".to_owned(),
+                gate: "verify".to_owned(),
+                command: "cargo xtask preflight".to_owned(),
                 status_code: 0,
                 duration_ms: 42,
                 completed_ms: Some(99),
                 branch: Some("factory/test".to_owned()),
                 head: Some("afb63dc".to_owned()),
-                summary: "host-dev ok @ afb63dc duration=42ms".to_owned(),
+                summary: "verify ok @ afb63dc duration=42ms".to_owned(),
             },
         )
         .expect("gate");
@@ -842,9 +840,9 @@ mod tests {
         store.close().expect("close");
         let gate_line = lines
             .iter()
-            .find(|line| line.contains("gate=host-dev"))
+            .find(|line| line.contains("gate=verify"))
             .expect("gate line");
-        assert!(gate_line.contains("summary=\"host-dev ok @ afb63dc duration=42ms\""));
+        assert!(gate_line.contains("summary=\"verify ok @ afb63dc duration=42ms\""));
         assert!(gate_line.contains("head=afb63dc"));
     }
 

@@ -1,5 +1,3 @@
-// justifies: INV-SUBSCRIPTION-STATE-MACHINE; subscription tests intentionally exercise blocking recv APIs under bounded producer/timeout probes.
-#![allow(clippy::disallowed_methods)]
 //! Integration tests for SubscriptionOps: filter, take, and combined chains.
 //!
 //! PROVES: LAW-004 (Composition Over Construction — ops chain correctly)
@@ -9,17 +7,15 @@
 //! after deterministic producer appends; exhaustion probes are bounded by an
 //! outer `recv_timeout` channel.
 
-mod support;
 use batpak::store::Notification;
+use batpak_testkit::prelude::*;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use support::prelude::*;
 
 const PROMPT_EXHAUSTION_TIMEOUT: Duration = Duration::from_secs(2);
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -39,10 +35,13 @@ fn ops_recv_without_filters() {
     // Spawn producer thread — recv() is blocking so append must happen concurrently.
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        let payload = serde_json::json!({"hello": "world"});
-        store_w.append(&coord_w, kind, &payload).expect("append");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-recv-no-filters-producer".into())
+        .spawn(move || {
+            let payload = serde_json::json!({"hello": "world"});
+            let _ = store_w.append(&coord_w, kind, &payload).expect("append");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(
@@ -77,16 +76,19 @@ fn subscription_notifications_preserve_committed_position() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        store_w
-            .append_with_options(
-                &coord_w,
-                kind,
-                &serde_json::json!({"position": true}),
-                AppendOptions::new().with_position_hint(AppendPositionHint::new(6, 2)),
-            )
-            .expect("append with position hint");
-    });
+    let producer = thread::Builder::new()
+        .name("subscription-position-producer".into())
+        .spawn(move || {
+            let _ = store_w
+                .append_with_options(
+                    &coord_w,
+                    kind,
+                    &serde_json::json!({"position": true}),
+                    AppendOptions::new().with_position_hint(AppendPositionHint::new(6, 2)),
+                )
+                .expect("append with position hint");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv().expect("position notification");
     assert_eq!(notif.position.lane(), 6);
@@ -112,13 +114,16 @@ fn ops_filter_passes_matching() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        let payload = serde_json::json!({"x": 1});
-        // Append an event with the matching kind.
-        store_w
-            .append(&coord_w, target_kind, &payload)
-            .expect("append matching");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-filter-matching-producer".into())
+        .spawn(move || {
+            let payload = serde_json::json!({"x": 1});
+            // Append an event with the matching kind.
+            let _ = store_w
+                .append(&coord_w, target_kind, &payload)
+                .expect("append matching");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(
@@ -153,17 +158,20 @@ fn ops_filter_rejects_non_matching() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        let payload = serde_json::json!({"x": 1});
-        // First: append non-matching event — should be rejected by filter.
-        store_w
-            .append(&coord_w, unwanted_kind, &payload)
-            .expect("append unwanted");
-        // Second: append matching event — should pass through.
-        store_w
-            .append(&coord_w, wanted_kind, &payload)
-            .expect("append wanted");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-filter-rejects-producer".into())
+        .spawn(move || {
+            let payload = serde_json::json!({"x": 1});
+            // First: append non-matching event — should be rejected by filter.
+            let _ = store_w
+                .append(&coord_w, unwanted_kind, &payload)
+                .expect("append unwanted");
+            // Second: append matching event — should pass through.
+            let _ = store_w
+                .append(&coord_w, wanted_kind, &payload)
+                .expect("append wanted");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(
@@ -194,12 +202,15 @@ fn ops_take_limits_count() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        let payload = serde_json::json!({"x": 1});
-        for _ in 0..5 {
-            store_w.append(&coord_w, kind, &payload).expect("append");
-        }
-    });
+    let producer = thread::Builder::new()
+        .name("ops-take-limits-producer".into())
+        .spawn(move || {
+            let payload = serde_json::json!({"x": 1});
+            for _ in 0..5 {
+                let _ = store_w.append(&coord_w, kind, &payload).expect("append");
+            }
+        })
+        .expect("spawn producer thread");
 
     // Should receive exactly 2.
     let first = ops.recv();
@@ -210,10 +221,13 @@ fn ops_take_limits_count() {
         "OPS TAKE: second recv should return Some."
     );
     let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let exhausted = ops.recv().is_none();
-        let _ = tx.send(exhausted);
-    });
+    thread::Builder::new()
+        .name("ops-take-exhausted-recv".into())
+        .spawn(move || {
+            let exhausted = ops.recv().is_none();
+            let _ = tx.send(exhausted);
+        })
+        .expect("spawn exhausted recv thread");
     assert!(
         rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT)
             .expect("OPS TAKE: exhausted recv should return promptly while store is open"),
@@ -233,7 +247,7 @@ fn ops_take_limit_returns_none_immediately_while_store_is_open() {
 
     let sub = store.subscribe_lossy(&Region::entity("entity:take-open"));
     let mut ops = sub.ops().take(1);
-    store
+    let _ = store
         .append(&coord, kind, &serde_json::json!({"x": 1}))
         .expect("append");
     assert!(
@@ -242,10 +256,13 @@ fn ops_take_limit_returns_none_immediately_while_store_is_open() {
     );
 
     let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let exhausted = ops.recv().is_none();
-        let _ = tx.send(exhausted);
-    });
+    thread::Builder::new()
+        .name("ops-take-open-exhausted-recv".into())
+        .spawn(move || {
+            let exhausted = ops.recv().is_none();
+            let _ = tx.send(exhausted);
+        })
+        .expect("spawn exhausted recv thread");
     assert!(
         rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT).expect(
             "OPS TAKE OPEN: exhausted recv must return immediately while store is still open"
@@ -272,25 +289,28 @@ fn ops_filter_and_take_combined() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        let payload = serde_json::json!({"x": 1});
-        // Interleave matching and non-matching events.
-        store_w
-            .append(&coord_w, other_kind, &payload)
-            .expect("append other");
-        store_w
-            .append(&coord_w, wanted_kind, &payload)
-            .expect("append wanted 1");
-        store_w
-            .append(&coord_w, other_kind, &payload)
-            .expect("append other");
-        store_w
-            .append(&coord_w, wanted_kind, &payload)
-            .expect("append wanted 2");
-        store_w
-            .append(&coord_w, wanted_kind, &payload)
-            .expect("append wanted 3");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-filter-take-combined-producer".into())
+        .spawn(move || {
+            let payload = serde_json::json!({"x": 1});
+            // Interleave matching and non-matching events.
+            let _ = store_w
+                .append(&coord_w, other_kind, &payload)
+                .expect("append other");
+            let _ = store_w
+                .append(&coord_w, wanted_kind, &payload)
+                .expect("append wanted 1");
+            let _ = store_w
+                .append(&coord_w, other_kind, &payload)
+                .expect("append other");
+            let _ = store_w
+                .append(&coord_w, wanted_kind, &payload)
+                .expect("append wanted 2");
+            let _ = store_w
+                .append(&coord_w, wanted_kind, &payload)
+                .expect("append wanted 3");
+        })
+        .expect("spawn producer thread");
 
     // Should receive exactly 2 matching events, skipping the non-matching ones.
     let first = ops.recv();
@@ -316,10 +336,13 @@ fn ops_filter_and_take_combined() {
     );
 
     let (tx, rx) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let exhausted = ops.recv().is_none();
-        let _ = tx.send(exhausted);
-    });
+    thread::Builder::new()
+        .name("ops-filter-take-combined-exhausted-recv".into())
+        .spawn(move || {
+            let exhausted = ops.recv().is_none();
+            let _ = tx.send(exhausted);
+        })
+        .expect("spawn exhausted recv thread");
     assert!(
         rx.recv_timeout(PROMPT_EXHAUSTION_TIMEOUT)
             .expect("OPS COMBINED: exhausted recv should return promptly while store is open"),
@@ -363,11 +386,14 @@ fn ops_map_transforms_notification() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        store_w
-            .append(&coord_w, kind, &serde_json::json!({"x": 1}))
-            .expect("append");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-map-transforms-producer".into())
+        .spawn(move || {
+            let _ = store_w
+                .append(&coord_w, kind, &serde_json::json!({"x": 1}))
+                .expect("append");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(
@@ -411,16 +437,19 @@ fn ops_map_returning_none_skips_event() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        // First event: skip_kind — map returns None, should be skipped
-        store_w
-            .append(&coord_w, skip_kind, &serde_json::json!({"skip": true}))
-            .expect("append skip");
-        // Second event: pass_kind — map returns Some, should pass through
-        store_w
-            .append(&coord_w, pass_kind, &serde_json::json!({"pass": true}))
-            .expect("append pass");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-map-none-skips-producer".into())
+        .spawn(move || {
+            // First event: skip_kind — map returns None, should be skipped
+            let _ = store_w
+                .append(&coord_w, skip_kind, &serde_json::json!({"skip": true}))
+                .expect("append skip");
+            // Second event: pass_kind — map returns Some, should pass through
+            let _ = store_w
+                .append(&coord_w, pass_kind, &serde_json::json!({"pass": true}))
+                .expect("append pass");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(
@@ -461,16 +490,19 @@ fn ops_multiple_filters_all_must_pass() {
 
     let store_w = Arc::clone(&store);
     let coord_w = coord.clone();
-    let producer = thread::spawn(move || {
-        // Event 1: kind_c — fails first filter
-        store_w
-            .append(&coord_w, kind_c, &serde_json::json!({"x": 1}))
-            .expect("append kind_c");
-        // Event 2: kind_a, sequence=1 — passes both filters
-        store_w
-            .append(&coord_w, kind_a, &serde_json::json!({"x": 2}))
-            .expect("append kind_a");
-    });
+    let producer = thread::Builder::new()
+        .name("ops-multi-filter-producer".into())
+        .spawn(move || {
+            // Event 1: kind_c — fails first filter
+            let _ = store_w
+                .append(&coord_w, kind_c, &serde_json::json!({"x": 1}))
+                .expect("append kind_c");
+            // Event 2: kind_a, sequence=1 — passes both filters
+            let _ = store_w
+                .append(&coord_w, kind_a, &serde_json::json!({"x": 2}))
+                .expect("append kind_a");
+        })
+        .expect("spawn producer thread");
 
     let notif = ops.recv();
     assert!(

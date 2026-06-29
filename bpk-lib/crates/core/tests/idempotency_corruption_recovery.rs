@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION, INV-IDEMPOTENCY-DURABLE-WINDOW; integration tests rely on expect/panic and cast a tiny synthetic key to u64 where truncation is impossible; clippy allowances are standard for harness tests.
-#![allow(clippy::unwrap_used, clippy::panic, clippy::cast_possible_truncation)]
 //! Crash / corruption posture for the durable idempotency sidecar (Phase 3).
 //!
 //! PROVES: INV-IDEMPOTENCY-DURABLE-WINDOW (graceful-degradation posture). A
@@ -13,7 +11,7 @@
 
 use batpak::coordinate::{Coordinate, Region};
 use batpak::event::EventKind;
-use batpak::id::IdempotencyKey;
+use batpak::id::{EntityIdType, IdempotencyKey};
 use batpak::store::{AppendOptions, Store, StoreConfig, StoreError};
 use std::io::Write;
 use tempfile::TempDir;
@@ -34,11 +32,12 @@ fn config(dir: &TempDir) -> StoreConfig {
 }
 
 fn append_keyed(store: &Store, key: u128) -> batpak::store::AppendReceipt {
+    let payload_tag = u64::try_from(key & u128::from(u64::MAX)).expect("low 64 bits fit u64");
     store
         .append_with_options(
             &coord(),
             KIND,
-            &serde_json::json!({"k": key as u64}),
+            &serde_json::json!({ "k": payload_tag }),
             AppendOptions::new().with_idempotency(IdempotencyKey::from(key)),
         )
         .expect("keyed append")
@@ -50,7 +49,7 @@ fn key_event_count(store: &Store, key: u128) -> usize {
     store
         .query(&Region::all())
         .into_iter()
-        .filter(|e| e.event_kind() == KIND && e.event_id() == key)
+        .filter(|e| e.event_kind() == KIND && e.event_id().as_u128() == key)
         .count()
 }
 
@@ -65,7 +64,7 @@ fn assert_graceful_degradation(mutate: impl FnOnce(&std::path::Path)) {
 
     {
         let store = Store::open(config(&dir)).expect("open");
-        append_keyed(&store, key);
+        let _ = append_keyed(&store, key);
         assert_eq!(key_event_count(&store, key), 1, "one keyed event committed");
         store.close().expect("close");
     }
@@ -81,7 +80,7 @@ fn assert_graceful_degradation(mutate: impl FnOnce(&std::path::Path)) {
     let fresh = append_keyed(&store, new_key);
     let replay = append_keyed(&store, new_key);
     assert_eq!(
-        fresh.sequence, replay.sequence,
+        fresh.global_sequence, replay.global_sequence,
         "store remains correct after corruption: new keyed append + retry no-ops"
     );
     assert_eq!(
@@ -147,7 +146,7 @@ fn future_version_is_a_hard_error_at_cold_start() {
     let key = 0x4242_4242_4242_4242_4242_4242_4242_4242u128;
     {
         let store = Store::open(config(&dir)).expect("open");
-        append_keyed(&store, key);
+        let _ = append_keyed(&store, key);
         store.close().expect("close");
     }
 

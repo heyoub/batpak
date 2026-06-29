@@ -76,9 +76,13 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
     let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
-    let segment =
-        Segment::<Active>::create_with_created_ns(&config.data_dir, 1, validated_cfg.now_wall_ns())
-            .expect("create active segment");
+    let segment = Segment::<Active>::create_with_created_ns_on(
+        &config.data_dir,
+        1,
+        validated_cfg.now_wall_ns(),
+        config.fs(),
+    )
+    .expect("create active segment");
     let (tx, rx) = flume::bounded(3);
     let (append_tx, append_rx) = flume::bounded(1);
     let (shutdown_tx, shutdown_rx) = flume::bounded(1);
@@ -104,6 +108,7 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
         idempotency_key: Some(0xA11CE),
         dag_lane: 0,
         dag_depth: 0,
+        dag_branch_root: false,
         extensions: BTreeMap::new(),
     };
 
@@ -126,22 +131,24 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
     writer_loop(
         WriterRuntime {
             rx: &rx,
-            config: &config,
-            validated_cfg: &validated_cfg,
-            index: &index,
-            subscribers: &subscribers,
-            reactor_subscribers: &reactor_subscribers,
-            reader: &reader,
-            watermark_handle: &watermark_handle,
+            config: Arc::clone(&config),
+            validated_cfg: Arc::clone(&validated_cfg),
+            index: Arc::clone(&index),
+            subscribers: Arc::new(subscribers),
+            reactor_subscribers: Arc::new(reactor_subscribers),
+            reader: Arc::clone(&reader),
+            watermark_handle: watermark_handle.clone(),
         },
         segment,
         1,
     );
 
-    append_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("append reply")
-        .expect("append succeeds");
+    drop(
+        append_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("append reply")
+            .expect("append succeeds"),
+    );
     shutdown_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("shutdown reply")

@@ -1,6 +1,6 @@
 [package]
 name = "batpak"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -28,7 +28,16 @@ rustdoc-args = ["--cfg", "docsrs"]
 # request `features = ["blake3"]` still resolve to the mandatory implementation.
 default = ["blake3"]
 blake3 = []
-dangerous-test-hooks = ["dep:fastrand"]
+dangerous-test-hooks = ["dep:fastrand", "batpak-testkit/dangerous-test-hooks"]
+# Test-only global-allocator shims (off by default; never in a normal build).
+# A `#[global_allocator]` is process-wide, so each shim must be installed by a
+# DEDICATED single-test binary. `alloc-count` enables `CountingAlloc` (atomic
+# alloc/realloc/dealloc counters + a `scope()` snapshot-delta guard) used to
+# gate hot paths against an allocation budget. `fault-alloc` enables
+# `FailingAlloc`, which returns null starting at the Kth allocation to exercise
+# OOM-handling paths deterministically. Neither alters production behavior.
+alloc-count = []
+fault-alloc = []
 # Gauntlet Phase 0B sentinel RED fixtures are gated behind the
 # `--cfg gauntlet_red_fixture` compile flag, NOT a Cargo feature. A red fixture
 # is designed to FAIL (it asserts the illegal/old behavior), so it must never be
@@ -42,8 +51,8 @@ dangerous-test-hooks = ["dep:fastrand"]
 uuid = { version = ">=1.20, <1.24", default-features = false, features = ["std", "v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-batpak-macros-support = { path = "../macros-support", version = "0.8.2" }
-batpak-macros = { path = "../macros", version = "0.8.2" }
+batpak-macros-support = { path = "../macros-support", version = "0.8.3" }
+batpak-macros = { path = "../macros", version = "0.8.3" }
 blake3 = "1"
 flume = "0.12"
 crc32fast = "1"
@@ -70,7 +79,8 @@ zeroize = "1"
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
-batpak-bench-support = { path = "../bench-support", version = "0.8.2" }
+batpak-bench-support = { path = "../bench-support", version = "0.8.3" }
+batpak-testkit = { path = "../testkit" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }
 criterion = { version = "0.8", features = ["html_reports"] }
@@ -80,6 +90,10 @@ fastrand = "2"
 serial_test = { version = "3.5.0", features = ["file_locks"] }
 loom = "0.7"
 tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
+yaml_serde = "0.10.4"
+# Pinned to the exact line the crate uses so a forged on-disk artifact in the
+# compat-matrix gate is byte-identical to what the store would write.
+rmp-serde = "=1.3.1"
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -162,4 +176,8 @@ harness = false
 
 [[bench]]
 name = "recovery_lanes"
+harness = false
+
+[[bench]]
+name = "fork_cost"
 harness = false

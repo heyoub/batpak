@@ -16,6 +16,37 @@
   paths:
     - tools/integrity/src/main.rs
     - tools/integrity/src/architecture_lints.rs
+- id: ART-TRIANGULATION-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/triangulation.rs
+    - tools/integrity/src/triangulation_tests.rs
+    - tools/integrity/src/fitness_functions.rs
+    - tools/integrity/src/fitness_functions_tests.rs
+    - tools/integrity/src/structural.rs
+- id: ART-SEMANTIC-DIFF-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/semantic_diff.rs
+- id: ART-LINEARIZABILITY-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/linearizability.rs
+- id: ART-COMPLEXITY-EXPONENT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/complexity_exponent.rs
+- id: ART-DOCS-CATALOG-GATE
+  kind: tool
+  paths:
+    - tools/integrity/src/docs_catalog.rs
+    - tools/integrity/src/docs_catalog_tests.rs
+    - tools/integrity/src/structural.rs
+- id: ART-REPO-IR-SOURCE
+  kind: tool
+  paths:
+    - tools/integrity/src/repo_ir.rs
+    - tools/integrity/src/repo_ir_tests.rs
 - id: ART-TRACEABILITY
   kind: registry
   paths:
@@ -88,7 +119,6 @@
     - crates/macros-support/Cargo.toml
     - crates/macros/Cargo.toml
     - crates/bench-support/Cargo.toml
-    - crates/syncbat-macros/Cargo.toml
     - crates/syncbat/Cargo.toml
     - crates/netbat/Cargo.toml
 - id: ART-PACKAGE-READMES
@@ -98,7 +128,6 @@
     - crates/macros-support/README.md
     - crates/macros/README.md
     - crates/bench-support/README.md
-    - crates/syncbat-macros/README.md
     - crates/syncbat/README.md
     - crates/netbat/README.md
 - id: ART-SYNCBAT-SOURCE
@@ -108,6 +137,7 @@
     - crates/syncbat/src/builder.rs
     - crates/syncbat/src/core.rs
     - crates/syncbat/src/error.rs
+    - crates/syncbat/src/effect.rs
     - crates/syncbat/src/handler.rs
     - crates/syncbat/src/module.rs
     - crates/syncbat/src/operation.rs
@@ -123,6 +153,7 @@
   kind: tests
   paths:
     - crates/syncbat/tests/descriptor_validation.rs
+    - crates/syncbat/tests/effect_enforcement.rs
     - crates/syncbat/tests/operation_macro.rs
     - crates/syncbat/tests/operation_macro_errors.rs
     - crates/syncbat/tests/receipt_namespace.rs
@@ -166,26 +197,6 @@
     - crates/netbat/tests/golden/response_ok.hex
     - crates/netbat/tests/golden/response_ok_hi.hex
     - crates/netbat/tests/golden/response_err_malformed.hex
-- id: ART-HBAT-SOURCE
-  kind: source
-  paths:
-    - crates/hbat/src/lib.rs
-    - crates/hbat/src/bank.rs
-    - crates/hbat/src/evidence.rs
-    - crates/hbat/src/region_wire.rs
-    - crates/hbat/src/handlers.rs
-    - crates/hbat/src/manifest.rs
-    - crates/hbat/src/main.rs
-- id: ART-HBAT-TESTS
-  kind: tests
-  paths:
-    - crates/hbat/tests/tcp_e2e.rs
-    - crates/hbat/tests/handlers.rs
-    - crates/hbat/tests/evidence.rs
-- id: ART-HBAT-MANIFEST-EXPORT
-  kind: tool
-  paths:
-    - tools/xtask/src/commands/export_ts_manifest.rs
 - id: ART-STORE-EVIDENCE-REPORTS
   kind: tests
   paths:
@@ -195,18 +206,6 @@
     - crates/core/tests/projection_run_evidence_report.rs
     - crates/core/src/store/read_walk.rs
     - crates/core/src/store/projection_run.rs
-- id: ART-BPK-TS-MANIFEST
-  kind: generated
-  paths:
-    - ../bpk-ts/batpak.manifest.json
-    - ../bpk-ts/packages/generated/src/events.ts
-    - ../bpk-ts/packages/generated/src/operations.ts
-    - ../bpk-ts/packages/generated/src/manifest.ts
-- id: ART-BPK-TS-CODEGEN
-  kind: tool
-  paths:
-    - ../bpk-ts/packages/codegen/src/index.ts
-    - ../bpk-ts/packages/codegen/test/codegen.test.ts
 - id: ART-ADR-SYNCBAT-CONTRACT
   kind: adr
   paths:
@@ -290,6 +289,103 @@
   kind: source
   paths:
     - crates/core/src/store/lifecycle.rs
+- id: ART-STORE-FORK-IMPORT-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/file_classification.rs
+    - crates/core/src/store/fork_report.rs
+    - crates/core/src/store/import.rs
+    - crates/core/src/store/import_api.rs
+    - crates/core/src/store/lifecycle.rs
+    - crates/core/src/store/lifecycle_api.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/write_api.rs
+- id: ART-STORE-FORK-IMPORT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/store_fork.rs
+    - crates/core/tests/import_events.rs
+    - crates/core/tests/import_same_store_ceiling.rs
+    - crates/core/tests/isomorphism_laws.rs
+    - crates/core/src/event/upcast.rs
+    - crates/core/src/store/segment/sidx/tests.rs
+- id: ART-STORE-FORK-BENCH
+  kind: benchmark
+  paths:
+    - crates/core/benches/fork_cost.rs
+- id: ART-IMPORT-FAULT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/import_under_fault.rs
+    - crates/core/tests/import_same_store_ceiling.rs
+    - crates/core/src/store/sim/import_recovery.rs
+- id: ART-FORK-HOSTILE-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/fork_hostile_fs.rs
+    - crates/core/src/store/sim/fork_hostile.rs
+- id: ART-FORK-UNDER-FAULT-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/fork_under_fault.rs
+    - crates/core/src/store/sim/fork_recovery.rs
+- id: ART-STORE-FORK-IMPORT-EXAMPLES
+  kind: examples
+  paths:
+    - crates/batpak-examples/src/bin/fork_clone.rs
+    - crates/batpak-examples/src/bin/import_events.rs
+    - crates/batpak-examples/src/bin/lane_branch.rs
+- id: ART-STORE-LANE-BRANCH-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/coordinate/mod.rs
+    - crates/core/src/store/append.rs
+    - crates/core/src/store/read_api.rs
+    - crates/core/src/store/index/entry.rs
+    - crates/core/src/store/index/mod.rs
+    - crates/core/src/store/index/query.rs
+    - crates/core/src/store/write/control/submission.rs
+    - crates/core/src/store/write/fanout.rs
+    - crates/core/src/store/write/writer/append.rs
+    - crates/core/src/store/write/writer/batch.rs
+- id: ART-STORE-LANE-BRANCH-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/lane_branches.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
+- id: ART-STORE-PROJECTION-FUSION-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/projection/flow/fusion.rs
+    - crates/core/src/store/projection/flow/mod.rs
+    - crates/core/src/store/read_api.rs
+- id: ART-STORE-PROJECTION-FUSION-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/projection_fusion.rs
+    - crates/core/src/store/projection/flow/fusion_tests.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
+- id: ART-STORE-LANE-FRONTIER-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/hidden_ranges.rs
+    - crates/core/src/store/index/mod.rs
+    - crates/core/src/store/index/projection_bridge.rs
+    - crates/core/src/store/index/query.rs
+    - crates/core/src/store/index/visibility.rs
+    - crates/core/src/store/lifecycle_api.rs
+    - crates/core/src/store/open.rs
+    - crates/core/src/store/projection/flow/fusion.rs
+    - crates/core/src/store/projection/flow/mod.rs
+    - crates/core/src/store/projection/registry.rs
+    - crates/core/src/store/stats.rs
+    - crates/core/src/store/write/writer/publish.rs
+    - crates/core/src/store/write/writer/watermark.rs
+- id: ART-STORE-LANE-FRONTIER-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/per_lane_frontier.rs
+    - tools/xtask/src/commands/mutants/lanes.rs
 - id: ART-STORE-DANGEROUS-TEST-HOOKS
   kind: source
   paths:
@@ -556,11 +652,11 @@
 - id: ART-UNIFIED-TESTS
   kind: tests
   paths:
-    - crates/core/tests/support/red_kinds.rs
-    - crates/core/tests/support/red_kind_b.rs
-    - crates/core/tests/support/red_test_coord.rs
-    - crates/core/tests/support/red_counters.rs
-    - crates/core/tests/support/red_versioned_counters.rs
+    - crates/testkit/src/red_kinds.rs
+    - crates/testkit/src/red_kind_b.rs
+    - crates/testkit/src/red_test_coord.rs
+    - crates/testkit/src/red_counters.rs
+    - crates/testkit/src/red_versioned_counters.rs
     - crates/core/tests/unified_cold_start_red.rs
     - crates/core/tests/unified_config_red.rs
     - crates/core/tests/unified_group_commit_red.rs
@@ -622,6 +718,18 @@
   paths:
     - crates/core/tests/monad_laws.rs
     - crates/core/tests/outcome_combinators.rs
+- id: ART-PROJECTION-FUSION-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/projection_fusion_laws.rs
+- id: ART-HLC-SEMILATTICE-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/hlc_semilattice_laws.rs
+- id: ART-OUTCOME-EVENTKIND-LAW-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/outcome_eventkind_laws.rs
 - id: ART-HASH-CHAIN-TESTS
   kind: tests
   paths:
@@ -642,14 +750,14 @@
   kind: docs
   paths:
     - README.md
-    - FACTORY.md
-    - MODEL.md
-    - INVARIANTS.md
-    - TERMINALS.md
-    - EVENTS.md
-    - REPLAY.md
-    - INTEGRATION.md
-    - CONFORMANCE.md
+    - 01_FACTORY.md
+    - 02_MODEL.md
+    - 03_INVARIANTS.md
+    - 05_TERMINALS.md
+    - 06_EVENTS.md
+    - 09_REPLAY.md
+    - 11_INTEGRATION.md
+    - 12_CONFORMANCE.md
     - CONTRIBUTING.md
     - AGENTS.md
     - templates/minimal-app/Cargo.toml
@@ -664,36 +772,39 @@
   kind: tests
   paths:
     - crates/core/tests/schema_evolution.rs
+- id: ART-PAYLOAD-VERSION-NONZERO-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/store_append_behavior.rs
 - id: ART-SCHEMA-EVOLUTION-DOC
   kind: docs
   paths:
-    - EVENTS.md
+    - 06_EVENTS.md
 - id: ART-EXAMPLES
   kind: examples
   paths:
-    - crates/core/examples/batch_append.rs
-    - crates/core/examples/chat_room.rs
-    - crates/core/examples/cross_crate_payloads.rs
-    - crates/core/examples/cursor_worker.rs
-    - crates/core/examples/dungeon_typestate.rs
-    - crates/core/examples/eight_jobs.rs
-    - crates/core/examples/event_sourced_counter.rs
-    - crates/core/examples/append_with_gate.rs
-    - crates/core/examples/lifecycle_observer.rs
-    - crates/core/examples/outbox.rs
-    - crates/core/examples/caller_defined_gates.rs
-    - crates/core/examples/quickstart.rs
-    - crates/core/examples/raw_projection_counter.rs
-    - crates/core/examples/raw_projection_counter_derived.rs
-    - crates/core/examples/read_only.rs
-    - crates/core/examples/signed_receipts.rs
-    - crates/core/examples/store_lock_helper.rs
-    - crates/core/examples/submit_pipeline.rs
-    - crates/core/examples/typed_reactor.rs
-    - crates/core/examples/typed_reactor_multi.rs
-    - crates/core/examples/visibility_fence.rs
-    - crates/core/examples/wait_for_durable.rs
-    - crates/core/examples/idempotent_pass.rs
+    - crates/batpak-examples/src/bin/batch_append.rs
+    - crates/batpak-examples/src/bin/chat_room.rs
+    - crates/batpak-examples/src/bin/cursor_worker.rs
+    - crates/batpak-examples/src/bin/dungeon_typestate.rs
+    - crates/batpak-examples/src/bin/eight_jobs.rs
+    - crates/batpak-examples/src/bin/event_sourced_counter.rs
+    - crates/batpak-examples/src/bin/fork_clone.rs
+    - crates/batpak-examples/src/bin/import_events.rs
+    - crates/batpak-examples/src/bin/lane_branch.rs
+    - crates/batpak-examples/src/bin/append_with_gate.rs
+    - crates/batpak-examples/src/bin/outbox.rs
+    - crates/batpak-examples/src/bin/caller_defined_gates.rs
+    - crates/batpak-examples/src/bin/quickstart.rs
+    - crates/batpak-examples/src/bin/raw_projection_counter.rs
+    - crates/batpak-examples/src/bin/raw_projection_counter_derived.rs
+    - crates/batpak-examples/src/bin/read_only.rs
+    - crates/batpak-examples/src/bin/signed_receipts.rs
+    - crates/batpak-examples/src/bin/store_lock_helper.rs
+    - crates/batpak-examples/src/bin/submit_pipeline.rs
+    - crates/batpak-examples/src/bin/typed_reactor.rs
+    - crates/batpak-examples/src/bin/typed_reactor_multi.rs
+    - crates/batpak-examples/src/bin/idempotent_pass.rs
 - id: ART-MACROS
   kind: source
   paths:
@@ -711,7 +822,40 @@
     - crates/core/tests/idempotency_window_priority.rs
     - crates/core/tests/idempotency_for_operation.rs
     - crates/core/tests/idempotency_corruption_recovery.rs
+- id: ART-COMPAT-MATRIX
+  kind: tests
+  paths:
+    - traceability/compat_matrix.yaml
+    - crates/core/tests/compat_matrix.rs
 - id: ART-TESTS
   kind: tests
   paths:
     - crates/core/tests
+- id: ART-DST-RECOVERY-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/sim/fs.rs
+    - crates/core/src/store/sim/recovery.rs
+    - crates/core/src/store/platform/fs.rs
+    - crates/core/src/store/segment/mod.rs
+- id: ART-DST-RECOVERY-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/dst_recovery.rs
+- id: ART-DST-CORPUS-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/dst_corpus_currency.rs
+    - crates/core/src/store/sim/corpus.rs
+    - traceability/dst_corpus.yaml
+- id: ART-RECOVERY-ORACLE-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/sim/recovery_matrix.rs
+    - crates/core/src/store/sim/recovery.rs
+    - crates/core/src/store/sim/fs.rs
+    - crates/core/src/store/fault.rs
+- id: ART-RECOVERY-ORACLE-TEST
+  kind: tests
+  paths:
+    - crates/core/tests/recovery_oracle.rs

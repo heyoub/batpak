@@ -5,11 +5,9 @@
 //! DEFENDS: ancestor traversal truncation drift, descendant leakage, and
 //! strict-ordering regressions in `DagPosition::is_ancestor_of`.
 
-mod support;
-use support::prelude::*;
+use batpak_testkit::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 
 fn test_store() -> (tempfile::TempDir, Store) {
     small_store_support::small_segment_store().expect("small segment store")
@@ -82,12 +80,12 @@ fn walk_ancestors_respects_limit() {
 
     for i in 0..10 {
         let payload = serde_json::json!({"i": i});
-        store.append(&coord, kind, &payload).expect("append");
+        let _ = store.append(&coord, kind, &payload).expect("append");
     }
 
     let entries = store.by_entity("entity:limit");
     let last_id = entries.last().expect("has entries").event_id();
-    let ancestors = store.walk_ancestors(batpak::id::EventId::from(last_id), 2);
+    let ancestors = store.walk_ancestors(last_id, 2);
 
     assert_eq!(
         ancestors.len(),

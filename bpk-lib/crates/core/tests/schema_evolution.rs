@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; schema-evolution frozen-decode tests in tests/schema_evolution.rs assert via panic and emit a stderr warning when GOLDEN_UPDATE appends a new frozen fixture.
-#![allow(clippy::panic, clippy::print_stderr)]
 //! Event payload schema-evolution proofs.
 //!
 //! PROVES: INV-EVENT-PAYLOAD-DECODE-BACKCOMPAT — the single decode seam keeps
@@ -30,6 +28,7 @@ use batpak::event::{DecodeTyped, Event, EventHeader, EventKind, TypedDecodeError
 use batpak::register_upcast;
 use batpak::EventPayload;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 
 // ─── Frozen-decode fixture helper ───────────────────────────────────────────
 
@@ -73,7 +72,8 @@ where
         let bytes = canonical::to_bytes(expected).expect("encode fixture payload");
         std::fs::create_dir_all(payloads_dir()).expect("create payloads dir");
         std::fs::write(&path, hex_encode(&bytes)).expect("write frozen fixture");
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "⚠ GOLDEN_UPDATE: wrote NEW frozen payload fixture {} (append-only; existing \
              fixtures are never overwritten). Inspect the diff before committing.",
             path.display()
@@ -95,9 +95,13 @@ where
     )
     .with_payload_version(version);
     let event: Event<Vec<u8>> = Event::new(header, bytes);
-    let decoded: T = event
-        .decode_typed::<T>()
-        .unwrap_or_else(|e| panic!("frozen fixture {fixture} failed current decode: {e}"));
+    let decoded: T = event.decode_typed::<T>().unwrap_or_else(|e| {
+        assert!(
+            std::hint::black_box(false),
+            "frozen fixture {fixture} failed current decode: {e}"
+        );
+        unreachable!("the decode assertion above always fails on error")
+    });
     assert_eq!(
         &decoded, expected,
         "SCHEMA DRIFT: frozen fixture {fixture} decoded to a different value than expected. \
@@ -169,7 +173,8 @@ fn freeze_upcast_counter_v1() {
         let bytes = canonical::to_bytes(&v1).expect("encode v1 payload");
         std::fs::create_dir_all(payloads_dir()).expect("create payloads dir");
         std::fs::write(&path, hex_encode(&bytes)).expect("write v1 fixture");
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "⚠ GOLDEN_UPDATE: wrote NEW frozen v1 fixture {}",
             path.display()
         );

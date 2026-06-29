@@ -218,9 +218,9 @@ pub(crate) fn emit_build_rerun_lines(
     let project_root = repo_root.join("..");
     for rel in [
         "README.md",
-        "MODEL.md",
-        "INVARIANTS.md",
-        "CONFORMANCE.md",
+        "02_MODEL.md",
+        "03_INVARIANTS.md",
+        "12_CONFORMANCE.md",
         "archive/decisions/100_ADR_0001_SYNC_ONLY_STORE.md",
     ] {
         emit_rerun_for_path(&project_root.join(rel));

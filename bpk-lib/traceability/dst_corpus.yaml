@@ -1,0 +1,172 @@
+# dst_corpus.yaml — graduated DST recovery corpus (Thread #64-B).
+#
+# Durable ledger of seeded crash-recovery runs over the real Store+SimFs
+# composition. Each entry passed graduation: a deterministic digest across two
+# runs, a legality-oracle pass, and a declared target seam. The corpus is a
+# growing oracle that now covers the FULL hostile-fs fault matrix the recovery
+# oracle models, not just one honest-disk path:
+#
+#   * HonestDiskCrash    — fsync honored; a crash loses only the unsynced tail.
+#                          Routes through `store::sim::recovery::run`.
+#   * LyingDiskFsyncDrop — ~1-in-`fsync_drop_one_in` fsync silently dropped, so an
+#                          "acked" commit may be legally absent after the crash.
+#   * CrashBeforeFsync   — mid-write abort at a durability `boundary`, leaving a
+#                          torn/partial frame; recovery must be a clean prefix or
+#                          a typed refusal, never a half-ghost.
+# The non-honest modes route through `store::sim::recovery_matrix::run`.
+#
+# Replay one seed with
+# `BATPAK_SEED=<seed> cargo nextest run -p batpak --features dangerous-test-hooks
+# -E 'test(dst_corpus_currency)'`.
+#
+# Schema — one entry per graduated seed:
+#   seed:                u64   — SimFs / op-plan seed (decimal)
+#   oracle:              str   — StoreRecovery | ForkIsolation | ImportReapply
+#   fault_mode:          str   — HonestDiskCrash | LyingDiskFsyncDrop | CrashBeforeFsync
+#   boundary:            str?  — durability boundary (CrashBeforeFsync only); null otherwise:
+#                                SingleAppendFrame | BatchCommitMarker |
+#                                BatchPostFsyncPrePublish | SegmentRotationCreate
+#                                ImportReapply-only: SameStoreCeiling selects the no-runaway replay
+#   fsync_drop_one_in:   u32?  — 1-in-N fsync-drop rate (LyingDiskFsyncDrop only); null otherwise
+#   seam_touched:        str   — critical mutation seam slug this seed stresses
+#   assurance_level:     str   — AL at graduation (L3/L4)
+#   steps:               u32   — op-plan length for the recovery oracle
+#   op_trace_digest:     u64   — FNV-1a identity; must replay identically
+#   outcome:             str   — CommittedPrefix | RolledBack | CanonicalRefusal
+
+# ── HonestDiskCrash: unsynced-tail loss only ────────────────────────────────
+- seed: 48104590831
+  oracle: StoreRecovery
+  fault_mode: HonestDiskCrash
+  boundary: null
+  fsync_drop_one_in: null
+  seam_touched: writer-commit
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 101395256710529115
+  outcome: CommittedPrefix
+
+- seed: 1677852679
+  oracle: StoreRecovery
+  fault_mode: HonestDiskCrash
+  boundary: null
+  fsync_drop_one_in: null
+  seam_touched: writer-commit
+  assurance_level: L4
+  steps: 64
+  op_trace_digest: 6838535361054563890
+  outcome: CommittedPrefix
+
+# ── LyingDiskFsyncDrop: dropped-fsync commit may legally vanish ──────────────
+- seed: 1677852673
+  oracle: StoreRecovery
+  fault_mode: LyingDiskFsyncDrop
+  boundary: null
+  fsync_drop_one_in: 2
+  seam_touched: durability-fsync
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 162884444788709664
+  outcome: CommittedPrefix
+
+- seed: 1677852674
+  oracle: StoreRecovery
+  fault_mode: LyingDiskFsyncDrop
+  boundary: null
+  fsync_drop_one_in: 5
+  seam_touched: durability-fsync
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 15220256914625381719
+  outcome: CommittedPrefix
+
+# ── CrashBeforeFsync: mid-write abort at each durability boundary ────────────
+- seed: 1677852675
+  oracle: StoreRecovery
+  fault_mode: CrashBeforeFsync
+  boundary: SingleAppendFrame
+  fsync_drop_one_in: null
+  seam_touched: single-append-frame
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 14266943457722804908
+  outcome: RolledBack
+
+- seed: 1677852676
+  oracle: StoreRecovery
+  fault_mode: CrashBeforeFsync
+  boundary: BatchCommitMarker
+  fsync_drop_one_in: null
+  seam_touched: batch-commit-marker
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 3258824138353557920
+  outcome: RolledBack
+
+- seed: 1677852677
+  oracle: StoreRecovery
+  fault_mode: CrashBeforeFsync
+  boundary: BatchPostFsyncPrePublish
+  fsync_drop_one_in: null
+  seam_touched: batch-post-fsync-pre-publish
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 11496869799566879297
+  outcome: CommittedPrefix
+
+- seed: 1677852678
+  oracle: StoreRecovery
+  fault_mode: CrashBeforeFsync
+  boundary: SegmentRotationCreate
+  fsync_drop_one_in: null
+  seam_touched: segment-rotation-create
+  assurance_level: L4
+  steps: 96
+  op_trace_digest: 17690542572815696266
+  outcome: CommittedPrefix
+
+# ── ForkIsolation: fork-under-fault oracle (`fork_recovery`) ─────────────────
+- seed: 4027539181
+  oracle: ForkIsolation
+  fault_mode: HonestDiskCrash
+  boundary: null
+  fsync_drop_one_in: null
+  seam_touched: fork-isolation
+  assurance_level: L4
+  steps: 1
+  op_trace_digest: 4736402254721647105
+  outcome: CommittedPrefix
+
+- seed: 4027514881
+  oracle: ForkIsolation
+  fault_mode: HonestDiskCrash
+  boundary: null
+  fsync_drop_one_in: null
+  seam_touched: fork-isolation
+  assurance_level: L4
+  steps: 1
+  op_trace_digest: 7657867828878101191
+  outcome: CommittedPrefix
+
+# ── ImportReapply: import re-apply oracle (`import_recovery`) ────────────────
+- seed: 453041837
+  oracle: ImportReapply
+  fault_mode: HonestDiskCrash
+  boundary: null
+  fsync_drop_one_in: null
+  seam_touched: import-reapply
+  assurance_level: L4
+  steps: 1
+  op_trace_digest: 6136008848919423745
+  outcome: CommittedPrefix
+
+- seed: 453037585
+  oracle: ImportReapply
+  fault_mode: HonestDiskCrash
+  boundary: SameStoreCeiling
+  fsync_drop_one_in: null
+  seam_touched: import-reapply
+  assurance_level: L4
+  steps: 1
+  op_trace_digest: 330210195014371426
+  outcome: CommittedPrefix

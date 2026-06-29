@@ -1,5 +1,3 @@
-// justifies: INV-TEST-PANIC-AS-ASSERTION; test body in tests/derive_event_sourced_generic.rs exercises precondition-holds invariants; .unwrap is acceptable in test code where a panic is a test failure.
-#![allow(clippy::unwrap_used, clippy::panic)]
 //! Generic-projection coverage for `#[derive(EventSourced)]`.
 //! Harness pattern: Equivalence Harness (parity lane).
 //!
@@ -12,12 +10,10 @@
 //!   2. The concrete instantiation `Foo<u64>` runs a real projection through
 //!      the store — end-to-end behaviour matches a non-generic equivalent.
 
-mod support;
+use batpak_testkit::prelude::*;
 use serde::{Deserialize, Serialize};
-use support::prelude::*;
 
-#[path = "support/small_store.rs"]
-mod small_store_support;
+use batpak_testkit::small_store as small_store_support;
 use small_store_support::small_segment_store;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, EventPayload)]
@@ -30,7 +26,7 @@ struct Bumped {
 /// store requires of a projection payload field plus what `Default::default()`
 /// and serde replay need.
 #[derive(Debug, Default, PartialEq, Serialize, Deserialize, EventSourced)]
-#[batpak(input = JsonValueInput, cache_version = 0)]
+#[batpak(input = JsonValueInput, cache_version = 0, state_max_cardinality = 1)]
 #[batpak(event = Bumped, handler = on_bump)]
 struct Foo<T>
 where
@@ -50,20 +46,26 @@ where
 
 #[test]
 fn generic_projection_compiles_and_projects() {
-    let (_dir, store) = small_segment_store().unwrap();
-    let coord = Coordinate::new("entity:generic", "scope:test").unwrap();
-    store.append_typed(&coord, &Bumped { amount: 2 }).unwrap();
-    store.append_typed(&coord, &Bumped { amount: 5 }).unwrap();
-    store.append_typed(&coord, &Bumped { amount: 11 }).unwrap();
+    let (_dir, store) = small_segment_store().expect("open small segment store");
+    let coord = Coordinate::new("entity:generic", "scope:test").expect("valid coord");
+    let _ = store
+        .append_typed(&coord, &Bumped { amount: 2 })
+        .expect("append amount 2");
+    let _ = store
+        .append_typed(&coord, &Bumped { amount: 5 })
+        .expect("append amount 5");
+    let _ = store
+        .append_typed(&coord, &Bumped { amount: 11 })
+        .expect("append amount 11");
 
     let projected = store
         .project::<Foo<u64>>("entity:generic", &Freshness::Consistent)
-        .unwrap()
+        .expect("project generic Foo")
         .expect("generic projection has state");
 
     assert_eq!(
         projected.state, 18u64,
         "PROPERTY: generic Foo<T=u64> replays through the store and accumulates"
     );
-    store.close().unwrap();
+    store.close().expect("close store");
 }
