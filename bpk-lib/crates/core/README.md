@@ -7,7 +7,7 @@ replay, and derived projections.
 
 The family around it — `syncbat`, `netbat`, and `hostbat` — wires
 the journal into larger Rust hosts through explicit terminals and circuits. See the
-[repository README](https://github.com/heyoub/batpak/blob/main/README.md) for
+[repository README](https://github.com/freebatteryfactory/batpak/blob/main/README.md) for
 the full family map, scale-out model, and host path.
 
 Use it when you need a tamper-evident, replayable record of what happened:
@@ -73,14 +73,14 @@ README and `03_INVARIANTS.md` for the current counts.
 ## Docs
 
 Full documentation lives in the
-[repository](https://github.com/heyoub/batpak): the
-[README](https://github.com/heyoub/batpak/blob/main/README.md) for the
+[repository](https://github.com/freebatteryfactory/batpak): the
+[README](https://github.com/freebatteryfactory/batpak/blob/main/README.md) for the
 evaluator path, the
-[cookbook](https://github.com/heyoub/batpak/blob/main/cookbook/README.md) for
+[cookbook](https://github.com/freebatteryfactory/batpak/blob/main/cookbook/README.md) for
 task-shaped recipes, and
-[MODEL](https://github.com/heyoub/batpak/blob/main/02_MODEL.md) /
-[INVARIANTS](https://github.com/heyoub/batpak/blob/main/03_INVARIANTS.md) /
-[CONFORMANCE](https://github.com/heyoub/batpak/blob/main/12_CONFORMANCE.md)
+[MODEL](https://github.com/freebatteryfactory/batpak/blob/main/02_MODEL.md) /
+[INVARIANTS](https://github.com/freebatteryfactory/batpak/blob/main/03_INVARIANTS.md) /
+[CONFORMANCE](https://github.com/freebatteryfactory/batpak/blob/main/12_CONFORMANCE.md)
 for the mental model and the guarantees.
 
 ```text

@@ -1,6 +1,6 @@
 [![crates.io](https://img.shields.io/crates/v/batpak.svg)](https://crates.io/crates/v/batpak)
 [![docs.rs](https://docs.rs/batpak/badge.svg)](https://docs.rs/batpak)
-[![CI](https://github.com/heyoub/batpak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/heyoub/batpak/actions/workflows/ci.yml)
+[![CI](https://github.com/freebatteryfactory/batpak/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/freebatteryfactory/batpak/actions/workflows/ci.yml)
 [![license](https://img.shields.io/crates/l/batpak.svg)](#license)
 
 # batpak
