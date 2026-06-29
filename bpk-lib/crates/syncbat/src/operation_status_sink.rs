@@ -124,3 +124,24 @@ impl StoreOperationStatusSink {
         self.record_fact(&OperationStatusFactV1::started(operation, receipt_kind))
     }
 }
+
+#[cfg(test)]
+mod sink_error_and_entity_tests {
+    use super::{operation_status_entity, OperationStatusSinkError};
+
+    #[test]
+    fn sink_error_exposes_its_message_and_display() {
+        let err = OperationStatusSinkError::new("append refused");
+        // Accessor must return the real text (kills `-> ""` and `-> "xyzzy"`).
+        assert_eq!(err.message(), "append refused");
+        // Display must write the message (kills `fmt -> Ok(Default)`).
+        assert_eq!(err.to_string(), "append refused");
+    }
+
+    #[test]
+    fn operation_status_entity_prefixes_the_operation_name() {
+        let entity = operation_status_entity("ping").expect("entity should be valid");
+        // The `Ok("xyzzy")` mutant would drop the real prefixing.
+        assert_eq!(entity, "syncbat:operation-status:ping");
+    }
+}

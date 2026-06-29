@@ -969,9 +969,164 @@ pub(crate) fn module_is_cfg_test(attrs: &[syn::Attribute]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        inline_test_islands, local_segment_extension_classification, nonblank_line_count,
-        read_dir_entry_error_is_swallowed,
+        check_allow_justifications, check_canonical_encoding_boundary,
+        check_event_payload_frozen_fixtures, check_examples_observable_output,
+        check_inline_test_island_pressure, check_no_dead_code_silencers,
+        check_no_placeholder_runtime_macros, check_no_store_read_dir_entry_error_swallowing,
+        check_rust_file_size_pressure, check_store_segment_classification_boundary,
+        inline_test_islands, local_segment_extension_classification, module_is_cfg_test,
+        nonblank_line_count, parse_batpak_kind, production_rust_files,
+        read_dir_entry_error_is_swallowed, workspace_manifest_inputs,
     };
+    use crate::repo_surface::repo_root;
+    use crate::source_cache::SourceCache;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn killset_temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "batpak-structural-killset-{name}-{}-{nanos}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn parse_batpak_kind_reads_real_category_and_type_id() {
+        // A real attribute parses to its EXACT (category, type_id) — distinct from
+        // every constant-return mutant: None, (0,0), (0,1), (1,0), (1,1).
+        let payload: syn::ItemStruct =
+            syn::parse_str("#[batpak(category = 14, type_id = 2, version = 1)] struct P;")
+                .expect("parse fixture struct");
+        assert_eq!(parse_batpak_kind(&payload.attrs), Some((14, 2)));
+
+        // No `#[batpak(..)]` attribute resolves to None (kills the `Some(..)` mutants).
+        let plain: syn::ItemStruct = syn::parse_str("struct Q;").expect("parse plain struct");
+        assert_eq!(parse_batpak_kind(&plain.attrs), None);
+    }
+
+    #[test]
+    fn module_is_cfg_test_distinguishes_test_modules() {
+        let cfg_mod: syn::ItemMod =
+            syn::parse_str("#[cfg(test)] mod inner {}").expect("parse cfg(test) mod");
+        assert!(module_is_cfg_test(&cfg_mod.attrs));
+
+        let plain_mod: syn::ItemMod = syn::parse_str("mod inner {}").expect("parse plain mod");
+        assert!(!module_is_cfg_test(&plain_mod.attrs));
+    }
+
+    #[test]
+    fn workspace_manifest_inputs_resolves_real_member_manifests() {
+        let repo = repo_root().expect("repo root");
+        let inputs = workspace_manifest_inputs(&repo);
+        assert!(
+            inputs.contains(&repo.join("crates/core/Cargo.toml")),
+            "must include the core member manifest: {inputs:?}"
+        );
+        assert!(
+            inputs.len() > 1,
+            "must resolve several manifests: {inputs:?}"
+        );
+        assert!(
+            inputs.iter().all(|p| p.exists()),
+            "every resolved manifest must exist (no Default placeholder): {inputs:?}"
+        );
+    }
+
+    #[test]
+    fn production_rust_files_lists_real_existing_sources() {
+        let repo = repo_root().expect("repo root");
+        let files = production_rust_files(&repo).expect("enumerate production files");
+        assert!(!files.is_empty(), "production surface must be non-empty");
+        assert!(
+            files.iter().any(|p| p.ends_with("crates/core/src/lib.rs")),
+            "must include the core lib root: {files:?}"
+        );
+        assert!(
+            files.iter().all(|p| p.exists()),
+            "every production file must exist (no Default placeholder)"
+        );
+    }
+
+    #[test]
+    fn examples_observable_output_returns_scanned_inputs() {
+        let repo = killset_temp_dir("examples");
+        let demo = repo.join("crates/batpak-examples/src/bin/demo.rs");
+        fs::create_dir_all(demo.parent().expect("parent dir")).expect("create dirs");
+        fs::write(
+            &demo,
+            "use std::io::Write as _;\n\
+             fn main() {\n\
+                 let mut out = std::io::stdout().lock();\n\
+                 let _ = writeln!(out, \"ok\");\n\
+             }\n",
+        )
+        .expect("write example");
+        let mut cache = SourceCache::new(&repo);
+        let inputs = check_examples_observable_output(&repo, &mut cache)
+            .expect("a clean example passes the observable-output gate");
+        assert_eq!(
+            inputs.len(),
+            1,
+            "exactly one example was scanned: {inputs:?}"
+        );
+        assert!(
+            inputs
+                .iter()
+                .any(|p| p.ends_with("crates/batpak-examples/src/bin/demo.rs")),
+            "returned inputs must name the scanned example: {inputs:?}"
+        );
+        fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
+    #[test]
+    fn production_surface_wrappers_propagate_root_failure() {
+        // A root with no Cargo workspace makes `production_rust_files` error; every
+        // wrapper that opens with `production_rust_files(repo_root)?` must surface
+        // that Err. A `-> Ok(())` mutant of any wrapper would swallow it.
+        let bogus = killset_temp_dir("bogus-root");
+        assert!(!bogus.exists(), "bogus root must not exist");
+        let mut cache = SourceCache::new(&bogus);
+        let mut swallowed: Vec<&str> = Vec::new();
+        if check_rust_file_size_pressure(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_rust_file_size_pressure");
+        }
+        if check_inline_test_island_pressure(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_inline_test_island_pressure");
+        }
+        if check_event_payload_frozen_fixtures(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_event_payload_frozen_fixtures");
+        }
+        if check_no_placeholder_runtime_macros(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_no_placeholder_runtime_macros");
+        }
+        if check_no_dead_code_silencers(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_no_dead_code_silencers");
+        }
+        if check_allow_justifications(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_allow_justifications");
+        }
+        if check_canonical_encoding_boundary(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_canonical_encoding_boundary");
+        }
+        if check_no_store_read_dir_entry_error_swallowing(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_no_store_read_dir_entry_error_swallowing");
+        }
+        if check_store_segment_classification_boundary(&bogus, &mut cache).is_ok() {
+            swallowed.push("check_store_segment_classification_boundary");
+        }
+        if production_rust_files(&bogus).is_ok() {
+            swallowed.push("production_rust_files");
+        }
+        assert!(
+            swallowed.is_empty(),
+            "wrappers swallowed the root-resolution failure: {swallowed:?}"
+        );
+    }
 
     #[test]
     fn file_size_pressure_counts_nonblank_lines() {

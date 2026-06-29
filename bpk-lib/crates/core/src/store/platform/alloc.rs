@@ -167,6 +167,47 @@ unsafe impl GlobalAlloc for CountingAlloc {
     }
 }
 
+#[cfg(all(test, feature = "alloc-count"))]
+mod alloc_delta_tests {
+    //! The `delta_*` accessors are pure arithmetic over two snapshots. The
+    //! constant mutants (`-> 0`, `-> 1`) are caught by asserting differences
+    //! that are neither 0 nor 1, and that `delta_allocating` is the sum of the
+    //! two component deltas (so a `-> 0`/`-> 1` on the sum dies too).
+    use super::AllocSnapshot;
+
+    fn snap(allocs: u64, reallocs: u64, deallocs: u64) -> AllocSnapshot {
+        AllocSnapshot {
+            allocs,
+            reallocs,
+            deallocs,
+        }
+    }
+
+    #[test]
+    fn deltas_report_the_exact_inter_snapshot_difference() {
+        let before = snap(10, 4, 1);
+        let after = snap(17, 9, 3);
+
+        let mut failures: Vec<String> = Vec::new();
+        let allocs = before.delta_allocs(after);
+        if allocs != 7 {
+            failures.push(format!("delta_allocs must be 7, got {allocs}"));
+        }
+        let reallocs = before.delta_reallocs(after);
+        if reallocs != 5 {
+            failures.push(format!("delta_reallocs must be 5, got {reallocs}"));
+        }
+        let allocating = before.delta_allocating(after);
+        if allocating != 12 {
+            failures.push(format!("delta_allocating must be 7+5=12, got {allocating}"));
+        }
+        assert!(
+            failures.is_empty(),
+            "delta accounting mismatches: {failures:?}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Allocation fault injection (`fault-alloc`).
 // ---------------------------------------------------------------------------

@@ -431,6 +431,42 @@ mod tests {
         );
     }
 
+    // RED: check_with_today loads + validates the on-disk waiver file. An expired
+    // committed waiver must make it Err — the `-> Ok(())` mutant would pass it.
+    #[test]
+    fn check_with_today_fails_on_an_expired_committed_waiver() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let repo = std::env::temp_dir().join(format!(
+            "batpak-typed-waivers-kill-{}-{nanos}",
+            std::process::id()
+        ));
+        let path = repo.join(WAIVERS_REL);
+        std::fs::create_dir_all(path.parent().expect("parent dir")).expect("create dirs");
+        std::fs::write(
+            &path,
+            "- id: WAIVER-EXPIRED-0001\n  \
+               kind: pub-item\n  \
+               target: Foo\n  \
+               owner: heyoub\n  \
+               expiry: 2000-01-01\n  \
+               justification: deliberately stale fixture\n  \
+               blast_radius: L2\n  \
+               debt_score: 3\n  \
+               adr: ADR-0026\n",
+        )
+        .expect("write waiver fixture");
+        let err = check_with_today(&repo, TODAY)
+            .expect_err("an expired committed waiver must fail check_with_today");
+        assert!(
+            err.to_string().contains("EXPIRED"),
+            "error must report the expiry, got: {err}"
+        );
+        std::fs::remove_dir_all(&repo).expect("remove temp repo");
+    }
+
     #[test]
     fn targets_for_filters_by_kind() {
         let mut pub_item = base_waiver();

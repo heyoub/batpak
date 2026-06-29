@@ -193,3 +193,30 @@ pub fn entity_stream_coordinate_hash(entity: &str, scope: &str) -> [u8; 16] {
     out.copy_from_slice(&digest.as_bytes()[0..16]);
     out
 }
+
+#[cfg(test)]
+mod entity_cursor_helper_tests {
+    use super::{
+        entity_stream_subscription_id_hash, EntityStreamCursorV1, SubscriptionRuntimeError,
+    };
+
+    #[test]
+    fn entity_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
+        // Beginning cursor with hlc_wall_ms != 0 but global_sequence == 0; real `||`
+        // rejects, a `&&` mutant would accept.
+        let mut bytes = EntityStreamCursorV1::beginning("sub-a", "ent", "scope").encode();
+        bytes[40..48].copy_from_slice(&7_u64.to_be_bytes());
+        assert!(matches!(
+            EntityStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn entity_subscription_id_hash_is_input_dependent_and_nonconstant() {
+        let alpha = entity_stream_subscription_id_hash("alpha");
+        assert_ne!(alpha, entity_stream_subscription_id_hash("beta"));
+        assert_ne!(alpha, [0_u8; 16]);
+        assert_ne!(alpha, [1_u8; 16]);
+    }
+}

@@ -360,3 +360,35 @@ mod receipt_sink_error_tests {
         assert_eq!(err.to_string(), "sink offline");
     }
 }
+
+#[cfg(test)]
+mod receipt_metadata_tests {
+    use super::ReceiptMetadata;
+
+    #[test]
+    fn is_empty_reports_both_drawers() {
+        // Fresh metadata is empty: kills the `-> false` constant.
+        assert!(
+            ReceiptMetadata::default().is_empty(),
+            "freshly constructed metadata has no entries"
+        );
+
+        // A signed-only entry is non-empty: the `signed.is_empty()` side is
+        // false here, so `&& -> ||` would flip the result to empty, and the
+        // `-> true` constant would also claim empty.
+        let mut signed_only = ReceiptMetadata::default();
+        signed_only.signed.insert("k".to_owned(), vec![1]);
+        assert!(
+            !signed_only.is_empty(),
+            "a signed entry makes metadata non-empty"
+        );
+
+        // A local-only entry exercises the other side of the conjunction.
+        let mut local_only = ReceiptMetadata::default();
+        local_only.local.insert("k".to_owned(), vec![2]);
+        assert!(
+            !local_only.is_empty(),
+            "a local entry makes metadata non-empty"
+        );
+    }
+}

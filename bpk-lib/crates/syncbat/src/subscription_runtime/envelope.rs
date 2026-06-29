@@ -108,6 +108,54 @@ fn hash_chain_parts(chain: Option<&HashChain>) -> (Option<[u8; 32]>, Option<[u8;
         .unwrap_or((None, None))
 }
 
+#[cfg(test)]
+mod envelope_helper_tests {
+    use super::{blake3_state_hash, freshness_label, hash_chain_parts};
+    use batpak::event::HashChain;
+    use batpak::store::Freshness;
+
+    #[test]
+    fn hash_chain_parts_some_returns_exact_pair() {
+        let chain = HashChain {
+            prev_hash: [7_u8; 32],
+            event_hash: [9_u8; 32],
+        };
+        assert_eq!(
+            hash_chain_parts(Some(&chain)),
+            (Some([7_u8; 32]), Some([9_u8; 32]))
+        );
+    }
+
+    #[test]
+    fn hash_chain_parts_none_returns_none_pair() {
+        assert_eq!(hash_chain_parts(None), (None, None));
+    }
+
+    #[test]
+    fn blake3_state_hash_is_real_digest_not_constant() {
+        let hash = blake3_state_hash(b"projection-state");
+        assert_eq!(hash, *blake3::hash(b"projection-state").as_bytes());
+        assert_ne!(
+            blake3_state_hash(b"projection-state"),
+            blake3_state_hash(b"other-state")
+        );
+        assert_ne!(hash, [0_u8; 32]);
+        assert_ne!(hash, [1_u8; 32]);
+    }
+
+    #[test]
+    fn freshness_label_maps_each_supported_mode() {
+        assert_eq!(
+            freshness_label(&Freshness::Consistent).ok(),
+            Some("consistent".to_owned())
+        );
+        assert_eq!(
+            freshness_label(&Freshness::MaybeStale { max_stale_ms: 5 }).ok(),
+            Some("maybe_stale".to_owned())
+        );
+    }
+}
+
 /// Canonical projection-stream payload envelope encoded with `batpak::canonical::to_bytes`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProjectionStreamEnvelopeV1 {

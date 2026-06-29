@@ -250,3 +250,87 @@ fn decode_fact(event: &ProjectionEvent<OperationStatusView>) -> Option<Operation
     }
     batpak::canonical::from_bytes(event.payload.as_slice()).ok()
 }
+
+#[cfg(test)]
+mod event_sourced_mutation_tests {
+    use batpak::coordinate::DagPosition;
+    use batpak::event::sourcing::EventSourced;
+    use batpak::event::{Event, EventHeader};
+
+    use super::{
+        has_open_attempt, OperationStatusFactV1, OperationStatusView,
+        SYNCBAT_OPERATION_STATUS_EVENT_KIND,
+    };
+
+    fn fact_event(fact: &OperationStatusFactV1) -> Event<Vec<u8>> {
+        let payload = batpak::canonical::to_bytes(fact).expect("encode status fact");
+        let size = u32::try_from(payload.len()).expect("payload size fits in u32");
+        let header = EventHeader::new(
+            1,
+            0,
+            None,
+            0,
+            DagPosition::root(),
+            size,
+            SYNCBAT_OPERATION_STATUS_EVENT_KIND,
+        );
+        Event::new(header, payload)
+    }
+
+    #[test]
+    fn apply_event_folds_a_started_fact() {
+        let mut view = OperationStatusView::default();
+        let started = OperationStatusFactV1::started("op", "receipt.kind.v1");
+        view.apply_event(&fact_event(&started));
+        // Replacing the body with `()` would leave the default view untouched.
+        assert_eq!(view.started_count, 1, "apply_event must fold the fact in");
+        assert_eq!(view.attempts_seen, 1);
+        assert_eq!(view.operation, "op");
+        assert_eq!(view.last_phase.as_deref(), Some("started"));
+    }
+
+    #[test]
+    fn relevant_event_kinds_lists_the_status_kind() {
+        let kinds = OperationStatusView::relevant_event_kinds();
+        // The `Vec::leak(Vec::new())` mutant returns an empty slice.
+        assert_eq!(kinds, &[SYNCBAT_OPERATION_STATUS_EVENT_KIND][..]);
+    }
+
+    #[test]
+    fn schema_version_reports_one() {
+        // Kills the `-> 0` constant. The `-> 1` mutant is equivalent because the
+        // real value is `u64::from(SCHEMA_VERSION)` == 1.
+        assert_eq!(OperationStatusView::schema_version(), 1);
+    }
+
+    #[test]
+    fn supports_incremental_apply_is_true() {
+        assert!(OperationStatusView::supports_incremental_apply());
+    }
+
+    #[test]
+    fn has_open_attempt_compares_started_against_terminal_counts() {
+        let mut view = OperationStatusView::default();
+        // No attempts at all => not open. Kills `-> true` and `> -> >=`
+        // (0 >= 0 would be true).
+        assert!(
+            !has_open_attempt(&view),
+            "no started checkout means no open attempt"
+        );
+
+        // One started, nothing terminal => open.
+        view.started_count = 1;
+        assert!(
+            has_open_attempt(&view),
+            "a started checkout with no terminal fact is open"
+        );
+
+        // started == terminal => not open. Kills `> -> >=` (1 >= 1 would be
+        // true) and `-> true`.
+        view.completed_count = 1;
+        assert!(
+            !has_open_attempt(&view),
+            "equal started and terminal counts mean no open attempt"
+        );
+    }
+}

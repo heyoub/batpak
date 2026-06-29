@@ -299,3 +299,94 @@ impl Canal for Cursor {
         }
     }
 }
+
+#[cfg(test)]
+mod mutation_kill_tests {
+    //! Targeted unit tests for the private cursor delivery seam. They pin the
+    //! exact observable behavior of `visibility_epoch`, `park_for_data`, and the
+    //! `pull_batch` empty arm so the constant/no-op/deleted-arm mutants of those
+    //! items are caught.
+    use super::{Canal, CanalBatch, Cursor, Region, StoreIndex};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    fn fresh_index() -> Arc<StoreIndex> {
+        Arc::new(StoreIndex::new())
+    }
+
+    #[test]
+    fn visibility_epoch_advances_with_each_publish() {
+        // Constant mutants (`-> 0`, `-> 1`) would make the epoch never change.
+        let index = fresh_index();
+        let cursor = Cursor::new(Region::all(), Arc::clone(&index));
+
+        let before = cursor.visibility_epoch();
+        index.reserve_sequences(1);
+        index
+            .publish(1, "mutation-kill-visibility")
+            .expect("publish 1");
+        let after_one = cursor.visibility_epoch();
+        index.reserve_sequences(1);
+        index
+            .publish(2, "mutation-kill-visibility")
+            .expect("publish 2");
+        let after_two = cursor.visibility_epoch();
+
+        let mut failures: Vec<String> = Vec::new();
+        if before != 0 {
+            failures.push(format!("fresh index epoch must be 0, got {before}"));
+        }
+        if after_one != 1 {
+            failures.push(format!(
+                "epoch after one publish must be 1, got {after_one}"
+            ));
+        }
+        if after_two != 2 {
+            failures.push(format!(
+                "epoch after two publishes must be 2, got {after_two}"
+            ));
+        }
+        assert!(
+            failures.is_empty(),
+            "visibility_epoch mismatches: {failures:?}"
+        );
+    }
+
+    #[test]
+    fn park_for_data_blocks_until_the_timeout_when_no_publish_races() {
+        // The `park_for_data -> ()` no-op mutant returns instantly; the real
+        // implementation must block (roughly) for the supplied timeout when the
+        // epoch never advances.
+        let index = fresh_index();
+        let cursor = Cursor::new(Region::all(), index);
+        let epoch = cursor.visibility_epoch();
+
+        let timeout = Duration::from_millis(200);
+        let start = Instant::now();
+        cursor.park_for_data(epoch, timeout);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "park_for_data must block for ~timeout when no publish advances the epoch; \
+             elapsed only {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn pull_batch_returns_empty_not_many_when_no_data_arrives() {
+        // Deleting the `0 =>` arm of `pull_batch` would route an empty poll into
+        // the `_ =>` arm and return `CanalBatch::Many(<empty>)` immediately.
+        let index = fresh_index();
+        let mut cursor = Cursor::new(Region::all(), index);
+
+        let result = cursor
+            .pull_batch(8, Duration::from_millis(30))
+            .expect("pull_batch on empty cursor");
+
+        assert!(
+            matches!(result, CanalBatch::Empty),
+            "an empty cursor must return CanalBatch::Empty after the deadline, got a non-empty batch"
+        );
+    }
+}

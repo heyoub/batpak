@@ -566,6 +566,68 @@ mod tests {
         Ok(())
     }
 
+    // The success-path test above proves the sync wrappers return Ok and persist
+    // bytes; it cannot catch `-> Ok(())` mutants because the real method also
+    // returns Ok on success. These error-path tests pin that the wrappers
+    // actually surface a platform sync failure, so replacing any wrapper body
+    // with `Ok(())` is caught.
+    #[cfg(unix)]
+    #[test]
+    fn real_fs_sync_file_with_mode_surfaces_platform_errors() -> Result<(), Box<dyn Error>> {
+        // A read-only /dev/null fd cannot be fsynced; both sync modes must error.
+        let file = std::fs::File::open("/dev/null")?;
+        let fs = RealFs;
+        let mut failures: Vec<String> = Vec::new();
+        if fs
+            .sync_file_with_mode(
+                &file,
+                std::path::Path::new("/dev/null"),
+                &crate::store::SyncMode::SyncAll,
+            )
+            .is_ok()
+        {
+            failures.push("sync_file_with_mode(SyncAll) must surface the platform error".into());
+        }
+        if fs
+            .sync_file_with_mode(
+                &file,
+                std::path::Path::new("/dev/null"),
+                &crate::store::SyncMode::SyncData,
+            )
+            .is_ok()
+        {
+            failures.push("sync_file_with_mode(SyncData) must surface the platform error".into());
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_fs_sync_file_all_surfaces_platform_errors() -> Result<(), Box<dyn Error>> {
+        let file = std::fs::File::open("/dev/null")?;
+        let fs = RealFs;
+        assert!(
+            fs.sync_file_all(&file, std::path::Path::new("/dev/null"))
+                .is_err(),
+            "RealFs::sync_file_all must surface the platform sync error, not report success"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn real_fs_sync_parent_dir_surfaces_missing_parent() -> Result<(), Box<dyn Error>> {
+        // A path whose parent directory does not exist cannot have its directory
+        // entry fsynced; the wrapper must error rather than report success.
+        let fs = RealFs;
+        let missing = std::path::Path::new("/batpak-mutation-kill-nonexistent-parent-xyz/leaf");
+        assert!(
+            fs.sync_parent_dir(missing).is_err(),
+            "RealFs::sync_parent_dir must surface an error when the parent dir is absent"
+        );
+        Ok(())
+    }
+
     #[test]
     fn reject_copy_source_rejects_non_file_source() -> Result<(), Box<dyn Error>> {
         // A directory is a non-file source: the cow_copy_file ladder must refuse
