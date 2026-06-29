@@ -138,6 +138,25 @@ fn read_only_store_reports_zero_writer_capacity() {
     );
 }
 
+// ─── Closed writer_queue_len → None (the marker is directly observable) ───────
+
+/// `Closed` is a public typestate ZST. No `Store<Closed>` is ever constructed,
+/// but its `StoreState::writer_queue_len` is callable on the bare marker, so the
+/// impl is reachable and observable — the round-2 "unreachable, never observed"
+/// equivalence claim was false. A closed store has no writer mailbox, so it must
+/// report `None`; the `Some(0)`/`Some(1)` constant mutants would fabricate a
+/// nonexistent writer queue.
+#[test]
+fn closed_state_reports_no_writer_queue() {
+    use batpak::store::{Closed, StoreState};
+    assert_eq!(
+        Closed.writer_queue_len(),
+        None,
+        "a cleanly-closed store owns no writer, so writer_queue_len() must be None; \
+         a Some(_) mutant would fabricate a nonexistent writer mailbox"
+    );
+}
+
 // ─── batch idempotency recording ──────────────────────────────────────────────
 
 const IDEM_KIND: EventKind = EventKind::custom(0xB, 5);

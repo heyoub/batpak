@@ -1083,14 +1083,13 @@ mod tests {
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 
-    // EQUIVALENT / UNKILLABLE MUTANT (`run -> Ok(())`, line 25): `run()` is pure
-    // orchestration over the live repo. It takes no injectable root — it resolves
-    // `repo_root()` from the process CWD and writes receipts into the working tree
-    // — so it cannot be driven over a planted temp tree, and calling it for real
-    // would mutate the repo and run the heavy gate suite. On the committed (green)
-    // tree it returns `Ok(())` anyway, so the mutant is observationally identical.
-    // Every gate `run()` sequences is independently RED-fixture'd: the sub-gate
-    // wrappers below and in structural_tests.rs each fail under their own mutation.
+    // The `run -> Ok(())` mutant IS killable (NOT equivalent): `run()` resolves the
+    // real repo via the compile-time manifest dir and, on the green tree, executes
+    // its full gate sequence AND writes gauntlet receipts under
+    // `target/gauntlet-receipts/`. The `Ok(())` mutant skips all of that, so its
+    // observable side effect (the `structural-source-lints` receipt) is pinned by
+    // `run_executes_gates_and_writes_the_structural_lints_receipt` (structural_tests.rs).
+    // The wrappers below additionally cover each sub-gate's own root-failure path.
     #[test]
     fn production_surface_wrappers_propagate_root_failure() {
         // A root with no Cargo workspace makes `production_rust_files` error; every

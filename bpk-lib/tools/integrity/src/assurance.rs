@@ -452,13 +452,22 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
 /// derived production root. Any non-empty result is a hard failure: production
 /// code must be explicitly classified (manifest glob or derived L1 root).
 ///
-/// EQUIVALENT MUTANT (`delete !` on the `!entry_matches_path` term, line 459):
-/// every `rel` here comes from `production_rel_paths`, which only walks files
-/// *under* a production root, so `matches_derived_production_root` is always true
-/// and `!matches_derived` always false. The `&&` is therefore unconditionally
-/// false (result always empty) no matter what the first term is — no input can
-/// distinguish dropping the leading `!`. The `-> Ok(vec![])` body mutant IS killed
-/// (it strips the `?` error path that `root_resolution_failure_propagates` asserts).
+/// MUTATION MAP for the two `!` terms in the filter below:
+/// * `delete !` on `!matches_derived_production_root` (trailing term) IS
+///   observable: every `rel` from `production_rel_paths` lies under a production
+///   root, so `matches_derived` is always true; dropping its `!` turns the
+///   conjunction into `!entry_matches_path && true` (the derived-L1 set), which is
+///   non-empty on the committed tree, so `check()` fails closed. Killed by
+///   `committed_manifest_full_check_is_green` and the direct
+///   `unleveled_files_is_empty_over_committed_manifest`.
+/// * `delete !` on `!entry_matches_path` (leading term) is EQUIVALENT: because
+///   `matches_derived` is always true, `!matches_derived` is unconditionally
+///   false, so `(..) && false` is empty no matter what the first term yields.
+///   `production_rel_paths` and `production_root_rels` both enumerate the same
+///   `production_rust_roots`, and every walked file is structurally under one of
+///   those roots for ANY `repo_root` (not just the committed tree) — so no input
+///   can make `matches_derived` false. The `-> Ok(vec![])` body mutant IS killed
+///   (it strips the `?` error path that `root_resolution_failure_propagates` asserts).
 pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Result<Vec<String>> {
     let root_rels = production_root_rels(repo_root)?;
     let mut unleveled: Vec<String> = production_rel_paths(repo_root)?
@@ -635,6 +644,28 @@ mod tests {
     #[test]
     fn committed_manifest_full_check_is_green() {
         check(&repo()).expect("assurance::check must be green on the clean tree");
+    }
+
+    // The committed production surface is fully classified: every file is either
+    // manifest-matched or under a derived production root, so `unleveled_files`
+    // is empty — while `derived_l1_files` is NON-empty. Dropping the `!` on the
+    // `matches_derived_production_root` term turns `unleveled` INTO the derived
+    // set, so this directly kills that mutant (and the emptiness is non-vacuous
+    // because the derived set is non-empty).
+    #[test]
+    fn unleveled_files_is_empty_over_committed_manifest() {
+        let repo = repo();
+        let entries = load_manifest(&repo).expect("load manifest");
+        let unleveled = unleveled_files(&repo, &entries).expect("compute unleveled files");
+        assert!(
+            unleveled.is_empty(),
+            "every production file must be classified (manifest glob or derived L1): {unleveled:?}"
+        );
+        let derived = derived_l1_files(&repo, &entries).expect("compute derived files");
+        assert!(
+            !derived.is_empty(),
+            "the derived-L1 set must be non-empty so the unleveled emptiness is non-vacuous"
+        );
     }
 
     #[test]

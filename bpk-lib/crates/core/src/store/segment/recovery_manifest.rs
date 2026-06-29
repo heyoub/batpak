@@ -174,13 +174,14 @@ fn read_frame_event_hash<R: Read + Seek>(
     frame_size: u64,
 ) -> Option<[u8; 32]> {
     let total = usize::try_from(frame_size).ok()?;
-    // EQUIVALENT-MUTANT (`< 8` -> `== 8`): this guard rejects frames too small to
-    // hold the 8-byte [len][crc] header. For every `total <= 8` both forms yield
-    // `None` — sizes 1..8 fall through to `frame_decode`, which returns
-    // `Err(TooShort)`/`Err(Truncated)` on a sub-header buffer (-> `None`), and a
-    // bare 8-byte header decodes to an empty payload that fails to deserialize
-    // (-> `None`); for `total > 8` neither form short-circuits. So `< 8` and
-    // `== 8` are behaviorally indistinguishable on this Option-returning seam.
+    // This guard rejects frames too small to hold the 8-byte [len][crc] header as
+    // a CHEAP pre-check: it short-circuits BEFORE the seek+read below. The
+    // `< 8` -> `== 8` mutant is return-value equivalent (every `total <= 8` still
+    // yields `None`: a sub-header buffer fails `frame_decode`, and a bare 8-byte
+    // header decodes to an empty payload that won't deserialize) — but it is NOT
+    // unobservable: for an undersized frame the mutant falls through and CONSUMES
+    // the source. `undersized_frame_rejected_without_consuming_the_source` pins
+    // the no-I/O short-circuit, killing the `== 8` mutant.
     if total < 8 {
         return None;
     }
@@ -340,5 +341,32 @@ pub(crate) fn resolve_untrusted_frames_end<R: Read + Seek>(
                  refusing to recover"
             ),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_frame_event_hash;
+    use std::io::{Cursor, Seek, SeekFrom};
+
+    #[test]
+    fn undersized_frame_rejected_without_consuming_the_source() {
+        // A frame smaller than the 8-byte [len][crc] header can never decode, so
+        // the `< 8` guard rejects it as a cheap pre-check — without seeking or
+        // reading. We park the cursor at a known offset; the guard must leave it
+        // there. The `< 8` -> `== 8` mutant falls through for a 4-byte frame,
+        // seeks to `at`, and reads the buffer — moving the cursor (while still
+        // returning None). Pinning the parked position kills that mutant.
+        let mut source = Cursor::new(vec![0u8; 64]);
+        source
+            .seek(SeekFrom::Start(41))
+            .expect("park the cursor before the call");
+        let hash = read_frame_event_hash(&mut source, 0, 4);
+        assert_eq!(hash, None, "an undersized frame yields no event hash");
+        assert_eq!(
+            source.position(),
+            41,
+            "the size guard must reject an undersized frame without consuming the source"
+        );
     }
 }

@@ -517,3 +517,26 @@ fn test_assertion_rigor_rejects_weak_negative_tests() {
 
     fs::remove_dir_all(repo).expect("remove temp repo");
 }
+
+// --- Top-level orchestrator: run() executes gates + writes its receipt ------
+
+/// `structural::run()` has no injectable root — it resolves the real repo via the
+/// compile-time manifest dir and writes gauntlet receipts. The `run -> Ok(())`
+/// mutant returns Ok WITHOUT running any gate or writing any receipt. On the
+/// committed (green) tree run() must (a) return Ok and (b) (re)write the
+/// `structural-source-lints` receipt; we delete that receipt first so a stale
+/// copy cannot mask the no-op mutant. This kills the `run -> Ok(())` mutant that
+/// round 2 wrongly labeled equivalent/unkillable.
+#[test]
+fn run_executes_gates_and_writes_the_structural_lints_receipt() {
+    let dir = crate::receipts::receipts_dir().expect("receipts dir resolves");
+    let receipt = dir.join("structural-source-lints.json");
+    let _ = fs::remove_file(&receipt);
+    super::run().expect("structural-check run() is green on the committed tree");
+    assert!(
+        receipt.exists(),
+        "run() must execute its gate sequence and write the structural-source-lints \
+         receipt at {}; the `-> Ok(())` mutant skips every gate and writes nothing",
+        receipt.display()
+    );
+}
