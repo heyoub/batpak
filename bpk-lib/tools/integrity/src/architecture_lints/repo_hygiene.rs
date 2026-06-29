@@ -348,12 +348,7 @@ fn check_bidirectional_substrate_lane_terms(
     repo_root: &Path,
     tracked_files: &[PathBuf],
 ) -> Result<()> {
-    let forbidden_substrate_ops = [
-        "mission.replay",
-        "downstream.query",
-        "workflow.events",
-        "receipt.walk",
-    ];
+    let forbidden_substrate_ops = ["mission.replay", "workflow.events", "receipt.walk"];
     for path in tracked_files {
         let rel = relative(repo_root, path);
         if rel == "tools/integrity/src/architecture_lints/repo_hygiene.rs" {

@@ -1,4 +1,4 @@
-//! portable-context handoff packet capture for agent/operator context.
+//! Portable context handoff packet capture for agent/operator context.
 //!
 //! Writes `target/context/latest.json` and `target/context/latest.md`.
 //! Read-only toward git and the factory ledger store.
@@ -29,9 +29,9 @@ const FACTORY_STACK_PARENTS: &[(&str, &str)] = &[
 ];
 
 const BOUNDARY_REMINDERS: &[&str] = &[
-    "Downstream graph law lives in a separate repo; not BatPAK substrate traversal.",
-    "EXTERNAL_SPEC is a separate spec; this packet is portable-context handoff tooling, not External-Profile.",
-    "BatPAK preserves opaque extension bytes; it does not validate ExtProfile schemas at runtime.",
+    "A downstream product graph law lives in a separate repo; not BatPAK substrate traversal.",
+    "An external context-profile spec is separate; this packet is portable context handoff tooling, aligned to that spec, not its runtime.",
+    "BatPAK preserves opaque extension bytes; it does not validate that external profile's schemas at runtime.",
     "event.walk is hash-chain ancestry only; event.query is commit-order pagination.",
 ];
 
@@ -461,11 +461,11 @@ fn gate_row_to_highlight(row: LedgerGateRow) -> GateHighlightRow {
 }
 
 pub(crate) fn render_context_markdown(packet: &ContextPacket) -> String {
-    let mut out = String::from("# BatPAK Context Packet (portable-context handoff v0)\n\n");
+    let mut out = String::from("# BatPAK Context Packet (portable context handoff v0)\n\n");
     out.push_str(
         "Use this packet to hand work between agents or operators. \
          It captures git state, stacked-PR hints, factory-ledger tail, \
-         and boundary reminders. It is not External-Profile and does not validate schemas.\n\n",
+         and boundary reminders. It does not implement that external profile and does not validate its schemas.\n\n",
     );
 
     out.push_str("## Git\n\n");

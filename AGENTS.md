@@ -159,7 +159,7 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
 - `cd bpk-lib && cargo xtask factory-ledger run -- <command> [args...]`
 - `cd bpk-lib && cargo xtask factory-ledger run --gate <name> -- <command> [args...]` — on success, records command completed + named gate completed
 - `cd bpk-lib && cargo xtask factory-ledger record gate-completed --run-id … --gate … --command … --duration-ms … --summary …` — manual gate record (any status_code; for tests/import hooks)
-- `cd bpk-lib && cargo xtask context [--ledger-limit N] [--notes TEXT]` — portable-context handoff packet under `target/context/`; local capture only, not External-Profile runtime
+- `cd bpk-lib && cargo xtask context [--ledger-limit N] [--notes TEXT]` — portable context handoff packet under `target/context/`; local capture only, not an external context-profile runtime
 - `cd bpk-lib && cargo xtask ci-fast`       — early PR signal; version pins, format, clippy, checks, nextest, deny/audit, traceability, structural
 - `cd bpk-lib && cargo xtask preflight`     — canonical devcontainer verification bundle for CI + coverage + docs from one in-container session. Prefer this over bare `cargo xtask ci` for pushes that touch store internals, xtask itself, or CI config, but do not describe it as the full proof chain unless you also run the extra hard gates (`mutants smoke`, perf gates, targeted fuzz/chaos).
 - `cd bpk-lib && cargo xtask ci`            — full merge bundle (`ci-fast` plus doctor, templates, public-api, package-leak-scan, bench compile, unused-deps advisory)
@@ -238,17 +238,17 @@ Implementation commands still live under `bpk-lib/` and remain valid when a task
   New traversal fields must name the axis as `global_sequence` when the axis is
   commit order. `after_global_sequence` is an exclusive resume point, not a
   stream cursor or server-held session; do not introduce ambiguous cursor names.
-- **Domain graph boundary** — do not add Downstream, workflow, mission, or
+- **Domain graph boundary** — do not add downstream product, workflow, mission, or
   receipt-body verbs as batpak/hostbat/netbat operations. Domain layers decode
   envelope payloads above batpak after `event.query` + `event.get`; substrate
   traversal returns metadata only.
-- **ExtProfile boundary** — batpak may align with the sibling `EXTERNAL_SPEC`, but this crate
-  does not implement External-Profile or `contract.external_v1` wire validation. Treat
-  `contract.external_v1` as a normative optional ExtProfile profile only when
-  `EXTERNAL_SPEC` is audit-clean; in batpak, ExtProfile references are docs-only alignment
-  unless a change explicitly adds codecs, tests, and traceability for a runtime
-  surface. `authority_required` remains receiver-policy input, never granted
-  authority.
+- **External-spec boundary** — batpak may align with a sibling external spec, but
+  this crate does not implement that external profile or an external context wire
+  profile validation. Treat such an external context wire profile as a normative
+  optional profile only when the sibling external spec is audit-clean; in batpak,
+  external-spec references are docs-only alignment unless a change explicitly adds
+  codecs, tests, and traceability for a runtime surface. `authority_required`
+  remains receiver-policy input, never granted authority.
 - `.githooks/` is the tracked repo hook surface. `cargo xtask setup --install-tools` will install it when no custom `core.hooksPath` is active; otherwise use `cargo xtask install-hooks` after clearing or changing the custom hook path.
 - **Structural parity checks** — `just inspect` runs the focused structural surface. The underlying `cd bpk-lib && cargo xtask structural` command (called automatically by `cargo xtask ci`) runs two detectors you must not break:
   - `check_ci_parity` — fails if `.github/workflows/ci.yml` drifts from the xtask source tree or `.devcontainer/Dockerfile`. Specifically: every `cargo xtask <subcommand>` referenced in the workflow must exist as a subcommand in xtask; every `taiki-e/install-action` tool must be present in xtask's setup step; tool version pins must agree across all three files. **Rule:** if you modify `bpk-lib/tools/xtask/src/main.rs`, `bpk-lib/tools/xtask/src/commands.rs`, `.github/workflows/ci.yml`, or `.devcontainer/Dockerfile`, run `cd bpk-lib && cargo xtask structural` before push.

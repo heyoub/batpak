@@ -14,8 +14,8 @@ bp records.
 
 ## Boundary
 
-`batpak` does not know operation kits, runtime checkouts, server routes, ExtProfile
-semantics, or rendering. Callers may store extension bytes whose keys belong to
+`batpak` does not know operation kits, runtime checkouts, server routes, external
+context-profile semantics, or rendering. Callers may store extension bytes whose keys belong to
 other layers, but batpak validates and preserves those bytes without deciding
 what they mean.
 

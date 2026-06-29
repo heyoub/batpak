@@ -577,7 +577,7 @@ Reduction (same substrate, clearer roles):
 
 **JournalBridge (composition, out of core):** a bridge consumes exported or tail-able events from the owning journal process, or reads an offline / copy snapshot of another store under an explicit future read-only contract. It must not open the same live `data_dir` read-only alongside the owner under the current `Store` contract.
 
-**ExtProfile (sibling spec, alignment only):** ExtProfile alignment is docs-only. `batpak` does not implement or validate External-Profile, `contract.external_v1`, active profiles, or `authority_required` semantics. `extprofile.*` and `contract.*` extension bytes are opaque receipt cargo persisted, signed, and replayed like any other extension; callers own ExtProfile codecs, validation, and policy.
+**External context-profile spec (sibling spec, alignment only):** alignment with the sibling external spec is docs-only. `batpak` does not implement or validate that spec's runtime, an external context wire profile, active profiles, or `authority_required` semantics. Such external-profile and `contract.*` extension bytes are opaque receipt cargo persisted, signed, and replayed like any other extension; callers own those codecs, validation, and policy.
 
 **Benchmark posture (directional, not lab-canonical):** treat microbenchmark digits as environment-specific: cold-start paths can differ by orders of magnitude between rebuild, mmap snapshot, and checkpoint snapshot; batched durable throughput is dramatically higher than naive per-append sync; heavy `wait_for_*` fan-out at high waiter counts can dominate wall time compared to visible progress — treat that as a design smell, not a subscription replacement. Projection cache-hit latency differs materially between neutral and all-features builds; measure on target hardware before treating exact figures as release criteria.
 
@@ -676,8 +676,8 @@ Important knobs on `StoreConfig`:
 - `batpak::encoding::to_bytes` is the batpak-scoped named-field MessagePack
   helper used for substrate-owned deterministic bytes.
 - `batpak::canonical` is a back-compatible alias for the same batpak-scoped
-  MessagePack surface. It is not ExtProfile/JCS or a universal cross-protocol
-  canonicalization promise.
+  MessagePack surface. It is not an external context profile, JCS, or a
+  universal cross-protocol canonicalization promise.
 - Public deterministic report bodies with schema versions are fixture-locked
   for patch stability. The root crate pins the exact `rmp-serde` encoder
   version used by those fixtures; changing that pin requires a deliberate
@@ -697,9 +697,9 @@ Important knobs on `StoreConfig`:
   core.
 - Unknown receipt extensions are substrate cargo: batpak preserves them
   byte-for-byte when returning, signing, replaying, or reconstructing the same
-  committed receipt. `extprofile.*` keys are handled exactly like application keys such
-  as `acme.*`; batpak validates key shape and byte durability, not profile
-  meaning.
+  committed receipt. External-profile keys are handled exactly like application
+  keys such as `acme.*`; batpak validates key shape and byte durability, not
+  profile meaning.
 - Derived receipts must not silently inherit old profile truth. Callers that
   create new receipt meaning should explicitly carry, link, refresh, redact, or
   invalidate profile extensions according to their own protocol rules.

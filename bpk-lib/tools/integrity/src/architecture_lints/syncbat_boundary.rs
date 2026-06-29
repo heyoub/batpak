@@ -26,14 +26,6 @@ const CORE_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "runtime layer type names belong outside batpak core",
     },
     BoundaryTerm {
-        token: "downstream-kit",
-        reason: "contract layer names belong outside batpak core",
-    },
-    BoundaryTerm {
-        token: "DownstreamKit",
-        reason: "contract layer type names belong outside batpak core",
-    },
-    BoundaryTerm {
         token: "netbat",
         reason: "network layer names belong outside batpak core",
     },
@@ -50,32 +42,12 @@ const CORE_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "boundary-supervisor layer type names belong outside batpak core",
     },
     BoundaryTerm {
-        token: "contract.external_v1",
-        reason: "ExtProfile profile wire validation belongs outside batpak core",
-    },
-    BoundaryTerm {
         token: "authority_required",
         reason: "authority claims are caller policy input, not substrate law",
-    },
-    BoundaryTerm {
-        token: "External-Profile",
-        reason: "ExtProfile semantics stay outside batpak core",
-    },
-    BoundaryTerm {
-        token: "ExternalProfile",
-        reason: "ExtProfile profile types stay outside batpak core",
     },
 ];
 
 const SYNCBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
-    BoundaryTerm {
-        token: "downstream-kit",
-        reason: "contract layer names belong outside syncbat",
-    },
-    BoundaryTerm {
-        token: "DownstreamKit",
-        reason: "contract layer type names belong outside syncbat",
-    },
     BoundaryTerm {
         token: "netbat",
         reason: "network layer names belong outside syncbat",
@@ -93,20 +65,8 @@ const SYNCBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "boundary-supervisor layer type names belong outside syncbat",
     },
     BoundaryTerm {
-        token: "contract.external_v1",
-        reason: "ExtProfile profile wire validation belongs outside syncbat",
-    },
-    BoundaryTerm {
         token: "authority_required",
         reason: "authority claims are caller policy input, not syncbat law",
-    },
-    BoundaryTerm {
-        token: "External-Profile",
-        reason: "ExtProfile semantics stay outside syncbat",
-    },
-    BoundaryTerm {
-        token: "ExternalProfile",
-        reason: "ExtProfile profile types stay outside syncbat",
     },
 ];
 
@@ -120,20 +80,8 @@ const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "boundary-supervisor layer type names belong outside netbat",
     },
     BoundaryTerm {
-        token: "contract.external_v1",
-        reason: "ExtProfile profile wire validation belongs outside netbat",
-    },
-    BoundaryTerm {
         token: "authority_required",
         reason: "authority claims are caller policy input, not netbat law",
-    },
-    BoundaryTerm {
-        token: "External-Profile",
-        reason: "ExtProfile semantics stay outside netbat",
-    },
-    BoundaryTerm {
-        token: "ExternalProfile",
-        reason: "ExtProfile profile types stay outside netbat",
     },
     BoundaryTerm {
         token: "batpak::",
@@ -146,8 +94,8 @@ const NETBAT_LAYER_LEAKS: &[BoundaryTerm] = &[
 // trust boundary that legitimately uses std/libc + the backend protocol types +
 // `batpak::canonical` decode. It must NOT reach into the network layer (`netbat`):
 // the launcher has NO network client (it execs and is replaced), so a `netbat`
-// token is a layer leak. The host-wiring layers (syncbat/downstream-kit) and the
-// contract-layer ExtProfile names also have no business in the launcher. We do NOT forbid
+// token is a layer leak. The host-wiring layer (syncbat) and the contract-layer
+// names also have no business in the launcher. We do NOT forbid
 // `bvisor`/`batpak` here: the launcher consumes the bvisor backend protocol and
 // `batpak::canonical`, which are its sanctioned inputs.
 const BVISOR_LAUNCHER_LAYER_LEAKS: &[BoundaryTerm] = &[
@@ -168,24 +116,8 @@ const BVISOR_LAUNCHER_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "host wiring belongs in the bvisor::host feature module, not the confinement launcher",
     },
     BoundaryTerm {
-        token: "downstream-kit",
-        reason: "contract layer names belong outside the launcher",
-    },
-    BoundaryTerm {
-        token: "DownstreamKit",
-        reason: "contract layer type names belong outside the launcher",
-    },
-    BoundaryTerm {
         token: "authority_required",
         reason: "authority claims are caller policy input — the launcher executes mechanisms, not meanings",
-    },
-    BoundaryTerm {
-        token: "External-Profile",
-        reason: "ExtProfile semantics stay outside the launcher",
-    },
-    BoundaryTerm {
-        token: "ExternalProfile",
-        reason: "ExtProfile profile types stay outside the launcher",
     },
 ];
 
@@ -212,25 +144,9 @@ const BVISOR_LAYER_LEAKS: &[BoundaryTerm] = &[
         reason: "transport belongs in the bvisor::host feature module, not the pure bvisor contract",
     },
     BoundaryTerm {
-        token: "downstream-kit",
-        reason: "contract layer names belong outside bvisor",
-    },
-    BoundaryTerm {
-        token: "DownstreamKit",
-        reason: "contract layer type names belong outside bvisor",
-    },
-    BoundaryTerm {
         token: "authority_required",
         reason:
             "authority claims are caller policy input — bvisor governs mechanisms, not meanings",
-    },
-    BoundaryTerm {
-        token: "External-Profile",
-        reason: "ExtProfile semantics stay outside bvisor",
-    },
-    BoundaryTerm {
-        token: "ExternalProfile",
-        reason: "ExtProfile profile types stay outside bvisor",
     },
 ];
 
@@ -615,17 +531,17 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
         ManifestRule {
             label: "batpak core",
             rel: "crates/core/Cargo.toml",
-            forbidden_stack_deps: &["syncbat", "downstream-kit", "netbat", "bvisor", "extprofile", "downstream-frontend"],
+            forbidden_stack_deps: &["syncbat", "netbat", "bvisor"],
         },
         ManifestRule {
             label: "syncbat",
             rel: "crates/syncbat/Cargo.toml",
-            forbidden_stack_deps: &["downstream-kit", "netbat", "bvisor", "extprofile", "downstream-frontend"],
+            forbidden_stack_deps: &["netbat", "bvisor"],
         },
         ManifestRule {
             label: "netbat",
             rel: "crates/netbat/Cargo.toml",
-            forbidden_stack_deps: &["batpak", "downstream-kit", "bvisor", "extprofile", "downstream-frontend"],
+            forbidden_stack_deps: &["batpak", "bvisor"],
         },
         // The PURE bvisor contract depends on the batpak generic substrate ONLY.
         // The `host` feature legitimately adds OPTIONAL syncbat + hostbat deps for
@@ -636,7 +552,7 @@ fn check_family_manifest_boundaries(repo_root: &Path) -> Result<()> {
         ManifestRule {
             label: "bvisor (pure contract)",
             rel: "crates/bvisor/Cargo.toml",
-            forbidden_stack_deps: &["netbat", "downstream-kit", "extprofile", "downstream-frontend"],
+            forbidden_stack_deps: &["netbat"],
         },
     ];
 
@@ -864,17 +780,17 @@ mod tests {
 
     #[test]
     fn detects_core_layer_leaks() {
-        let content = "pub struct SyncbatCore;\nconst PROFILE: &str = \"contract.external_v1\";\n";
+        let content = "pub struct SyncbatCore;\nuse netbat::Client;\n";
         let tokens = tokens(&forbidden_layer_terms(SourceLayer::Core, content));
         assert!(tokens.contains(&"Syncbat"));
-        assert!(tokens.contains(&"contract.external_v1"));
+        assert!(tokens.contains(&"netbat"));
     }
 
     #[test]
     fn detects_syncbat_layer_leaks() {
-        let content = "pub struct DownstreamKitRuntime;\nconst CLAIM: &str = \"authority_required\";\n";
+        let content = "pub struct BvisorRuntime;\nconst CLAIM: &str = \"authority_required\";\n";
         let tokens = tokens(&forbidden_layer_terms(SourceLayer::Syncbat, content));
-        assert!(tokens.contains(&"DownstreamKit"));
+        assert!(tokens.contains(&"Bvisor"));
         assert!(tokens.contains(&"authority_required"));
     }
 
@@ -963,7 +879,7 @@ mod tests {
 
     #[test]
     fn ignores_comment_only_boundary_terms() {
-        let content = "//! This layer does not implement External-Profile.\n/** Nor ExternalProfile. */\n/*! Nor contract.external_v1. */\npub struct Plain;\n";
+        let content = "//! This layer does not depend on netbat.\n/** Nor Bvisor. */\n/*! Nor bvisor. */\npub struct Plain;\n";
         let semantic = semantic_content(content);
         assert!(forbidden_layer_terms(SourceLayer::Syncbat, &semantic).is_empty());
     }
@@ -1093,12 +1009,10 @@ mod tests {
     #[test]
     fn launcher_rejects_netbat_and_host_wiring_leaks() {
         // No network client (it execs and is replaced) and no host wiring.
-        let content =
-            "use netbat::serve_tcp_listener;\nuse syncbat::Core;\nconst C: &str = \"External-Profile\";\n";
+        let content = "use netbat::serve_tcp_listener;\nuse syncbat::Core;\n";
         let tokens = tokens(&forbidden_layer_terms(SourceLayer::BvisorLauncher, content));
         assert!(tokens.contains(&"netbat"), "launcher must reject netbat");
         assert!(tokens.contains(&"syncbat"), "launcher must reject syncbat");
-        assert!(tokens.contains(&"External-Profile"));
     }
 
     #[test]

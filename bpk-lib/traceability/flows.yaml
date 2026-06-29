@@ -45,7 +45,7 @@
     - ART-DAG-POSITION-HINT-TESTS
     - ART-ADR-POSITION-HINTS
 - id: FLOW-RECEIPT-EXTENSION-CARGO
-  summary: Unknown receipt extensions are substrate cargo. batpak preserves extension bytes byte-for-byte when returning, signing, replaying, or reconstructing the same committed receipt; current checkpoint and mmap artifacts carry those maps directly, older artifacts hydrate from .fbat frames, extprofile.* keys are handled exactly like application keys, and semantic interpretation is left to extension-aware code outside batpak-core.
+  summary: Unknown receipt extensions are substrate cargo. batpak preserves extension bytes byte-for-byte when returning, signing, replaying, or reconstructing the same committed receipt; current checkpoint and mmap artifacts carry those maps directly, older artifacts hydrate from .fbat frames, external profile keys are handled exactly like application keys, and semantic interpretation is left to extension-aware code outside batpak-core.
   artifacts:
     - ART-STORE-APPEND
     - ART-STORE-SEGMENT

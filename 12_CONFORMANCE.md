@@ -47,7 +47,7 @@ The factory uses tiered verification so humans, agents, and CI all speak the sam
 | Host contract | `cargo test -p hostbat` | hostbat tests | No | `ClientManifest` projection, schema golden vectors, subscription descriptors. |
 | NETBAT wire | `cargo test -p netbat` | netbat tests | No | NETBAT/1 goldens, stream runtime sessions, bounded request/response paths. |
 | Factory ledger | `just ledger-list`, `just ledger-run -- …`, `just ledger-run-gate …` | `factory-ledger` | No | Opt-in local proof trail: command events plus optional named gate completions under `bpk-lib/target/factory-ledger/store/`. Gates are proof markers, not CI enforcement. |
-| Context packet | `just context` | `context` | No | Opt-in portable-context handoff artifact under `bpk-lib/target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
+| Context packet | `just context` | `context` | No | Opt-in portable context handoff artifact under `bpk-lib/target/context/latest.{json,md}`; captures git state, stack hints, ledger tail, boundary reminders. |
 | Doctrine audit | traceability/docs artifact | traceability metadata | No | Records the substrate/product semantic firewall; not a CI or release gate unless promoted to an explicit command later. |
 | Fast | `just ci-fast` | `ci-fast` | Yes | Early PR signal: format, clippy, checks, tests, dependency gates, traceability, structural law. |
 | Integrity | `just verify` | `preflight` | Yes | Canonical Linux devcontainer proof: full CI, coverage threshold 80%, docs. |
@@ -133,7 +133,7 @@ core ops plus the four domain-neutral `evidence.*` ops:
 wire cursor session. It pages by `global_sequence`; callers resume by sending
 the previous response's `next_after_global_sequence` as the next
 `after_global_sequence`. `event.walk` exposes bounded hash-chain ancestry only
-— not DAG or Downstream graph law. Cursor-style open/next/checkpoint protocols
+— not DAG or downstream graph law. Cursor-style open/next/checkpoint protocols
 belong to a later NETBAT version or product-specific layer.
 
 The `evidence.*` ops are thin wire adapters over the substrate evidence reports

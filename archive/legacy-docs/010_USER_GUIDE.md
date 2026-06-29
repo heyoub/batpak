@@ -195,7 +195,7 @@ let opts = AppendOptions::new().with_receipt_extension(key, value);
 store.append_typed_with_options(&coord, &payload, opts)?;
 ```
 
-batpak treats all extension namespaces as opaque substrate cargo. A `extprofile.*`
+batpak treats all extension namespaces as opaque substrate cargo. An external-profile
 extension and an application extension are persisted, signed, replayed, and
 reconstructed by the same generic mechanism; namespace-aware code outside
 batpak decides what those bytes mean.

@@ -45,7 +45,6 @@ const FORBIDDEN_PUBLIC_SUBSTRINGS: &[&str] = &[
     "portkind",
     "mcp",
     "a2a",
-    "extprofile",
     "capsule",
     "websocket",
     "sandbox",

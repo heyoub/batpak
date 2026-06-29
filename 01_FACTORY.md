@@ -26,7 +26,7 @@ pressure on BatPAK's naming and boundaries, not a BatPAK feature list.
 
 BatPAK supplies durable append/event truth, receipts, replay, projections as
 mechanisms, evidence, and opaque extension bytes. Higher layers own the product,
-agent-framework, Downstream, and External-Profile semantics that interpret those bytes.
+agent-framework and downstream product semantics that interpret those bytes.
 
 ## Factory Contract
 
@@ -61,7 +61,7 @@ The opt-in factory ledger (`just ledger-run -- …`, `just ledger-list`, `just l
 
 Command events (`factory.command.*`) record that a wrapped command ran. Gate events (`factory.gate.completed`) record which named proof that command represented when using `just ledger-run-gate …`.
 
-The opt-in context packet (`just context`) writes a portable-context handoff artifact to `bpk-lib/target/context/latest.json` and `latest.md`. It captures git state, stacked-PR hints, factory-ledger tail, and boundary reminders for agent/operator handoff. It is local tooling only — not External-Profile, not a CI gate.
+The opt-in context packet (`just context`) writes a portable context handoff artifact to `bpk-lib/target/context/latest.json` and `latest.md`. It captures git state, stacked-PR hints, factory-ledger tail, and boundary reminders for agent/operator handoff. It is local tooling only — not an external context-profile spec, not a CI gate.
 
 The manual proof commands (`just perf-gates`, `just loom`) run the existing
 xtask proof surfaces from the root counter. They are release-confidence tools:

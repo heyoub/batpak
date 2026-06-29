@@ -472,7 +472,7 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
     let key = SigningKey::from_bytes([0x44; 32]);
     let coord = Coordinate::new("extension:signed", "scope:test").expect("coord");
     let kind = EventKind::custom(0xA, 14);
-    let pcp_key = ExtensionKey::new("extprofile.receipt").expect("extprofile extension key");
+    let ext_key = ExtensionKey::new("ext.receipt").expect("external profile extension key");
     let app_key = ExtensionKey::new("acme.receipt").expect("app extension key");
 
     {
@@ -490,13 +490,13 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
                 &serde_json::json!({"n": 1}),
                 AppendOptions::new()
                     .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
-                    .with_extension(pcp_key.clone(), vec![0x50, 0x43, 0x50])
+                    .with_extension(ext_key.clone(), vec![0x45, 0x58, 0x54])
                     .with_extension(app_key.clone(), vec![0x41, 0x50, 0x50]),
             )
             .expect("append signed extension receipt");
         assert_eq!(
-            receipt.extensions.get(&pcp_key),
-            Some(&vec![0x50, 0x43, 0x50])
+            receipt.extensions.get(&ext_key),
+            Some(&vec![0x45, 0x58, 0x54])
         );
         assert_eq!(
             receipt.extensions.get(&app_key),
@@ -520,14 +520,14 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
             &serde_json::json!({"n": 2}),
             AppendOptions::new()
                 .with_idempotency(batpak::id::IdempotencyKey::from(0x51_6E_D0))
-                .with_extension(pcp_key.clone(), vec![0])
+                .with_extension(ext_key.clone(), vec![0])
                 .with_extension(app_key.clone(), vec![0]),
         )
         .expect("idempotent replay");
 
     assert_eq!(
-        replay.extensions.get(&pcp_key),
-        Some(&vec![0x50, 0x43, 0x50])
+        replay.extensions.get(&ext_key),
+        Some(&vec![0x45, 0x58, 0x54])
     );
     assert_eq!(
         replay.extensions.get(&app_key),
@@ -536,10 +536,10 @@ fn signed_unknown_extensions_survive_reopen_and_verify() {
     assert!(reopened.verify_append_receipt(&replay).is_valid());
 
     let mut tampered = replay.clone();
-    tampered.extensions.insert(pcp_key, vec![0x66]);
+    tampered.extensions.insert(ext_key, vec![0x66]);
     assert!(
         !reopened.verify_append_receipt(&tampered).is_valid(),
-        "extprofile.* bytes are opaque substrate cargo and must still be covered by the signature"
+        "external profile bytes are opaque substrate cargo and must still be covered by the signature"
     );
 }
 

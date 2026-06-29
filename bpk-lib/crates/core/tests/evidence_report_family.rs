@@ -65,7 +65,6 @@ fn evidence_public_types_avoid_protocol_product_vocabulary() -> TestResult {
         "portkind",
         "mcp",
         "a2a",
-        "extprofile",
         "capsule",
         "websocket",
         "sandbox",

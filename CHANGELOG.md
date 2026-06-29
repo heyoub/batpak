@@ -321,9 +321,8 @@ All notable changes to this project will be documented in this file.
   `ReservationReconciliationReportBody`.
 - Removed the transitional `StateTransitionReport` alias; use
   `StateTransitionReportBody`.
-- Removed the in-workspace Rust `downstream-kit` kit crate and root `cb` layer doc;
-  DownstreamKit-shaped kit/agent surfaces are downstream consumers of batpak,
-  syncbat, and netbat.
+- Removed the in-workspace Rust downstream kit crate and root `cb` layer doc;
+  downstream kit/agent surfaces are consumers of batpak, syncbat, and netbat.
 - Removed the transitional `syncbat::InvokeResult` alias; use
   `CheckoutResult`.
 - Removed the transitional `syncbat::RegisterOperationPutV1` alias; use
@@ -408,8 +407,8 @@ All notable changes to this project will be documented in this file.
 - Added durable opaque receipt extensions for append and denial receipts.
   Extension bytes are persisted in `.fbat` frames, restored on cold start,
   preserved through idempotency replay, and covered by receipt signatures;
-  `extprofile.*` and application namespaces are treated as uninterpreted substrate
-  cargo by `batpak` core.
+  external-profile and application namespaces are treated as uninterpreted
+  substrate cargo by `batpak` core.
 - Added a private store platform backend for target-sensitive fs/sync/lock/
   clock/mmap mechanics, descriptive platform evidence, admission summaries,
   and opt-in profile-verified open through

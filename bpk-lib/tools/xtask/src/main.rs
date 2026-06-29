@@ -101,7 +101,7 @@ enum XtaskCommand {
     ReleaseManifest(ReleaseManifestArgs),
     /// Opt-in factory command proof ledger backed by a local BatPAK store.
     FactoryLedger(FactoryLedgerArgs),
-    /// Emit a portable-context handoff packet under `target/context/`.
+    /// Emit a portable context handoff packet under `target/context/`.
     Context(ContextArgs),
     /// Copy a golden batpak starter template into a local project directory.
     Scaffold(ScaffoldArgs),

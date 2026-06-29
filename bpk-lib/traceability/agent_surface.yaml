@@ -361,7 +361,7 @@ tasks:
     avoid:
       - "product artifact APIs in BatPAK core"
       - "Downstream route or graph semantics in substrate traversal"
-      - "External-Profile validation without explicit codecs, tests, and traceability"
+      - "downstream profile validation without explicit codecs, tests, and traceability"
       - "role, workflow, studio, or delegated-mode vocabulary as public substrate API"
     examples:
       - "crates/netbat/tests/stream_runtime_event.rs"

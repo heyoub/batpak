@@ -17,7 +17,7 @@ model. batpak does not own the whole application.
 | `batpak` core does not own network wire surfaces (`netbat` sits above `syncbat`) | `just boundary` |
 | Store machine contact routes through `store/platform` rather than ad hoc filesystem calls | `just boundary` |
 | `authority_required` is receiver policy input, never granted authority | traceability + substrate docs; no runtime grant path in core |
-| External-Profile wire validation ships only with explicit codecs, tests, and traceability | absence of undeclared ExtProfile codecs in core; ADR/traceability when added |
+| External context-profile wire validation ships only with explicit codecs, tests, and traceability | absence of undeclared external-profile codecs in core; ADR/traceability when added |
 | Downstream product doctrine maps to existing substrate terminals, not new BatPAK product APIs | traceability/product_doctrine_audit.yaml + `just inspect` |
 
 batpak ships as an embedded event substrate, not as a hosted database, queue, ORM, or workflow product. Callers own process model, disk placement, and integration boundaries.
@@ -49,7 +49,7 @@ The reference NETBAT terminal is a loop, not just a mailbox:
 
 `event.query` is domain-neutral commit-order pagination. It filters on
 substrate coordinates, kind category/type, and `global_sequence`; it does not
-know Downstream missions, workflows, movement graphs, or receipt-body
+know downstream missions, workflows, movement graphs, or receipt-body
 taxonomies. `after_global_sequence` is the strict resume point for the next
 page, not a server-held stream cursor.
 

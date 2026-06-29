@@ -1,8 +1,8 @@
 schema_version: 1
 summary: >
   0.8.0 substrate/product firewall. Product doctrine informs BatPAK naming and
-  boundaries, but does not authorize product, agent-framework, Downstream, or
-  External-Profile semantics inside the substrate.
+  boundaries, but does not authorize product, agent-framework, downstream product, or
+  external profile-spec semantics inside the substrate.
 entries:
   - id: onboarding_pressure
     downstream_pressure: >
@@ -19,7 +19,7 @@ entries:
     proof_commands:
       - just verify
       - cargo test -p netbat
-    owning_layer: downstream product / Downstream
+    owning_layer: downstream product
     explicit_non_goals:
       - pain intake
       - onboarding wizard
@@ -40,7 +40,7 @@ entries:
       - opaque extension bytes
     proof_commands:
       - just inspect
-    owning_layer: downstream agent framework / Downstream
+    owning_layer: downstream agent framework
     explicit_non_goals:
       - agent policy
       - role authority
@@ -67,7 +67,7 @@ entries:
       - product permission model
       - agent trust policy
       - receipt-body domain semantics
-      - External-Profile validation
+      - downstream profile validation
 
   - id: multi_representation_surfaces
     downstream_pressure: >
@@ -80,7 +80,7 @@ entries:
       - canonical substrate artifact envelopes
     proof_commands:
       - just inspect
-    owning_layer: product surface registry / Downstream
+    owning_layer: product surface registry
     explicit_non_goals:
       - UI framework
       - role dashboard
@@ -101,11 +101,11 @@ entries:
     proof_commands:
       - just context
       - just inspect
-    owning_layer: EXTERNAL_SPEC / local tooling / downstream agent framework
+    owning_layer: external profile spec / local tooling / downstream agent framework
     explicit_non_goals:
-      - External-Profile validation
+      - downstream profile validation
       - context hydration law
-      - extprofile.recall
+      - external profile recall
       - agent memory protocol
       - runtime authority grant
 
@@ -128,7 +128,7 @@ entries:
       - event.stream
       - session cursor
       - workflow graph traversal
-      - Downstream route semantics
+      - downstream route semantics
 
   - id: overloaded_vocabulary
     downstream_pressure: >
@@ -146,6 +146,6 @@ entries:
     explicit_non_goals:
       - artifact studio
       - product workflow engine
-      - ExtProfile context-packet semantics in core
-      - Downstream routes
+      - external context-packet semantics in core
+      - downstream routes
       - role-aware product surface
