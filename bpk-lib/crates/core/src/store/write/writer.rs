@@ -892,3 +892,7 @@ impl WriterCore {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "writer_mutation_tests.rs"]
+mod mutation_kill_tests;

@@ -296,3 +296,192 @@ impl CoreBuilder {
         })
     }
 }
+
+#[cfg(test)]
+mod builder_mutation_tests {
+    //! Pins the boxed-registration and sink/guard/backend setters: each setter
+    //! mutates builder state that `build()` lifts into `Core`'s `pub(crate)`
+    //! fields, so the leaked-`Default` setter mutants (which drop the mutation)
+    //! and the `register_boxed -> Ok(Default)` mutant are observable here.
+
+    use std::sync::Arc;
+
+    use crate::admission::{AdmissionDecision, AdmissionGuard};
+    use crate::core::Ctx;
+    use crate::effect_backend::{EffectBackend, EffectError};
+    use crate::handler::{Handler, HandlerResult};
+    use crate::operation::{EffectClass, OperationDescriptor};
+    use crate::operation_status::OperationStatusFactV1;
+    use crate::operation_status_sink::{OperationStatusSink, OperationStatusSinkError};
+    use crate::receipt::{ReceiptEnvelope, ReceiptSink, ReceiptSinkError, RecordedReceipt};
+
+    use super::CoreBuilder;
+
+    const PING: OperationDescriptor = OperationDescriptor::new(
+        "ping",
+        EffectClass::Inspect,
+        "schema.ping.input.v1",
+        "schema.ping.output.v1",
+        "receipt.ping.v1",
+    );
+
+    struct Echo;
+
+    impl Handler for Echo {
+        fn handle(&mut self, input: &[u8], _cx: &mut Ctx<'_>) -> HandlerResult {
+            Ok(input.to_vec())
+        }
+    }
+
+    fn boxed_handler() -> Box<dyn Handler + 'static> {
+        Box::new(Echo)
+    }
+
+    struct NoopReceiptSink;
+
+    impl ReceiptSink for NoopReceiptSink {
+        fn record_receipt(
+            &self,
+            envelope: &ReceiptEnvelope,
+        ) -> Result<RecordedReceipt, ReceiptSinkError> {
+            Ok(RecordedReceipt::new(envelope.clone()))
+        }
+    }
+
+    struct NoopStatusSink;
+
+    impl OperationStatusSink for NoopStatusSink {
+        fn record_fact(
+            &self,
+            _fact: &OperationStatusFactV1,
+        ) -> Result<(), OperationStatusSinkError> {
+            Ok(())
+        }
+    }
+
+    struct NoopBackend;
+
+    impl EffectBackend for NoopBackend {
+        fn append_event(
+            &mut self,
+            _kind: batpak::event::EventKind,
+            _payload: &[u8],
+        ) -> Result<(), EffectError> {
+            Ok(())
+        }
+    }
+
+    struct DenyGuard;
+
+    impl AdmissionGuard for DenyGuard {
+        fn admit(
+            &self,
+            _descriptor: &OperationDescriptor,
+            _input: &[u8],
+            _cx: &mut Ctx<'_>,
+        ) -> AdmissionDecision {
+            AdmissionDecision::deny("denied", "blocked in test")
+        }
+    }
+
+    #[test]
+    fn register_boxed_inserts_descriptor_and_handler_and_detects_duplicates() {
+        let mut builder = CoreBuilder::new();
+        builder
+            .register_boxed(PING, boxed_handler())
+            .expect("first register_boxed should succeed");
+        // The second registration only errors if the first insert actually took
+        // hold; the `Ok(Default)` mutant never inserts, so it cannot detect the
+        // duplicate and returns Ok.
+        let duplicate = builder.register_boxed(PING, boxed_handler());
+        assert!(
+            duplicate.is_err(),
+            "registering the same name twice must be a duplicate error"
+        );
+        let core = builder.build().expect("build should succeed");
+        assert!(
+            core.contains_operation("ping"),
+            "register_boxed must leave the descriptor in the built Core"
+        );
+    }
+
+    #[test]
+    fn admission_guard_is_set_then_cleared() {
+        let mut with_guard = CoreBuilder::new();
+        with_guard
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        with_guard.admission_guard(DenyGuard);
+        let core = with_guard.build().expect("build");
+        assert!(
+            core.admission_guard.is_some(),
+            "admission_guard setter must bind a guard"
+        );
+
+        let mut cleared = CoreBuilder::new();
+        cleared
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        cleared.admission_guard(DenyGuard);
+        cleared.clear_admission_guard();
+        let core = cleared.build().expect("build");
+        assert!(
+            core.admission_guard.is_none(),
+            "clear_admission_guard must drop the bound guard"
+        );
+    }
+
+    #[test]
+    fn receipt_sink_boxed_binds_the_sink() {
+        let mut builder = CoreBuilder::new();
+        builder
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        builder.receipt_sink_boxed(Box::new(NoopReceiptSink));
+        let core = builder.build().expect("build");
+        assert!(
+            core.receipt_sink.is_some(),
+            "receipt_sink_boxed must bind the sink"
+        );
+    }
+
+    #[test]
+    fn status_sink_boxed_is_set_then_cleared() {
+        let mut builder = CoreBuilder::new();
+        builder
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        builder.status_sink_boxed(Arc::new(NoopStatusSink));
+        let core = builder.build().expect("build");
+        assert!(
+            core.status_sink.is_some(),
+            "status_sink_boxed must bind the sink"
+        );
+
+        let mut cleared = CoreBuilder::new();
+        cleared
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        cleared.status_sink_boxed(Arc::new(NoopStatusSink));
+        cleared.clear_status_sink();
+        let core = cleared.build().expect("build");
+        assert!(
+            core.status_sink.is_none(),
+            "clear_status_sink must drop the bound sink"
+        );
+    }
+
+    #[test]
+    fn effect_backend_boxed_binds_the_backend() {
+        let mut builder = CoreBuilder::new();
+        builder
+            .register_boxed(PING, boxed_handler())
+            .expect("register");
+        builder.effect_backend_boxed(Box::new(NoopBackend));
+        let core = builder.build().expect("build");
+        assert!(
+            core.effect_backend.is_some(),
+            "effect_backend_boxed must bind the backend"
+        );
+    }
+}

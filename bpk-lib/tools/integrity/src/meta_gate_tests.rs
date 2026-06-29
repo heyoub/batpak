@@ -774,3 +774,67 @@ fn capability_downgrade_with_full_two_person_approval_passes() {
     evaluate(&diff, &l4_manifest(), &fully_approved_l4())
         .expect("a fully two-person-approved capability downgrade must pass");
 }
+
+#[test]
+fn equal_enforcement_is_not_a_capability_downgrade() {
+    // Identical enforcement on both sides must NOT read as a weakening. The
+    // `<` -> `<=` mutant of the rank comparison would flag this equal-rank cell.
+    let diff = cap_diff(
+        "  - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree] }",
+        "  - { backend: linux, kind: Kill, enforcement: Enforced, evidence: [ProcessTree] }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        !findings
+            .iter()
+            .any(|w| w.detail.contains("enforcement weakened")),
+        "equal enforcement must not read as a downgrade; got {findings:?}"
+    );
+}
+
+#[test]
+fn already_unwitnessed_invariant_is_not_un_proved() {
+    // witnessed:false -> false is not a regression. The `&&` -> `||` mutant in the
+    // witness check would flag any cell that is not currently `true`.
+    let diff = cap_diff(
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: false }",
+        "  - { id: INV-HASH-CHAIN-INTEGRITY, witnessed: false }",
+    );
+    let findings = classify_weakening(&diff, &l4_manifest());
+    assert!(
+        !findings
+            .iter()
+            .any(|w| w.detail.contains("witness un-proved")),
+        "an already-unwitnessed invariant must not read as un-proved; got {findings:?}"
+    );
+}
+
+#[test]
+fn is_raw_regex_list_element_classifies_entries() {
+    // Each case pins a value the operator/constant mutants would flip:
+    //   - `true` body mutant: the negative cases must stay false;
+    //   - 625 `&&`->`||`: `abc",` (ends like an r" element but is not r-prefixed);
+    //   - 626 `&&`->`||`: `foo"#` (ends like an r#" element but is not prefixed);
+    //   - 626 inner `||`->`&&`: the r#" positives end with only one of the two suffixes.
+    let cases: &[(&str, bool)] = &[
+        ("r\"pattern\",", true),
+        ("r\"pattern\"", true),
+        ("r#\"pattern\"#,", true),
+        ("r#\"pattern\"#", true),
+        ("// r\"comment\",", false),
+        ("const FOO = r\"y\";", false),
+        ("plain text", false),
+        ("abc\",", false),
+        ("foo\"#", false),
+    ];
+    let mut wrong: Vec<String> = Vec::new();
+    for (input, expected) in cases {
+        if is_raw_regex_list_element(input) != *expected {
+            wrong.push(format!("{input:?} (expected {expected})"));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "misclassified raw-regex elements: {wrong:?}"
+    );
+}

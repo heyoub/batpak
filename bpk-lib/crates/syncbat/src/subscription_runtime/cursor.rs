@@ -816,3 +816,53 @@ pub fn receipt_stream_receipt_kind_hash(receipt_kind: &str) -> [u8; 16] {
         receipt_kind.as_bytes(),
     )
 }
+
+#[cfg(test)]
+mod cursor_helper_tests {
+    use super::{
+        operation_status_subscription_id_hash, projection_subscription_id_hash,
+        receipt_stream_subscription_id_hash, subscription_id_hash, EventStreamCursorV1,
+        ReceiptStreamCursorV1, SubscriptionRuntimeError,
+    };
+
+    #[test]
+    fn event_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
+        // Beginning cursor (kind byte 0x00) with hlc_wall_ms != 0 but global_sequence == 0.
+        // Real `||` rejects when either numeric field is nonzero; a `&&` mutant would accept.
+        let mut bytes = EventStreamCursorV1::beginning("sub-a", 3).encode();
+        bytes[24..32].copy_from_slice(&7_u64.to_be_bytes());
+        assert!(matches!(
+            EventStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn receipt_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
+        let mut bytes = ReceiptStreamCursorV1::beginning("sub-a", "kind-a").encode();
+        bytes[40..48].copy_from_slice(&7_u64.to_be_bytes());
+        assert!(matches!(
+            ReceiptStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn subscription_id_hashes_are_input_dependent_and_nonconstant() {
+        let pairs = [
+            subscription_id_hash("alpha"),
+            subscription_id_hash("beta"),
+            projection_subscription_id_hash("alpha"),
+            projection_subscription_id_hash("beta"),
+            operation_status_subscription_id_hash("alpha"),
+            operation_status_subscription_id_hash("beta"),
+            receipt_stream_subscription_id_hash("alpha"),
+            receipt_stream_subscription_id_hash("beta"),
+        ];
+        for chunk in pairs.chunks_exact(2) {
+            assert_ne!(chunk[0], chunk[1]);
+            assert_ne!(chunk[0], [0_u8; 16]);
+            assert_ne!(chunk[0], [1_u8; 16]);
+        }
+    }
+}

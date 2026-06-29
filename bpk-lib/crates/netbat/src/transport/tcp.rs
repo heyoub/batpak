@@ -515,6 +515,45 @@ mod tests {
     }
 
     #[test]
+    fn merge_tcp_serve_stats_sums_connection_io_failures() {
+        // KILLS mutants at tcp.rs:336 (`+=` -> `*=`/`-=` on
+        // connection_io_failures). With `*=` the merged total stays 0; with
+        // `-=` it underflows. Only real addition yields 5.
+        let mut total = TcpServeStats::default();
+        let partial = TcpServeStats {
+            connection_io_failures: 5,
+            ..Default::default()
+        };
+        merge_tcp_serve_stats(&mut total, partial);
+        assert_eq!(total.connection_io_failures, 5);
+    }
+
+    #[test]
+    fn record_request_failure_counts_malformed_stream_frame_as_malformed() {
+        // KILLS mutants at tcp.rs:443 (`+=` -> `*=`/`-=` on malformed_requests
+        // in the MalformedStreamFrame arm).
+        let mut stats = TcpServeStats::default();
+        record_request_failure(
+            &mut stats,
+            &NetbatError::MalformedStreamFrame {
+                reason: "bad stream frame",
+            },
+        );
+        assert_eq!(stats.malformed_requests, 1);
+        assert_eq!(stats.limit_failures, 0);
+    }
+
+    #[test]
+    fn record_request_failure_counts_stream_limit_as_limit_failure() {
+        // KILLS mutants at tcp.rs:447 (`+=` -> `*=`/`-=` on limit_failures in
+        // the stream-limit arm covering CursorTooLarge and friends).
+        let mut stats = TcpServeStats::default();
+        record_request_failure(&mut stats, &NetbatError::CursorTooLarge { max: 1 });
+        assert_eq!(stats.limit_failures, 1);
+        assert_eq!(stats.malformed_requests, 0);
+    }
+
+    #[test]
     fn peer_io_failure_does_not_propagate_from_connection() {
         // REGRESSION: previously, a client that sent a valid request and
         // then RST/closed before the server's write_all completed would

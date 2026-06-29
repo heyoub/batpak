@@ -240,7 +240,7 @@ fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{check, doc_hidden_public_names};
+    use super::{check, check_doc_hidden_public_surface, doc_hidden_public_names};
     use crate::source_cache::SourceCache;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -298,6 +298,36 @@ mod tests {
         assert!(
             err.to_string().contains("WidgetProbe")
                 && err.to_string().contains("has no test reference"),
+            "{err:?}"
+        );
+
+        fs::remove_dir_all(repo).expect("remove temp repo");
+    }
+
+    /// END-TO-END RED FIXTURE for the doc-hidden surface gate: a non-allowlisted
+    /// `#[doc(hidden)] pub` item must make `check_doc_hidden_public_surface(..)`
+    /// fail, while a tree with no hidden public items passes. Both halves run so
+    /// the `-> Ok(())` mutant of the gate is caught (it would pass the RED half).
+    #[test]
+    fn doc_hidden_surface_rejects_unexpected_hidden_item() {
+        let repo = temp_repo("doc-hidden");
+        // GREEN: a plain pub item (no doc(hidden)) passes.
+        write_file(&repo, "crates/core/src/clean.rs", "pub struct Clean;\n");
+        let mut cache = SourceCache::new(&repo);
+        check_doc_hidden_public_surface(&repo, &mut cache)
+            .expect("a source tree with no hidden public items passes");
+
+        // RED: a non-allowlisted #[doc(hidden)] pub item is flagged.
+        write_file(
+            &repo,
+            "crates/core/src/sneaky.rs",
+            "#[doc(hidden)]\npub struct Sneaky;\n",
+        );
+        let mut cache = SourceCache::new(&repo);
+        let err = check_doc_hidden_public_surface(&repo, &mut cache)
+            .expect_err("an unexpected doc-hidden public item must be rejected");
+        assert!(
+            err.to_string().contains("Sneaky") && err.to_string().contains("doc(hidden)"),
             "{err:?}"
         );
 

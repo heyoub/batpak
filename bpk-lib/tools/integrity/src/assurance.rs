@@ -629,6 +629,75 @@ mod tests {
         check(&repo()).expect("assurance::check must be green on the clean tree");
     }
 
+    #[test]
+    fn production_rel_paths_lists_real_sources() {
+        let paths = production_rel_paths(&repo()).expect("enumerate production rel paths");
+        assert!(!paths.is_empty(), "production surface must be non-empty");
+        assert!(
+            paths.iter().any(|p| p == "crates/core/src/lib.rs"),
+            "must include the core lib root: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn derived_l1_files_are_unmatched_production_files() {
+        let repo = repo();
+        // With NO manifest entries, every production file is derived-L1.
+        let all_derived = derived_l1_files(&repo, &[]).expect("derive with empty manifest");
+        assert!(all_derived.len() > 1, "empty manifest derives many files");
+        assert!(
+            all_derived.iter().any(|p| p == "crates/core/src/lib.rs"),
+            "an unmatched production file must be derived: {all_derived:?}"
+        );
+        assert!(
+            !all_derived.iter().any(|p| p == "xyzzy" || p.is_empty()),
+            "the derived list must be real paths, not placeholders: {all_derived:?}"
+        );
+
+        // A manifest-declared L4 seam file is NOT derived (it matched a glob, so
+        // `!entry_matches_path && matches_derived` excludes it; the `||` mutant
+        // would re-include it).
+        let entries = load_manifest(&repo).expect("load manifest");
+        let derived = derived_l1_files(&repo, &entries).expect("derive with real manifest");
+        assert!(
+            !derived.iter().any(|p| p == "crates/core/src/store/gate.rs"),
+            "a manifest-declared seam file must be excluded from derived-L1: {derived:?}"
+        );
+    }
+
+    #[test]
+    fn declared_files_counts_manifest_matches() {
+        let repo = repo();
+        let entries = load_manifest(&repo).expect("load manifest");
+        let declared = declared_files(&repo, &entries).expect("count declared files");
+        assert!(
+            declared > 1,
+            "the committed manifest declares many files, got {declared}"
+        );
+    }
+
+    #[test]
+    fn root_resolution_failure_propagates() {
+        // A root with no Cargo workspace / manifest makes the production-root
+        // derivation and manifest load error; both entry points must surface it.
+        let bogus = std::env::temp_dir().join(format!(
+            "batpak-assurance-bogus-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(
+            unleveled_files(&bogus, &[]).is_err(),
+            "unleveled_files must surface a bad production root"
+        );
+        assert!(
+            check(&bogus).is_err(),
+            "check must surface a missing manifest"
+        );
+    }
+
     // RED fixture (a): a seam file dropped from every L3/L4 glob → lockstep Err.
     // Model: the manifest omits the `frontier-append-gate` glob entirely, so a
     // critical seam file is no longer covered by any L3/L4 entry.

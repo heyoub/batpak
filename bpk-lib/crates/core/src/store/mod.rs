@@ -382,3 +382,60 @@ impl Store<Open> {
         // `state.0` then drops inertly.
     }
 }
+
+#[cfg(all(test, feature = "dangerous-test-hooks"))]
+mod writer_queue_len_tests {
+    //! Pins `<Open as StoreState>::writer_queue_len` through the public
+    //! `diagnostics()` surface. A cooperative store does not drain its command
+    //! queue until pumped, so several un-awaited `submit`s leave a known,
+    //! non-trivial backlog — catching the `None`, `Some(0)`, and `Some(1)`
+    //! constant mutants of the `Open` impl.
+    use crate::coordinate::Coordinate;
+    use crate::event::EventKind;
+    use crate::store::{Store, StoreConfig};
+
+    #[test]
+    fn open_diagnostics_reports_the_live_writer_backlog_and_capacity() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = StoreConfig::new(dir.path()).with_writer_channel_capacity(32);
+        let store = Store::open_cooperative(config).expect("open cooperative store");
+        let coord = Coordinate::new("entity:queue-len", "scope:mutation").expect("coord");
+
+        // Submit without awaiting: cooperative mode does not pump here, so each
+        // command stays queued in the writer mailbox.
+        let mut tickets = Vec::new();
+        for n in 0..4u32 {
+            tickets.push(
+                store
+                    .submit(&coord, EventKind::DATA, &serde_json::json!({ "n": n }))
+                    .expect("submit"),
+            );
+        }
+
+        let pressure = store.diagnostics().writer_pressure;
+        let mut failures: Vec<String> = Vec::new();
+        if pressure.queue_len < 2 {
+            failures.push(format!(
+                "Open writer_queue_len must reflect the real backlog (>=2 after 4 un-awaited \
+                 submits), got {}",
+                pressure.queue_len
+            ));
+        }
+        if pressure.capacity != 32 {
+            failures.push(format!(
+                "Open writer pressure capacity must be the configured 32 (None mutant would \
+                 report 0), got {}",
+                pressure.capacity
+            ));
+        }
+        assert!(
+            failures.is_empty(),
+            "writer pressure mismatches: {failures:?}"
+        );
+
+        // Drain inline and drop inertly — no Shutdown drain (which would deadlock
+        // a cooperative store with a backlog and no pumping thread).
+        drop(tickets);
+        store.abandon_without_shutdown();
+    }
+}
