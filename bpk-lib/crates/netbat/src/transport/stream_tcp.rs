@@ -161,11 +161,11 @@ pub fn serve_tcp_subscription_listener(
                     Err(error) => return Err(error),
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                thread::sleep(config.idle_sleep);
-            }
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(error.into()),
+            Err(error) => match classify_accept_error(error.kind()) {
+                AcceptError::WouldBlock => thread::sleep(config.idle_sleep),
+                AcceptError::Interrupted => {}
+                AcceptError::Fatal => return Err(error.into()),
+            },
         }
     }
     stats.shutdown_requested = shutdown.is_shutdown();
@@ -365,6 +365,33 @@ fn read_control_loop(
     Ok(())
 }
 
+/// How the accept loop reacts to a failed `TcpListener::accept()`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AcceptError {
+    /// Nonblocking listener with no pending connection: sleep, then retry.
+    WouldBlock,
+    /// Syscall interrupted by a signal (EINTR): retry immediately.
+    Interrupted,
+    /// Unrecoverable accept failure: surface to the caller.
+    Fatal,
+}
+
+/// Classify an `accept()` error kind into the loop's reaction.
+///
+/// Extracted as a pure seam because the `Interrupted` and `Fatal` arms cannot
+/// be driven through a real `std::net::TcpListener` (you cannot make `accept()`
+/// return EINTR or an arbitrary fatal kind on demand); the loop's `WouldBlock`
+/// path is additionally covered end-to-end by the nonblocking listener tests.
+fn classify_accept_error(kind: io::ErrorKind) -> AcceptError {
+    if kind == io::ErrorKind::WouldBlock {
+        AcceptError::WouldBlock
+    } else if kind == io::ErrorKind::Interrupted {
+        AcceptError::Interrupted
+    } else {
+        AcceptError::Fatal
+    }
+}
+
 fn timeout_kind(kind: io::ErrorKind) -> bool {
     matches!(kind, io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)
 }
@@ -541,6 +568,33 @@ mod tests {
         assert_eq!(
             maybe_cursor_bytes(MaybeCursor::Present(CursorBytes::new(vec![7, 9, 3]))),
             Some(vec![7, 9, 3])
+        );
+    }
+
+    #[test]
+    fn classify_accept_error_maps_each_kind() {
+        // KILLS the accept-loop classification at the listener `accept()` site
+        // (formerly the WouldBlock/Interrupted match guards): WouldBlock ->
+        // retry-after-sleep, Interrupted (EINTR) -> retry-immediately, every
+        // other kind -> fatal. A real TcpListener cannot be coerced into
+        // returning Interrupted or an arbitrary fatal kind on demand, so this
+        // pure classifier is the only deterministic seam. Asserting all three
+        // distinct outcomes kills any constant-return or arm-swap mutation.
+        assert_eq!(
+            classify_accept_error(io::ErrorKind::WouldBlock),
+            AcceptError::WouldBlock
+        );
+        assert_eq!(
+            classify_accept_error(io::ErrorKind::Interrupted),
+            AcceptError::Interrupted
+        );
+        assert_eq!(
+            classify_accept_error(io::ErrorKind::BrokenPipe),
+            AcceptError::Fatal
+        );
+        assert_eq!(
+            classify_accept_error(io::ErrorKind::ConnectionReset),
+            AcceptError::Fatal
         );
     }
 

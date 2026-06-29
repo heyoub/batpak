@@ -111,6 +111,20 @@ mod tests {
     }
 
     #[test]
+    fn process_boot_ns_is_the_fixed_simclock_marker() {
+        // `process_boot_ns -> 1` would collapse the stable, distinctive sim boot
+        // marker to a trivial constant. It must be the fixed "SIMCLOCK" ASCII value
+        // so cached monotonic comparisons stay consistent and a sim value is never
+        // mistaken for a real (wall-derived) one.
+        let c = SimClock::new();
+        assert_eq!(
+            c.process_boot_ns(),
+            0x53_49_4D_43_4C_4F_43_4B,
+            "SimClock::process_boot_ns must return the fixed SIMCLOCK marker, not 1"
+        );
+    }
+
+    #[test]
     fn monotonic_stream_tracks_microseconds() {
         let c = SimClock::new();
         c.advance_us(3);

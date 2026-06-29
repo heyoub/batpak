@@ -110,6 +110,23 @@ mod tests {
     };
 
     #[test]
+    fn timeout_accessor_returns_the_configured_wait_not_default() {
+        // `DurabilityGate::timeout -> Default::default()` would always report a
+        // zero Duration; the accessor must echo the configured wait.
+        let gate = DurabilityGate::new(WatermarkKind::Durable, Duration::from_millis(250));
+        assert_eq!(
+            gate.timeout(),
+            Duration::from_millis(250),
+            "DurabilityGate::timeout must return the configured wait, not Duration::default()"
+        );
+        assert_ne!(
+            gate.timeout(),
+            Duration::default(),
+            "a non-zero configured timeout must never read back as the default zero"
+        );
+    }
+
+    #[test]
     fn gate_wait_measurement_excludes_receipt_lookup_work() {
         let lookup_complete = Arc::new(AtomicBool::new(false));
         let wait_saw_lookup_complete = Arc::clone(&lookup_complete);

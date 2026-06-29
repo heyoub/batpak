@@ -31,6 +31,10 @@ pub(super) fn read_layout<R: Read + Seek>(
     segment_id: u64,
 ) -> Result<Option<FooterLayout>, StoreError> {
     let file_len = reader.seek(SeekFrom::End(0)).map_err(StoreError::Io)?;
+    // STRICT `<`: a file of EXACTLY `TRAILER_SIZE` bytes still contains a full
+    // 16-byte trailer and must be parsed (then rejected as corrupt because there
+    // is no room for entries/CRC). The `< -> <=` mutant would short-circuit it as
+    // "no footer" — see `read_layout_parses_a_trailer_only_file_then_rejects_it`.
     if file_len < TRAILER_SIZE {
         return Ok(None);
     }
@@ -277,4 +281,35 @@ fn read_trailer_u32(bytes: &[u8], segment_id: u64) -> Result<u32, StoreError> {
         reason: "trailer truncated: entry_count bytes not readable".into(),
     })?;
     Ok(u32::from_le_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_layout, SIDX_MAGIC};
+    use std::io::Cursor;
+
+    #[test]
+    fn read_layout_parses_a_trailer_only_file_then_rejects_it() {
+        // A file of EXACTLY TRAILER_SIZE (16) bytes carries a full trailer but no
+        // room for the entries block + CRC, so real `read_layout` parses the
+        // trailer and then fails the geometry check with CorruptSegment. The
+        // `< -> <=` mutant treats `file_len == TRAILER_SIZE` as "no footer" and
+        // returns Ok(None) — so asserting the result is an Err kills it.
+        let mut buf = Vec::with_capacity(16);
+        buf.extend_from_slice(&0u64.to_le_bytes()); // string_table_offset = 0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // entry_count = 0
+        buf.extend_from_slice(SIDX_MAGIC); // valid SDX3 magic (total = 16 bytes)
+        assert_eq!(
+            buf.len(),
+            16,
+            "trailer-only fixture must be exactly TRAILER_SIZE"
+        );
+
+        let is_err = read_layout(&mut Cursor::new(buf), 0).is_err();
+        assert!(
+            is_err,
+            "a magic-bearing file of exactly TRAILER_SIZE must be parsed and rejected as \
+             corrupt (no room for entries/CRC), not short-circuited as Ok(None)"
+        );
+    }
 }

@@ -378,3 +378,48 @@ fn report_body_hash(body: &ReadWalkReportBody) -> Result<ReadWalkHash, ReadWalkR
         message,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{source_refs_from_region, ReadWalkSourceRef};
+    use crate::coordinate::{ClockRange, EventCategory, Region};
+
+    #[test]
+    fn source_refs_capture_every_active_region_selector() {
+        // `source_refs_from_region -> vec![]` would erase the provenance selectors
+        // from every read-walk evidence report. A region carrying an entity prefix,
+        // a fact category, and a clock range must surface all three refs.
+        let region = Region::entity("entity:rw")
+            .with_fact_category(EventCategory::new(7).expect("valid category"))
+            .with_clock_range(ClockRange::new(3, 9).expect("valid range"));
+
+        let refs = source_refs_from_region(&region);
+
+        let mut failures: Vec<String> = Vec::new();
+        if !refs.iter().any(
+            |r| matches!(r, ReadWalkSourceRef::EntityPrefix { prefix } if prefix == "entity:rw"),
+        ) {
+            failures.push("missing EntityPrefix ref".into());
+        }
+        if !refs
+            .iter()
+            .any(|r| matches!(r, ReadWalkSourceRef::FactCategory { category } if *category == 7))
+        {
+            failures.push("missing FactCategory ref".into());
+        }
+        if !refs.iter().any(|r| {
+            matches!(
+                r,
+                ReadWalkSourceRef::ClockRange { start_clock, end_clock }
+                    if *start_clock == 3 && *end_clock == 9
+            )
+        }) {
+            failures.push("missing ClockRange ref".into());
+        }
+        assert!(
+            failures.is_empty(),
+            "source_refs_from_region must capture every active selector (the `-> vec![]` \
+             mutant returns none): {failures:?}"
+        );
+    }
+}

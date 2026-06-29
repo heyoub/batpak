@@ -236,6 +236,13 @@ impl<'a> RestorePlanner<'a> {
         let tail_count = tail_entries.len();
         entries.extend(tail_entries);
         entries.sort_by_key(|entry| entry.global_sequence);
+        // EQUIVALENT-MUTANT (`tail_count > 0` -> `>= 0`): this only adds one extra
+        // restore CHUNK when tail entries were replayed. `chunk_count` is purely an
+        // internal parallel-decode partition hint — `RoutingSummary::from_entries`
+        // splits the SAME entries into that many contiguous pieces (skipping empties)
+        // and `restore_chunk_ranges` re-derives/validates them — so a `>= 0` (always
+        // +1) merely changes the partition granularity. The restored index content,
+        // ordering, and every downstream query result are byte-identical.
         let chunk_count = usize::try_from(input_routing.chunk_count)
             .unwrap_or(1)
             .max(1)

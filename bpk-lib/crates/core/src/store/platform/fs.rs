@@ -488,6 +488,10 @@ impl StoreFs for RealFs {
     }
 }
 
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[path = "fs_reflink_mutation_tests.rs"]
+mod fs_reflink_mutation_tests;
+
 #[cfg(test)]
 mod tests {
     const UNROUTED_STORE_FS_TAIL_OPS: &[&str] = &[

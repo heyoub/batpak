@@ -174,6 +174,13 @@ fn read_frame_event_hash<R: Read + Seek>(
     frame_size: u64,
 ) -> Option<[u8; 32]> {
     let total = usize::try_from(frame_size).ok()?;
+    // EQUIVALENT-MUTANT (`< 8` -> `== 8`): this guard rejects frames too small to
+    // hold the 8-byte [len][crc] header. For every `total <= 8` both forms yield
+    // `None` — sizes 1..8 fall through to `frame_decode`, which returns
+    // `Err(TooShort)`/`Err(Truncated)` on a sub-header buffer (-> `None`), and a
+    // bare 8-byte header decodes to an empty payload that fails to deserialize
+    // (-> `None`); for `total > 8` neither form short-circuits. So `< 8` and
+    // `== 8` are behaviorally indistinguishable on this Option-returning seam.
     if total < 8 {
         return None;
     }

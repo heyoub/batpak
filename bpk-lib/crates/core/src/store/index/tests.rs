@@ -29,6 +29,45 @@ fn make_entry(seq: u64, entity: &str, scope: &str) -> IndexEntry {
 }
 
 #[test]
+fn hlc_for_global_sequence_matches_the_queried_sequence_exactly() {
+    // `find(... global_sequence == g)` -> `!=` would return the HLC of some OTHER
+    // entry. `make_entry` sets `wall_ms == seq`, so the entry for seq=2 is the only
+    // one whose wall_ms is 2; an inverted match resolves a different entry whose
+    // wall_ms is never 2.
+    let index = StoreIndex::new();
+    let entity_id = index.interner.intern("entity:hlc").expect("intern");
+    let scope_id = index.interner.intern("scope:hlc").expect("intern");
+    for seq in 0..3 {
+        let mut entry = make_entry(seq, "entity:hlc", "scope:hlc");
+        entry.entity_id = entity_id;
+        entry.scope_id = scope_id;
+        index.insert(entry);
+    }
+
+    let point = index
+        .hlc_for_global_sequence(2)
+        .expect("global_sequence 2 must resolve to an HlcPoint");
+    let mut failures: Vec<String> = Vec::new();
+    if point.global_sequence != 2 {
+        failures.push(format!(
+            "returned HlcPoint must name the queried sequence 2, got {}",
+            point.global_sequence
+        ));
+    }
+    if point.wall_ms != 2 {
+        failures.push(format!(
+            "HLC must come from the entry whose global_sequence == 2 (wall_ms==seq); an \
+             inverted `!=` match returns a different entry's wall_ms, got {}",
+            point.wall_ms
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "hlc_for_global_sequence mismatches: {failures:?}"
+    );
+}
+
+#[test]
 fn clock_key_orders_by_wall_then_clock_then_uuid() {
     let mut keys = [
         ClockKey {

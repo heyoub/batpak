@@ -249,9 +249,12 @@ fn serve_subscription_stream_counts_malformed_pre_subscribe(
 fn listener_serves_one_connection_then_exits_on_budget() -> Result<(), Box<dyn std::error::Error>> {
     // KILLS stream_tcp.rs:150 (fn -> Ok(Default)), 155 (`+=` on
     // accepted_connections), 152 (the `while` guard: delete `!`, `&&` -> `||`,
-    // `<` -> `<=`/`==`/`>`), 181 (connection fn -> Ok(Default)), and 164
-    // (WouldBlock guard -> false / `==` -> `!=`). The 30ms pre-connect delay
-    // guarantees the nonblocking accept loop spins on WouldBlock first.
+    // `<` -> `<=`/`==`/`>`), 181 (connection fn -> Ok(Default)), and the
+    // accept-error classifier's WouldBlock/Fatal arms (a `classify_accept_error`
+    // that returned Fatal would surface the first pre-connect WouldBlock as an
+    // error). The 30ms pre-connect delay guarantees the nonblocking accept loop
+    // spins on WouldBlock first. The classifier's Interrupted arm and the full
+    // mapping are pinned by `classify_accept_error_maps_each_kind` (inline).
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let mut config = nb::TcpSubscriptionServerConfig::default();

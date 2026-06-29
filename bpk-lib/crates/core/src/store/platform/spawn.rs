@@ -251,6 +251,45 @@ mod tests {
     }
 
     #[test]
+    fn is_finished_flips_to_true_after_the_body_completes() {
+        use std::time::{Duration, Instant};
+        // `ThreadJob::is_finished -> false` would make a completed job report as
+        // still-running forever, so the writer's `fail_if_exited` crash detector
+        // could never observe a dead writer thread. A body that returns
+        // immediately must drive `is_finished()` to `true` (and `status()` to
+        // `Finished`) within a bounded wait.
+        let spawner = ThreadSpawn;
+        let handle: Box<dyn JobHandle> = spawner
+            .spawn(
+                "thread-spawn-is-finished-proof".to_string(),
+                None,
+                Box::new(|| {}),
+            )
+            .expect("spawn must succeed");
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut observed_finished = false;
+        while Instant::now() < deadline {
+            if handle.is_finished() {
+                observed_finished = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            observed_finished,
+            "PROPERTY: is_finished must report true once the body completes (the \
+             `-> false` mutant never does)"
+        );
+        assert_eq!(
+            handle.status(),
+            JobStatus::Finished,
+            "PROPERTY: a completed body's status is Finished, defaulted from is_finished"
+        );
+        handle.join().expect("completed body joins Ok");
+    }
+
+    #[test]
     fn spawn_error_is_a_typed_io_failure_preserving_its_source() {
         // Name the typed spawn error; its Display wraps the io source.
         let err = SpawnError::ThreadCreation(std::io::Error::other("simulated"));
