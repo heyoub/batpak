@@ -142,9 +142,22 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
         clock: &clock,
         fault_injector: NO_FAULT_INJECTOR,
     };
-    let (entries, interner_strings) = sample_index_entries(0, 0);
+    // DISCRIMINATING FIXTURE: use ENOUGH entries that a +1 to `chunk_count`
+    // produces an observably different routing. With 0 entries the chunk
+    // partition is always empty (empty chunks are skipped), so `chunk_count`
+    // of 1 vs 2 both collapse to 0 — a degenerate case that CANNOT catch the
+    // `tail_count > 0` -> `>= 0` mutant. With 4 entries and an input routing
+    // of 1 chunk, the empty-tail path must preserve `chunk_count == 1`, whereas
+    // the mutant (always +1) re-partitions into 2 non-empty chunks of 2.
+    // `receipt_extensions_hydrated: true` lets the entries skip frame backing
+    // (the planner does not re-read receipts), so no segments are required.
+    let (entries, interner_strings) = sample_index_entries(4, 0);
     let routing = RoutingSummary::from_sorted_entries(&entries, 1);
     let expected_chunk_count = routing.chunk_count;
+    assert_eq!(
+        expected_chunk_count, 1,
+        "SANITY: the fixture must start from a single-chunk routing so a +1 is observable as 2"
+    );
 
     let plan = planner
         .build_snapshot_plan(
@@ -160,7 +173,7 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
                 routing,
                 reopen_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
                 persisted_cumulative_reserved_kind_fallbacks: ReservedKindFallbackStats::default(),
-                receipt_extensions_hydrated: false,
+                receipt_extensions_hydrated: true,
                 snapshot_loads: SnapshotLoadDiagnostics::default(),
             },
         )
@@ -171,9 +184,13 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
         "SANITY: empty temp dir should produce no tail replay"
     );
     assert_eq!(
+        plan.restored_entries, 4,
+        "SANITY: all four snapshot entries must survive into the plan"
+    );
+    assert_eq!(
             plan.routing.chunk_count,
             expected_chunk_count,
-            "PROPERTY: a snapshot plan with no tail entries must preserve the existing routing chunk count instead of synthesizing an extra chunk"
+            "PROPERTY: a snapshot plan with no tail entries must preserve the existing routing chunk count (1) instead of synthesizing an extra chunk (2 under `tail_count >= 0`)"
         );
 }
 

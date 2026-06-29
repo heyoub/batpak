@@ -236,13 +236,18 @@ impl<'a> RestorePlanner<'a> {
         let tail_count = tail_entries.len();
         entries.extend(tail_entries);
         entries.sort_by_key(|entry| entry.global_sequence);
-        // EQUIVALENT-MUTANT (`tail_count > 0` -> `>= 0`): this only adds one extra
-        // restore CHUNK when tail entries were replayed. `chunk_count` is purely an
-        // internal parallel-decode partition hint — `RoutingSummary::from_entries`
-        // splits the SAME entries into that many contiguous pieces (skipping empties)
-        // and `restore_chunk_ranges` re-derives/validates them — so a `>= 0` (always
-        // +1) merely changes the partition granularity. The restored index content,
-        // ordering, and every downstream query result are byte-identical.
+        // Tail replay adds exactly ONE extra restore CHUNK: the snapshot's stored
+        // partitioning gains a chunk for the replayed tail (`tail_count > 0`), and
+        // when there is no tail the existing `input_routing.chunk_count` is preserved
+        // verbatim. This is NOT a free `tail_count >= 0` (always +1): once the merged
+        // `entries` outnumber the partitions, `RoutingSummary::from_sorted_entries`
+        // emits one non-empty chunk per partition, so a spurious +1 at `tail_count ==
+        // 0` yields a routing with N+1 chunks instead of N — an observable change in
+        // `RoutingSummary::{chunk_count, chunks}` that propagates into the restored
+        // index's scan partitioning. Guarded against the `>` -> `>=` mutant by
+        // `build_snapshot_plan_keeps_chunk_count_when_tail_is_empty` (empty tail must
+        // keep N) paired with `build_snapshot_plan_adds_chunk_when_tail_is_present`
+        // (non-empty tail must add exactly one).
         let chunk_count = usize::try_from(input_routing.chunk_count)
             .unwrap_or(1)
             .max(1)
