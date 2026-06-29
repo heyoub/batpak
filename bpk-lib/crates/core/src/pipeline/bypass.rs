@@ -100,3 +100,33 @@ impl<T> BypassReceipt<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::BypassReceipt;
+
+    #[test]
+    fn approved_by_reports_the_recorded_approver_not_a_constant() {
+        // `approved_by -> Some("xyzzy")` would forge an approver onto every
+        // receipt. A receipt built without one must report None, and one built
+        // with `with_approved_by` must echo exactly that approver.
+        let bare = BypassReceipt {
+            payload: 7u32,
+            reason: "test-reason",
+            justification: "test-justification",
+            approved_by: None,
+        };
+        assert_eq!(
+            bare.approved_by(),
+            None,
+            "a receipt with no approver must report None, not a hardcoded Some(_)"
+        );
+
+        let signed = bare.with_approved_by("operator:alice");
+        assert_eq!(
+            signed.approved_by(),
+            Some("operator:alice"),
+            "approved_by must return the recorded approver, not a constant"
+        );
+    }
+}

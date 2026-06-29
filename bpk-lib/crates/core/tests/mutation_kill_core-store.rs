@@ -412,3 +412,31 @@ fn cold_start_scan_frame_injection_fires_during_rebuild() {
          the -> Ok(()) mutant skips emitting them so open would wrongly succeed"
     );
 }
+
+// ─── lifecycle wait_for_emitted blocks on an unmet emitted frontier ───────────
+
+/// `Store::wait_for_emitted` must actually wait on the emitted watermark. The
+/// `-> Ok(())` mutant returns success without waiting, so a point the emitted
+/// frontier can never reach within the timeout would wrongly report Ok.
+#[test]
+fn wait_for_emitted_times_out_when_the_emitted_frontier_is_behind() {
+    use batpak::store::HlcPoint;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(StoreConfig::new(dir.path())).expect("open store");
+
+    // A point far beyond any sequence the emitted frontier of a fresh, reactor-less
+    // store could reach: the real wait must exhaust its (short) timeout.
+    let unreachable = HlcPoint {
+        wall_ms: u64::MAX,
+        global_sequence: u64::MAX,
+    };
+    let result = store.wait_for_emitted(unreachable, Duration::from_millis(50));
+    assert!(
+        matches!(result, Err(StoreError::WaitTimeout { .. })),
+        "wait_for_emitted must time out waiting for an unreachable emitted point (the \
+         -> Ok(()) mutant returns Ok without waiting); got {result:?}"
+    );
+
+    store.close().expect("close");
+}

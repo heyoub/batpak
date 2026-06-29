@@ -451,6 +451,14 @@ pub(crate) fn check_seam_registry_lockstep(entries: &[SeamRegistryEntry]) -> Res
 /// List production `.rs` files matched by no manifest glob and not under any
 /// derived production root. Any non-empty result is a hard failure: production
 /// code must be explicitly classified (manifest glob or derived L1 root).
+///
+/// EQUIVALENT MUTANT (`delete !` on the `!entry_matches_path` term, line 459):
+/// every `rel` here comes from `production_rel_paths`, which only walks files
+/// *under* a production root, so `matches_derived_production_root` is always true
+/// and `!matches_derived` always false. The `&&` is therefore unconditionally
+/// false (result always empty) no matter what the first term is — no input can
+/// distinguish dropping the leading `!`. The `-> Ok(vec![])` body mutant IS killed
+/// (it strips the `?` error path that `root_resolution_failure_propagates` asserts).
 pub(crate) fn unleveled_files(repo_root: &Path, entries: &[AssuranceEntry]) -> Result<Vec<String>> {
     let root_rels = production_root_rels(repo_root)?;
     let mut unleveled: Vec<String> = production_rel_paths(repo_root)?

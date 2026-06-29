@@ -143,3 +143,35 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
     entries.sort_by_key(|(segment_id, _)| *segment_id);
     Ok(entries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{clear_pending_compaction, pending_compaction_path};
+    use crate::store::StoreError;
+
+    #[test]
+    fn clear_pending_compaction_propagates_non_not_found_errors() {
+        // The match guard `err.kind() == NotFound` must let real I/O errors
+        // through. Replacing it with `true` would swallow EVERY removal failure as
+        // Ok(()). A DIRECTORY at the marker path makes `remove_file` fail with a
+        // non-NotFound error (EISDIR/EPERM), which must surface as Err.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let marker = pending_compaction_path(dir.path());
+        std::fs::create_dir(&marker).expect("create directory at marker path");
+
+        let result = clear_pending_compaction(dir.path());
+        assert!(
+            matches!(result, Err(StoreError::Io(_))),
+            "a non-NotFound removal failure must propagate as Err(Io), not be \
+             swallowed by the NotFound guard; got {result:?}"
+        );
+    }
+
+    #[test]
+    fn clear_pending_compaction_is_ok_when_marker_is_absent() {
+        // The NotFound arm: an absent marker is a clean no-op success — this
+        // anchors that the error-path test above is the discriminating case.
+        let dir = tempfile::tempdir().expect("tempdir");
+        clear_pending_compaction(dir.path()).expect("absent marker clears cleanly");
+    }
+}

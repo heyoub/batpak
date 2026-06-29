@@ -351,3 +351,32 @@ pub fn decode_fork_evidence_wire(bytes: &[u8]) -> Result<ForkReportBody, StoreEr
     }
     Ok(body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_fork_evidence_wire, FORK_EVIDENCE_WIRE_MAGIC};
+    use crate::store::StoreError;
+
+    #[test]
+    fn decode_rejects_a_short_frame_before_reading_its_version() {
+        // The framing guard is `bytes.len() < 12 || magic-mismatch`. Replacing the
+        // `||` with `&&` would require BOTH a short buffer AND a bad magic to
+        // reject, so a too-short buffer that DOES carry the magic would slip past
+        // the length check. We feed exactly that: 10 bytes = magic(6) + a version
+        // field (0xFFFF) far above the supported schema. The real code rejects on
+        // length with Configuration; the `&&` mutant skips the length check and
+        // instead trips the future-version branch — a different error variant.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(FORK_EVIDENCE_WIRE_MAGIC); // 6 bytes
+        bytes.extend_from_slice(&u16::MAX.to_le_bytes()); // version 0xFFFF
+        bytes.extend_from_slice(&[0u8, 0u8]); // pad to len 10 (< 12)
+
+        let err = decode_fork_evidence_wire(&bytes)
+            .expect_err("a 10-byte frame is too short to be a valid fork-evidence wire");
+        assert!(
+            matches!(err, StoreError::Configuration(_)),
+            "a sub-12-byte frame must be rejected on LENGTH as Configuration, not \
+             routed to a later branch; got {err:?}"
+        );
+    }
+}

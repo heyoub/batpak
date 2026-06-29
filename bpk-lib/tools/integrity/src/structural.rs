@@ -1083,6 +1083,14 @@ mod tests {
         fs::remove_dir_all(&repo).expect("remove temp repo");
     }
 
+    // EQUIVALENT / UNKILLABLE MUTANT (`run -> Ok(())`, line 25): `run()` is pure
+    // orchestration over the live repo. It takes no injectable root — it resolves
+    // `repo_root()` from the process CWD and writes receipts into the working tree
+    // — so it cannot be driven over a planted temp tree, and calling it for real
+    // would mutate the repo and run the heavy gate suite. On the committed (green)
+    // tree it returns `Ok(())` anyway, so the mutant is observationally identical.
+    // Every gate `run()` sequences is independently RED-fixture'd: the sub-gate
+    // wrappers below and in structural_tests.rs each fail under their own mutation.
     #[test]
     fn production_surface_wrappers_propagate_root_failure() {
         // A root with no Cargo workspace makes `production_rust_files` error; every

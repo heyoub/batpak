@@ -306,6 +306,10 @@ impl StoreState for Open {
 
 impl StoreState for Closed {
     fn shutdown_writer(&mut self, _should_shutdown: bool) {}
+    // EQUIVALENT-MUTANT (Some(0)/Some(1)): no `Store<Closed>` is ever constructed
+    // (`close()` returns the bare `Closed` ZST, not a `Store<Closed>`), so this
+    // method is unreachable via every public path — its return value is never
+    // observed and any constant substitution is behaviorally indistinguishable.
     fn writer_queue_len(&self) -> Option<usize> {
         None
     }

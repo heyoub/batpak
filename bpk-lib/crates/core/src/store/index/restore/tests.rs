@@ -65,6 +65,32 @@ fn restore_chunk_ranges_falls_back_for_malformed_chunks() {
 }
 
 #[test]
+fn restore_chunk_ranges_falls_back_on_a_single_violated_condition() {
+    // The fallback guard is `len == 0 || start != expected_start || end > entry_count`.
+    // The existing malformed-chunk test trips TWO conditions at once, so the
+    // `|| -> &&` mutant (between the start-mismatch and out-of-bounds terms) still
+    // falls back. Here a chunk is non-empty AND in-bounds (end == entry_count) but
+    // start-discontinuous, so ONLY the middle condition holds: the real `||` falls
+    // back to even ranges, while the `&&` mutant wrongly accepts the bad chunk.
+    let entries = vec![
+        entry(0, "alpha"),
+        entry(1, "alpha"),
+        entry(2, "beta"),
+        entry(3, "beta"),
+    ];
+    let mut routing = RoutingSummary::from_sorted_entries(&entries, 1);
+    routing.chunks[0].start = 1; // != expected_start (0)
+    routing.chunks[0].len = 3; // end = 1 + 3 = 4 == entry_count (NOT > )
+
+    assert_eq!(
+        restore_chunk_ranges(entries.len(), &routing),
+        vec![(0, 4)],
+        "a start-discontinuous but in-bounds chunk must fall back to even ranges; the \
+         `|| -> &&` mutant would instead accept the bad chunk and yield [(1, 3)]"
+    );
+}
+
+#[test]
 fn routing_summary_entity_run_scan_makes_forward_progress() {
     let entries = vec![
         entry(0, "alpha"),

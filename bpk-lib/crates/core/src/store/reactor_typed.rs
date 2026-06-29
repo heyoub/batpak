@@ -595,6 +595,13 @@ where
                     };
                     let mut batch = ReactionBatch::new();
                     match dispatcher.dispatch(&stored, &mut batch, None) {
+                        // EQUIVALENT-MUTANT (guard -> `true`): replacing the guard
+                        // with `true` only routes an EMPTY batch into the flush arm,
+                        // and `ReactionBatch::flush` early-returns `Ok(Vec::new())`
+                        // for an empty batch (no append), exactly like the `Ok(()) =>
+                        // {}` arm — so the two are behaviorally indistinguishable.
+                        // The `delete !` and `-> false` mutants are killed by
+                        // `lossy_reactor_flushes_a_non_empty_reaction_batch`.
                         Ok(()) if !batch.is_empty() => {
                             use crate::id::EntityIdType;
                             if let Err(error) = batch.flush(

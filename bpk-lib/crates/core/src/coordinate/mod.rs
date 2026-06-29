@@ -528,6 +528,24 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn region_filter_error_display_renders_each_variant_detail() {
+        use super::RegionFilterError;
+        // `<RegionFilterError as Display>::fmt -> Ok(Default::default())` would
+        // write NOTHING, producing an empty string for every variant. Each
+        // variant must render its operative numbers and intent.
+        let inverted = RegionFilterError::InvertedClockRange { start: 9, end: 3 }.to_string();
+        assert!(
+            inverted.contains("clock range start 9") && inverted.contains("end 3"),
+            "InvertedClockRange Display must name its start/end; got {inverted:?}"
+        );
+        let out_of_range = RegionFilterError::CategoryOutOfRange { category: 99 }.to_string();
+        assert!(
+            out_of_range.contains("99") && out_of_range.contains("out of range"),
+            "CategoryOutOfRange Display must name the bad category; got {out_of_range:?}"
+        );
+    }
+
+    #[test]
     fn namespace_prefix_matches_exact_and_descendants() {
         assert!(namespace_prefix_matches("alice", "alice"));
         assert!(namespace_prefix_matches("alice", "alice:child"));
