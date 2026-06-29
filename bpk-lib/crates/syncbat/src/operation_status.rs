@@ -332,5 +332,23 @@ mod event_sourced_mutation_tests {
             !has_open_attempt(&view),
             "equal started and terminal counts mean no open attempt"
         );
+
+        // `failed_count` is also terminal: a started attempt balanced by a
+        // failed fact is not open. If `failed_count` dropped out of the sum,
+        // terminal would be 1 and `2 > 1` would wrongly report open.
+        view.started_count = 2;
+        view.failed_count = 1;
+        assert!(
+            !has_open_attempt(&view),
+            "a failed terminal fact must close the open attempt"
+        );
+
+        // `denied_count` is the third terminal bucket; same reasoning.
+        view.started_count = 3;
+        view.denied_count = 1;
+        assert!(
+            !has_open_attempt(&view),
+            "a denied terminal fact must close the open attempt"
+        );
     }
 }

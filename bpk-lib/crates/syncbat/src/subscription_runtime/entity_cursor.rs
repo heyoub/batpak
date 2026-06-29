@@ -200,12 +200,34 @@ mod entity_cursor_helper_tests {
         entity_stream_subscription_id_hash, EntityStreamCursorV1, SubscriptionRuntimeError,
     };
 
+    // Wire-format offsets of the numeric fields inside an encoded beginning
+    // cursor; named so a future `encode` reordering moves these in lockstep
+    // instead of a bare byte slice silently corrupting the wrong field.
+    const BEGINNING_HLC_WALL_MS_OFFSET: usize = 40;
+    const BEGINNING_GLOBAL_SEQUENCE_OFFSET: usize = 48;
+
+    fn put_u64_be(bytes: &mut [u8], offset: usize, value: u64) {
+        bytes[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+    }
+
     #[test]
     fn entity_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
         // Beginning cursor with hlc_wall_ms != 0 but global_sequence == 0; real `||`
         // rejects, a `&&` mutant would accept.
         let mut bytes = EntityStreamCursorV1::beginning("sub-a", "ent", "scope").encode();
-        bytes[40..48].copy_from_slice(&7_u64.to_be_bytes());
+        put_u64_be(&mut bytes, BEGINNING_HLC_WALL_MS_OFFSET, 7);
+        assert!(matches!(
+            EntityStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn entity_cursor_decode_rejects_beginning_with_nonzero_global_sequence_only() {
+        // Mirror case: hlc_wall_ms == 0, global_sequence != 0. Catches a decoder
+        // that stops validating `global_sequence` while still checking `hlc_wall_ms`.
+        let mut bytes = EntityStreamCursorV1::beginning("sub-a", "ent", "scope").encode();
+        put_u64_be(&mut bytes, BEGINNING_GLOBAL_SEQUENCE_OFFSET, 7);
         assert!(matches!(
             EntityStreamCursorV1::decode(&bytes),
             Err(SubscriptionRuntimeError::CursorInvalid { .. })

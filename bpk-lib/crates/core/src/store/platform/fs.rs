@@ -619,14 +619,17 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn real_fs_sync_parent_dir_surfaces_missing_parent() -> Result<(), Box<dyn Error>> {
         // A path whose parent directory does not exist cannot have its directory
         // entry fsynced; the wrapper must error rather than report success.
         let fs = RealFs;
-        let missing = std::path::Path::new("/batpak-mutation-kill-nonexistent-parent-xyz/leaf");
+        let dir = tempfile::tempdir()?;
+        let missing_parent = dir.path().join("missing-parent");
+        let missing = missing_parent.join("leaf");
         assert!(
-            fs.sync_parent_dir(missing).is_err(),
+            fs.sync_parent_dir(&missing).is_err(),
             "RealFs::sync_parent_dir must surface an error when the parent dir is absent"
         );
         Ok(())

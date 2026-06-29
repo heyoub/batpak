@@ -361,13 +361,16 @@ mod mutation_kill_tests {
         let cursor = Cursor::new(Region::all(), index);
         let epoch = cursor.visibility_epoch();
 
-        let timeout = Duration::from_millis(200);
+        // A 50 ms floor keeps the whole-suite tax low while still proving the
+        // park actually blocked: the `park_for_data -> ()` no-op mutant returns
+        // in ~0 ms, far below the 20 ms lower bound asserted here.
+        let timeout = Duration::from_millis(50);
         let start = Instant::now();
         cursor.park_for_data(epoch, timeout);
         let elapsed = start.elapsed();
 
         assert!(
-            elapsed >= Duration::from_millis(80),
+            elapsed >= Duration::from_millis(20),
             "park_for_data must block for ~timeout when no publish advances the epoch; \
              elapsed only {elapsed:?}"
         );

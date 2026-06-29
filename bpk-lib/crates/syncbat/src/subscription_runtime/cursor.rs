@@ -825,12 +825,37 @@ mod cursor_helper_tests {
         ReceiptStreamCursorV1, SubscriptionRuntimeError,
     };
 
+    // Wire-format offsets of the two numeric fields inside an encoded beginning
+    // cursor. Naming them keeps the byte-slice coupling explicit: if `encode`
+    // ever reorders fields these consts must move with it, instead of a bare
+    // `bytes[24..32]` silently corrupting the wrong field and neutering the test.
+    const EVENT_BEGINNING_HLC_WALL_MS_OFFSET: usize = 24;
+    const EVENT_BEGINNING_GLOBAL_SEQUENCE_OFFSET: usize = 32;
+    const RECEIPT_BEGINNING_HLC_WALL_MS_OFFSET: usize = 40;
+    const RECEIPT_BEGINNING_GLOBAL_SEQUENCE_OFFSET: usize = 48;
+
+    fn put_u64_be(bytes: &mut [u8], offset: usize, value: u64) {
+        bytes[offset..offset + 8].copy_from_slice(&value.to_be_bytes());
+    }
+
     #[test]
     fn event_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
         // Beginning cursor (kind byte 0x00) with hlc_wall_ms != 0 but global_sequence == 0.
         // Real `||` rejects when either numeric field is nonzero; a `&&` mutant would accept.
         let mut bytes = EventStreamCursorV1::beginning("sub-a", 3).encode();
-        bytes[24..32].copy_from_slice(&7_u64.to_be_bytes());
+        put_u64_be(&mut bytes, EVENT_BEGINNING_HLC_WALL_MS_OFFSET, 7);
+        assert!(matches!(
+            EventStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn event_cursor_decode_rejects_beginning_with_nonzero_global_sequence_only() {
+        // Mirror case: hlc_wall_ms == 0, global_sequence != 0. Catches a decoder
+        // that stops validating `global_sequence` while still checking `hlc_wall_ms`.
+        let mut bytes = EventStreamCursorV1::beginning("sub-a", 3).encode();
+        put_u64_be(&mut bytes, EVENT_BEGINNING_GLOBAL_SEQUENCE_OFFSET, 7);
         assert!(matches!(
             EventStreamCursorV1::decode(&bytes),
             Err(SubscriptionRuntimeError::CursorInvalid { .. })
@@ -840,7 +865,18 @@ mod cursor_helper_tests {
     #[test]
     fn receipt_cursor_decode_rejects_beginning_with_nonzero_hlc_only() {
         let mut bytes = ReceiptStreamCursorV1::beginning("sub-a", "kind-a").encode();
-        bytes[40..48].copy_from_slice(&7_u64.to_be_bytes());
+        put_u64_be(&mut bytes, RECEIPT_BEGINNING_HLC_WALL_MS_OFFSET, 7);
+        assert!(matches!(
+            ReceiptStreamCursorV1::decode(&bytes),
+            Err(SubscriptionRuntimeError::CursorInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn receipt_cursor_decode_rejects_beginning_with_nonzero_global_sequence_only() {
+        // Mirror case for the receipt-stream cursor's `global_sequence` field.
+        let mut bytes = ReceiptStreamCursorV1::beginning("sub-a", "kind-a").encode();
+        put_u64_be(&mut bytes, RECEIPT_BEGINNING_GLOBAL_SEQUENCE_OFFSET, 7);
         assert!(matches!(
             ReceiptStreamCursorV1::decode(&bytes),
             Err(SubscriptionRuntimeError::CursorInvalid { .. })

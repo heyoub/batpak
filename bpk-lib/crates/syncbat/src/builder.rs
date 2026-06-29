@@ -403,6 +403,13 @@ mod builder_mutation_tests {
             core.contains_operation("ping"),
             "register_boxed must leave the descriptor in the built Core"
         );
+        // Descriptor presence alone is insufficient: a regression that kept the
+        // descriptor but dropped the boxed handler would still pass the check
+        // above while breaking dispatch. Assert the handler map retained it too.
+        assert!(
+            core.handlers.contains_key("ping"),
+            "register_boxed must also retain the boxed handler in the built Core"
+        );
     }
 
     #[test]

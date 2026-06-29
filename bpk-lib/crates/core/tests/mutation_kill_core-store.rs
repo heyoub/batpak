@@ -102,8 +102,7 @@ fn lossy_reactor_flushes_a_non_empty_reaction_batch() {
          LossyReaction must be persisted)"
     );
 
-    handle.stop();
-    let _ = handle.join();
+    handle.stop_and_join().expect("clean stop and join");
 }
 
 // ─── ReadOnly writer_queue_len → None (capacity reported as 0) ────────────────

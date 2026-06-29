@@ -439,12 +439,23 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let repo = std::env::temp_dir().join(format!(
+        // The repo root's *parent* is the ADR search root, so nest the repo one
+        // level down and plant a resolvable `ADR-0026` anchor beside it. Without
+        // this the fixture conflates the expiry failure with an unresolvable-ADR
+        // failure (covered separately by `unresolvable_adr_fails`); pinning the
+        // ADR keeps this test exclusively on the expired-waiver path.
+        let base = std::env::temp_dir().join(format!(
             "batpak-typed-waivers-kill-{}-{nanos}",
             std::process::id()
         ));
+        let repo = base.join("repo");
         let path = repo.join(WAIVERS_REL);
         std::fs::create_dir_all(path.parent().expect("parent dir")).expect("create dirs");
+        std::fs::write(
+            base.join("ADR-0026-expired-waiver-fixture.md"),
+            "# ADR-0026 fixture anchor\n",
+        )
+        .expect("write resolvable ADR anchor");
         std::fs::write(
             &path,
             "- id: WAIVER-EXPIRED-0001\n  \
@@ -464,7 +475,7 @@ mod tests {
             err.to_string().contains("EXPIRED"),
             "error must report the expiry, got: {err}"
         );
-        std::fs::remove_dir_all(&repo).expect("remove temp repo");
+        std::fs::remove_dir_all(&base).expect("remove temp repo");
     }
 
     #[test]

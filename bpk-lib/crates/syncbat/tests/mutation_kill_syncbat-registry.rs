@@ -115,6 +115,21 @@ fn event_category_accessor_returns_real_category_and_none() -> TestResult {
         None
     );
     assert_eq!(rcpt("k", "w.rc", None, None).event_category(), None);
+    // The remaining non-EventCategory variants must also yield None, so a
+    // variant-specific regression in OperationStatus or EntityStream is caught.
+    assert_eq!(
+        ops(
+            op("mod.a.echo")?,
+            "ent",
+            "w.op",
+            None,
+            Freshness::Consistent,
+            None
+        )
+        .event_category(),
+        None
+    );
+    assert_eq!(es("e", "s", "w.es", None, None).event_category(), None);
     Ok(())
 }
 
