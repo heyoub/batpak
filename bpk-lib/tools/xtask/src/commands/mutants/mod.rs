@@ -597,6 +597,66 @@ mod tests {
     }
 
     #[test]
+    fn diff_scoped_lane_with_unviable_only_pr_diff_passes() {
+        // GREEN fixture: a diff-scoped seam whose only PR-diff mutable line yields
+        // an UNVIABLE (uncompilable) mutant — e.g. a `usize` tautology rejected by
+        // `-D warnings` — has no scoreable behavior to prove, identical to the
+        // zero-mutant case. On a REAL PR diff this is a legitimate PASS, not a
+        // coverage gap. (This is the false-red that bit hash-chain-replay and
+        // platform-backend on a tests-only PR.)
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        assert!(lane.diff_scoped, "lane under test must be diff-scoped");
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 1,
+            executed: 1,
+            scored: 0,
+            score_pct: None,
+        };
+
+        assert!(
+            assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::PrDiff).is_ok(),
+            "diff-scoped lane on a REAL PR diff whose only mutant is unviable is a legitimate PASS"
+        );
+    }
+
+    #[test]
+    fn diff_scoped_lane_with_unviable_only_manual_run_still_bails() {
+        // RED fixture: the unviable-only PASS is gated strictly on DiffScope::PrDiff.
+        // A manual `workflow_dispatch`/local run (DiffScope::None) must NOT pass on
+        // unviable-only output, or a manual mutation proof could skip a critical-seam
+        // gate by emitting only uncompilable mutants. This proves the relaxation did
+        // not weaken the no-evidence guard for non-PR runs.
+        let lane = critical_mutation_smoke_lanes()
+            .into_iter()
+            .find(|lane| lane.slug == "writer-commit")
+            .expect("writer-commit smoke lane");
+        assert!(lane.diff_scoped);
+        let score = MutationScore {
+            caught: 0,
+            missed: 0,
+            timed_out: 0,
+            unviable: 3,
+            executed: 3,
+            scored: 0,
+            score_pct: None,
+        };
+
+        let err = assert_mutation_policy(&lane, &fake_output_dir(), score, DiffScope::None)
+            .expect_err("manual-run unviable-only must still bail");
+        assert!(
+            err.to_string()
+                .contains("no scoreable caught/missed mutants"),
+            "a diff-scoped lane on a manual (non-PR) run must still reject unviable-only, got: {err:#}"
+        );
+    }
+
+    #[test]
     fn mutation_policy_rejects_truly_empty_execution() {
         let lane = fake_lane();
         let score = MutationScore {

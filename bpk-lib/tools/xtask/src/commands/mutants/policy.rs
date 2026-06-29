@@ -154,6 +154,30 @@ pub(super) fn assert_mutation_policy(
 
     let MutationEnforcement::Threshold { min_catch_pct } = lane.enforcement;
     let Some(score_pct) = score.score_pct else {
+        // No scoreable (caught/missed) mutants. Timeouts already hard-failed
+        // above, so every executed mutant that reaches here was UNVIABLE — it did
+        // not compile. cargo-mutants routinely emits such mutants from a single
+        // diff line: e.g. `usize::from(tail_count > 0)` mutated to `>= 0` is a
+        // tautology that `-D warnings` rejects (`unused_comparisons`). An
+        // uncompilable mutant has no behavior to test, so it is NOT a coverage
+        // gap — it is the same "nothing to prove" situation as zero mutants above.
+        //
+        // For a REAL PR diff this is a legitimate PASS: the PR's only mutable
+        // lines in this seam produced uncompilable mutants, leaving nothing
+        // scoreable to prove. Gated on BOTH `diff_scoped` AND `DiffScope::PrDiff`,
+        // mirroring the zero-mutant pass: a manual `workflow_dispatch`/local run
+        // (`DiffScope::None`) or a non-diff-scoped lane must STILL hard-fail on
+        // unviable-only, so a manual mutation proof cannot skip a critical-seam
+        // gate by emitting only unviable mutants.
+        if lane.diff_scoped && diff_scope == DiffScope::PrDiff {
+            outln!(
+                "mutants: `{}` => PR diff touched only mutable lines whose mutants are \
+                 unviable (uncompilable, e.g. a tautology under -D warnings); no scoreable \
+                 behavior to prove.",
+                lane.label
+            );
+            return Ok(());
+        }
         bail!(
             "mutation lane `{}` produced no scoreable caught/missed mutants \
              ({} executed total; {} unviable). Threshold gates require at least one \
