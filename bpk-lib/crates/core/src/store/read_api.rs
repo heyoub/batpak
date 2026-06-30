@@ -4,6 +4,28 @@ use crate::id::EventId;
 use crate::store::index::IndexEntry;
 use std::collections::BTreeMap;
 
+/// Report from a full store hash-chain verification ([`Store::verify_chain`]).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ChainVerificationReport {
+    /// Number of committed, visible events whose content hash was recomputed.
+    pub events_checked: usize,
+    /// Events whose recomputed blake3 content hash did NOT match the stored
+    /// `event_hash` — the content no longer matches its claimed identity.
+    pub content_hash_mismatches: Vec<EventId>,
+    /// Non-genesis events whose `prev_hash` references no verified event in the
+    /// store (a dangling chain link).
+    pub dangling_links: Vec<EventId>,
+}
+
+impl ChainVerificationReport {
+    /// True when every checked event's content hash matched and every link
+    /// referenced a verified event.
+    #[must_use]
+    pub fn is_intact(&self) -> bool {
+        self.content_hash_mismatches.is_empty() && self.dangling_links.is_empty()
+    }
+}
+
 impl<State: crate::store::StoreState> Store<State> {
     /// READ: get a single event by ID.
     ///
@@ -107,6 +129,45 @@ impl<State: crate::store::StoreState> Store<State> {
             entry.kind,
             entry.hash_chain.prev_hash,
         )
+    }
+
+    /// VERIFY: recompute and check the blake3 hash chain over every committed,
+    /// visible event.
+    ///
+    /// A plain read trusts the self-reported `event_hash` (guarded only by the
+    /// per-frame CRC). This pass instead recomputes blake3 over each event's
+    /// actual content bytes and confirms it matches the stored `event_hash`,
+    /// then confirms every non-genesis `prev_hash` references a verified event —
+    /// the on-demand tamper-evidence check. By default a store does NOT run this
+    /// at open (it is `O(events)`); opt into [`ChainVerification::Recompute`] to
+    /// run it automatically.
+    ///
+    /// # Errors
+    /// Returns [`StoreError::Io`]/[`StoreError::Serialization`] if a committed
+    /// event cannot be re-read from disk.
+    pub fn verify_chain(&self) -> Result<ChainVerificationReport, StoreError> {
+        let mut entries = self.query(&Region::all());
+        entries.sort_by_key(IndexEntry::global_sequence);
+        let mut report = ChainVerificationReport::default();
+        let mut verified_hashes: std::collections::BTreeSet<[u8; 32]> =
+            std::collections::BTreeSet::new();
+        for entry in &entries {
+            report.events_checked += 1;
+            let stored = self.read_raw(entry.event_id())?;
+            let recomputed = crate::event::hash::compute_hash(&stored.event.payload);
+            if recomputed == entry.hash_chain().event_hash {
+                verified_hashes.insert(entry.hash_chain().event_hash);
+            } else {
+                report.content_hash_mismatches.push(entry.event_id());
+            }
+        }
+        for entry in &entries {
+            let prev = entry.hash_chain().prev_hash;
+            if prev != [0u8; 32] && !verified_hashes.contains(&prev) {
+                report.dangling_links.push(entry.event_id());
+            }
+        }
+        Ok(report)
     }
 
     /// READ: return every currently visible index entry matching a Region.
