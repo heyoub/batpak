@@ -554,12 +554,31 @@ fn repo_wide_paths(surface: MutantSurface) -> &'static [&'static str] {
     }
 }
 
-pub(super) fn surface_excludes(_surface: MutantSurface) -> &'static [&'static str] {
-    // blake3 is mandatory, so the surface-specific by_hash/by_clock excludes
-    // are gone. The two surfaces only differ by the dangerous-test-hooks
-    // feature now, and neither exposes additional file-level excludes.
-    &[]
+/// Files cargo-mutants must NOT mutate on a given surface. The two repo-wide
+/// surfaces differ only by the `dangerous-test-hooks` feature, and that feature
+/// gates an ENTIRE module tree — `store/sim/**` (`store/mod.rs`:
+/// `#[cfg(feature = "dangerous-test-hooks")] pub(crate) mod sim;`). cargo-mutants
+/// does not evaluate cfg, so it generates the SAME mutant population for both
+/// surfaces (~359 mutants live under `store/sim/`). Under `--no-default-features`
+/// that whole tree is compiled OUT: every sim mutant lands in dead code, the build
+/// and tests pass unchanged, and the mutant is scored a phantom "missed" that can
+/// NEVER be caught on this surface — ~9% of the no-default population, dead weight
+/// that only depresses the score. Exclude the sim tree from the no-default surface
+/// so its denominator reflects code the surface actually builds. The all-features
+/// surface keeps mutating sim, where `dangerous-test-hooks` compiles the SimBackend
+/// and its tests run and DO catch these mutants — so no real coverage is lost.
+pub(super) fn surface_excludes(surface: MutantSurface) -> &'static [&'static str] {
+    match surface {
+        MutantSurface::NoDefaultFeatures => NO_DEFAULT_SURFACE_EXCLUDES,
+        MutantSurface::AllFeatures => &[],
+    }
 }
+
+/// The `store/sim/**` tree is `dangerous-test-hooks`-only (see [`surface_excludes`]);
+/// excluding it from the no-default surface strips phantom survivors, not real
+/// mutants. `no_default_surface_excludes_the_cfg_gated_sim_tree` pins this so a
+/// later refactor of `surface_excludes` cannot silently re-pollute the denominator.
+const NO_DEFAULT_SURFACE_EXCLUDES: &[&str] = &["crates/core/src/store/sim/**/*.rs"];
 
 fn surface_exclude_res(_surface: MutantSurface) -> &'static [&'static str] {
     MUTANT_EXCLUDE_RES
@@ -806,8 +825,55 @@ pub(super) fn repo_wide_mutation_lanes(
 
 #[cfg(test)]
 mod tests {
-    use super::critical_seam_slugs;
+    use super::{
+        critical_seam_slugs, surface_excludes, REPO_WIDE_ALL_FEATURES_MUTANT_FILES,
+        REPO_WIDE_NO_DEFAULT_MUTANT_FILES,
+    };
+    use crate::MutantSurface;
     use std::collections::BTreeSet;
+
+    /// Honest-denominator guard for the no-default mutation surface. `store/sim/**`
+    /// is entirely `#[cfg(feature = "dangerous-test-hooks")]`-gated, so under
+    /// `--no-default-features` it is not compiled — yet cargo-mutants (which does not
+    /// evaluate cfg) still plants ~359 mutants there, every one a phantom "missed"
+    /// that can never be caught on this surface. This pins the surface-specific
+    /// exclude: the no-default surface must drop the sim tree, while the all-features
+    /// surface must keep mutating it (its `dangerous-test-hooks` tests do the
+    /// catching) and the all-features include set must still glob sim in, so the
+    /// exclude strips phantoms WITHOUT losing any real coverage.
+    #[test]
+    fn no_default_surface_excludes_the_cfg_gated_sim_tree() {
+        let sim_glob = "crates/core/src/store/sim/**/*.rs";
+
+        let no_default = surface_excludes(MutantSurface::NoDefaultFeatures);
+        assert!(
+            no_default.contains(&sim_glob),
+            "no-default surface must exclude the cfg-gated sim tree (it grades phantom \
+             survivors otherwise); excludes = {no_default:?}"
+        );
+
+        let all_features = surface_excludes(MutantSurface::AllFeatures);
+        assert!(
+            !all_features.iter().any(|glob| glob.contains("store/sim")),
+            "all-features surface must STILL mutate sim — its dangerous-test-hooks tests \
+             catch those mutants; excludes = {all_features:?}"
+        );
+
+        // The no-default include set globs sim in (store/**), and the exclude is what
+        // removes it; the all-features include set globs it in with no exclude, so sim
+        // stays graded somewhere. Both invariants together prove zero coverage loss.
+        let store_glob = "crates/core/src/store/**/*.rs";
+        assert!(
+            REPO_WIDE_NO_DEFAULT_MUTANT_FILES.contains(&store_glob),
+            "no-default include set must still glob store/** (the exclude, not a narrower \
+             include, is what drops sim)"
+        );
+        assert!(
+            REPO_WIDE_ALL_FEATURES_MUTANT_FILES.contains(&store_glob),
+            "all-features include set must still cover store/** (and thus sim) so the \
+             no-default exclude loses no real coverage"
+        );
+    }
 
     /// Anti-fragility guard: the hard-coded `seam:` matrix in the CI workflow must
     /// stay in lockstep with `critical_mutation_seams()`. Without this coupling a

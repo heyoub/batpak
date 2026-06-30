@@ -98,12 +98,15 @@ pub(super) fn mutants_command(
     args.push("--cargo-arg".to_owned());
     args.push("--locked".to_owned());
     args.push("--test-tool".to_owned());
-    // nextest, not raw `cargo test`: per-test process isolation + the `ci`
-    // profile's `terminate-after` (pinned via NEXTEST_PROFILE in run.rs) reap a
-    // mutation-induced livelock as a bounded per-test timeout, so a single hung
-    // test can no longer mask the fast-failing assertions that actually convict
-    // the mutant. This aligns the mutation lane with every other test lane in the
-    // house (run_nextest_ci), which has always run under nextest.
+    // nextest, not raw `cargo test`: per-test process isolation + the `mutants`
+    // profile's `fail-fast = true` (pinned via NEXTEST_PROFILE in run.rs) convict a
+    // mutant on the FIRST failing test, so a fast assertion short-circuits the run
+    // before a sibling test the mutation livelocked can hang it — with the same
+    // profile's `terminate-after` reaping any pure-hang mutant as a bounded per-test
+    // timeout. A single hung test can no longer mask the fast-failing assertions
+    // that actually convict the mutant. This aligns the mutation lane with every
+    // other test lane in the house (run_nextest_ci), which has always run under
+    // nextest.
     args.push("nextest".to_owned());
 
     if lane.diff_scoped {
