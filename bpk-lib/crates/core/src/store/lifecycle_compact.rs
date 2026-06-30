@@ -2,7 +2,7 @@
 
 use super::sync;
 use crate::coordinate::Coordinate;
-use crate::event::{EventKind, StoredEvent};
+use crate::event::{Event, EventKind, StoredEvent};
 use crate::store::file_classification::StoreFileKind;
 use crate::store::lifecycle_close::write_cold_start_artifacts_on_close;
 use crate::store::platform::fs::StoreFs;
@@ -255,8 +255,23 @@ fn write_scanned_entry(
     merged_segment: &mut segment::Segment<Active>,
     entry: reader::ScannedEntry,
 ) -> Result<(), StoreError> {
+    // Re-emit the survivor's ORIGINAL payload BYTES, never the decoded Value.
+    // `entry.event.payload` is the `serde_json::Value` view kept only for the
+    // keep/drop predicate; serializing THAT writes a msgpack MAP where the
+    // reader's `FramePayload<Vec<u8>>` decode expects raw bytes, making every
+    // survivor unreadable ("invalid type: map, expected a sequence"). Rebuilding
+    // the frame from `entry.payload_bytes` re-encodes only the outer frame
+    // envelope — the user payload is carried verbatim — so a kept frame is
+    // byte-identical to the original and its `event_hash` (blake3 over
+    // `event.payload`) is byte-stable across compaction. The Tombstone path's
+    // in-place `event_kind` mutation rides through `entry.event.header` here.
+    let event = Event {
+        header: entry.event.header,
+        payload: entry.payload_bytes,
+        hash_chain: entry.event.hash_chain,
+    };
     let frame_payload = FramePayload {
-        event: entry.event,
+        event,
         entity: entry.entity,
         scope: entry.scope,
         receipt_extensions: entry.receipt_extensions,

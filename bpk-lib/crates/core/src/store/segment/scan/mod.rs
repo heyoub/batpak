@@ -103,6 +103,17 @@ pub(crate) struct ScannedEntry {
     pub entity: String,
     pub scope: String,
     pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+    /// The ORIGINAL canonical `event.payload` bytes, exactly as written to disk,
+    /// captured BEFORE they were decoded into the `serde_json::Value` above.
+    ///
+    /// Retention/Tombstone compaction MUST re-emit these verbatim. The decoded
+    /// `Value` drives the keep/drop predicate, but serializing it back would
+    /// write a msgpack MAP where the reader's `FramePayload<Vec<u8>>` decode
+    /// expects raw BYTES — corrupting every survivor into an unreadable
+    /// "invalid type: map, expected a sequence". Carrying the bytes also keeps a
+    /// survivor's `event_hash` (blake3 over `event.payload`) byte-stable across
+    /// compaction, so the hash chain and receipt identity do not drift.
+    pub payload_bytes: Vec<u8>,
 }
 
 pub(crate) struct ScannedIndexEntry {
@@ -150,25 +161,44 @@ impl Reader {
     fn decode_frame_payload_value(
         msgpack: &[u8],
     ) -> Result<FramePayload<serde_json::Value>, StoreError> {
+        Self::decode_frame_payload_value_with_raw_payload(msgpack).map(|(payload, _raw)| payload)
+    }
+
+    /// Like [`Self::decode_frame_payload_value`] but ALSO returns the ORIGINAL
+    /// raw `event.payload` bytes alongside the decoded `serde_json::Value` view.
+    ///
+    /// The decoded `Value` is the user-facing payload (and what the
+    /// retention/tombstone predicate inspects); the raw bytes are what
+    /// compaction must re-emit verbatim so a survivor's frame — and therefore
+    /// its `event_hash` (blake3 over `event.payload`) — is byte-stable. Both are
+    /// derived from a single `decode_frame_payload_raw`, so the raw bytes are
+    /// the exact on-disk payload with no re-encode.
+    fn decode_frame_payload_value_with_raw_payload(
+        msgpack: &[u8],
+    ) -> Result<(FramePayload<serde_json::Value>, Vec<u8>), StoreError> {
         let payload = Self::decode_frame_payload_raw(msgpack)?;
         let event = payload.event;
+        let raw_payload_bytes = event.payload;
         let decoded_payload = match event.header.event_kind {
             EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT => {
                 serde_json::Value::Null
             }
-            _ => crate::encoding::from_bytes(&event.payload)
+            _ => crate::encoding::from_bytes(&raw_payload_bytes)
                 .map_err(|e| StoreError::Serialization(Box::new(e)))?,
         };
-        Ok(FramePayload {
-            event: Event {
-                header: event.header,
-                payload: decoded_payload,
-                hash_chain: event.hash_chain,
+        Ok((
+            FramePayload {
+                event: Event {
+                    header: event.header,
+                    payload: decoded_payload,
+                    hash_chain: event.hash_chain,
+                },
+                entity: payload.entity,
+                scope: payload.scope,
+                receipt_extensions: payload.receipt_extensions,
             },
-            entity: payload.entity,
-            scope: payload.scope,
-            receipt_extensions: payload.receipt_extensions,
-        })
+            raw_payload_bytes,
+        ))
     }
 
     fn frame_decode_error(
