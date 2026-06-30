@@ -1700,6 +1700,7 @@ pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, e
 pub fn batpak::store::Store<State>::verify_chain(&self) -> core::result::Result<batpak::store::ChainVerificationReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors_outcome(&self, event_id: batpak::id::EventId, limit: usize) -> batpak::store::AncestorWalk
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
@@ -2568,6 +2569,16 @@ pub batpak::store::ActiveSegmentReadEvidence::LockedSeekRead
 pub batpak::store::ActiveSegmentReadEvidence::ProbeFailed
 pub batpak::store::ActiveSegmentReadEvidence::UnixReadAt
 pub batpak::store::ActiveSegmentReadEvidence::Unknown
+#[non_exhaustive] pub enum batpak::store::AncestryBoundary
+pub batpak::store::AncestryBoundary::Cycle
+pub batpak::store::AncestryBoundary::Cycle::event_id: batpak::id::EventId
+pub batpak::store::AncestryBoundary::LimitReached
+pub batpak::store::AncestryBoundary::MissingParent
+pub batpak::store::AncestryBoundary::MissingParent::child: batpak::id::EventId
+pub batpak::store::AncestryBoundary::NoAnchor
+pub batpak::store::AncestryBoundary::ReachedGenesis
+pub batpak::store::AncestryBoundary::ReadFailure
+pub batpak::store::AncestryBoundary::ReadFailure::event_id: batpak::id::EventId
 pub enum batpak::store::CanalBatch<I>
 pub batpak::store::CanalBatch::Empty
 pub batpak::store::CanalBatch::Many(alloc::vec::Vec<I>)
@@ -3218,6 +3229,12 @@ pub batpak::store::WatermarkKind::Durable
 pub batpak::store::WatermarkKind::Emitted
 pub batpak::store::WatermarkKind::Visible
 pub batpak::store::WatermarkKind::Written
+pub struct batpak::store::AncestorWalk
+pub batpak::store::AncestorWalk::ancestors: alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub batpak::store::AncestorWalk::boundary: batpak::store::AncestryBoundary
+impl batpak::store::AncestorWalk
+pub fn batpak::store::AncestorWalk::reached_genesis(&self) -> bool
+pub fn batpak::store::AncestorWalk::truncated_at(&self) -> core::option::Option<batpak::id::EventId>
 pub struct batpak::store::AppendOptions
 pub batpak::store::AppendOptions::causation_id: core::option::Option<batpak::id::CausationId>
 pub batpak::store::AppendOptions::correlation_id: core::option::Option<batpak::id::CorrelationId>
@@ -3877,6 +3894,7 @@ pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, e
 pub fn batpak::store::Store<State>::verify_chain(&self) -> core::result::Result<batpak::store::ChainVerificationReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors_outcome(&self, event_id: batpak::id::EventId, limit: usize) -> batpak::store::AncestorWalk
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State: batpak::store::StoreState> batpak::store::Store<State>

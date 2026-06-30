@@ -223,12 +223,33 @@ impl<State: crate::store::StoreState> Store<State> {
     /// READ: walk bounded hash-chain ancestors from an event id.
     ///
     /// This is substrate ancestry, not domain graph traversal.
+    ///
+    /// Returns only the ancestor events; the returned `Vec` cannot tell a
+    /// complete chain (reached genesis) from one truncated at a dangling link
+    /// (e.g. a retention-dropped mid-chain event). Use
+    /// [`Store::walk_ancestors_outcome`] when that boundary matters.
     pub fn walk_ancestors(
         &self,
         event_id: EventId,
         limit: usize,
     ) -> Vec<StoredEvent<serde_json::Value>> {
-        ancestry::walk_ancestors(self, event_id.as_u128(), limit)
+        self.walk_ancestors_outcome(event_id, limit).ancestors
+    }
+
+    /// READ: walk bounded hash-chain ancestors from an event id, reporting
+    /// where the walk stopped.
+    ///
+    /// Like [`Store::walk_ancestors`], but the returned [`AncestorWalk`] also
+    /// carries the [`AncestryBoundary`] at which traversal ended, so callers
+    /// can distinguish a chain that genuinely reached genesis
+    /// ([`AncestryBoundary::ReachedGenesis`]) from one truncated at a missing
+    /// parent link ([`AncestryBoundary::MissingParent`]) — for example, a
+    /// surviving descendant of a Retention-dropped mid-chain event — as well
+    /// as the `limit`, read-failure, cycle, and no-anchor boundaries.
+    ///
+    /// This is substrate ancestry, not domain graph traversal.
+    pub fn walk_ancestors_outcome(&self, event_id: EventId, limit: usize) -> AncestorWalk {
+        ancestry::walk_ancestors_outcome(self, event_id.as_u128(), limit)
     }
 
     /// PROJECT: reconstruct typed state from events, with cache support.

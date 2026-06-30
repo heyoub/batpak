@@ -65,6 +65,7 @@ mod watch_api;
 pub(crate) mod write;
 mod write_api;
 
+pub use ancestry::{AncestorWalk, AncestryBoundary};
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
     CompactionConfig, CompactionStrategy, DenialReceipt, DenialRequest, EncodedBytes, ExtensionKey,

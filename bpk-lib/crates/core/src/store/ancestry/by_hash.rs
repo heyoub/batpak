@@ -1,7 +1,10 @@
+use super::{AncestryBoundary, NextLink};
 use crate::event::StoredEvent;
+use crate::id::EventId;
 use crate::store::Store;
 
-/// Walk hash-chain ancestors of `event_id`, up to `limit` entries.
+/// Walk hash-chain ancestors of `event_id`, up to `limit` entries, reporting
+/// where the walk stopped.
 ///
 /// The per-hop parent lookup is a linear scan over the entity's stream
 /// (`entity_stream.iter().find(…)`). That is O(N) per hop where N is
@@ -15,29 +18,40 @@ use crate::store::Store;
 /// across the whole index. This linear-scan shape is deliberate and
 /// bounded; cycle detection lives in the caller (`ancestry::mod`) via
 /// [`super::collect_ancestors`].
-pub(crate) fn walk_ancestors_by_hash<State: crate::store::StoreState>(
+///
+/// When the per-hop scan fails to resolve a non-genesis `prev_hash` (the
+/// parent event is absent from the index — e.g. a Retention compaction
+/// dropped a mid-chain event), the walk records the surviving child and
+/// stops with [`AncestryBoundary::MissingParent`] instead of silently
+/// returning a short prefix indistinguishable from one that reached genesis.
+pub(crate) fn walk_ancestors_outcome_by_hash<State: crate::store::StoreState>(
     store: &Store<State>,
     event_id: u128,
     limit: usize,
-) -> Vec<StoredEvent<serde_json::Value>> {
+) -> (Vec<StoredEvent<serde_json::Value>>, AncestryBoundary) {
     // All events in a hash chain belong to the same entity, so we load the
     // entity stream once and reuse it across every hop instead of re-querying
     // the DashMap (and re-cloning all IndexEntries) on each step.
     let start = match store.index.get_by_id(event_id) {
         Some(e) => e,
-        None => return Vec::new(),
+        None => return (Vec::new(), AncestryBoundary::NoAnchor),
     };
     let entity_stream = store.index.stream(start.coord.entity());
 
     super::collect_ancestors(store, Some(event_id), limit, |store, current_id| {
-        let (entry, stored) = super::read_entry_and_event(store, current_id)?;
+        let Some((entry, stored)) = super::read_entry_and_event(store, current_id) else {
+            return Err(EventId::from(current_id));
+        };
         let prev = entry.hash_chain.prev_hash;
         let next = if prev == [0_u8; 32] {
-            None
+            NextLink::Genesis
         } else {
-            super::parent_event_id_by_hash(&entity_stream, prev)
+            match super::parent_event_id_by_hash(&entity_stream, prev) {
+                Some(parent_id) => NextLink::Continue(parent_id),
+                None => NextLink::MissingParent,
+            }
         };
-        Some((stored, next))
+        Ok((stored, next))
     })
 }
 
@@ -83,7 +97,9 @@ mod tests {
         let (store, _dir) = test_store();
         let ids = seeded_chain(&store, "entity:hash-helper");
 
-        let actual: Vec<_> = walk_ancestors_by_hash(&store, ids.last().expect("last").as_u128(), 8)
+        let (events, boundary) =
+            walk_ancestors_outcome_by_hash(&store, ids.last().expect("last").as_u128(), 8);
+        let actual: Vec<_> = events
             .into_iter()
             .map(|stored| stored.event.event_id())
             .collect();
@@ -94,6 +110,11 @@ mod tests {
             expected,
             "PROPERTY: hash-based ancestor traversal must return the exact chain in reverse append order."
         );
+        assert_eq!(
+            boundary,
+            AncestryBoundary::ReachedGenesis,
+            "PROPERTY: a fully intact chain must report ReachedGenesis, not a silent stop."
+        );
     }
 
     #[test]
@@ -102,13 +123,27 @@ mod tests {
         let (store, _dir) = test_store();
         let ids = seeded_chain(&store, "entity:hash-zero");
 
+        let (zero_limit, zero_boundary) =
+            walk_ancestors_outcome_by_hash(&store, ids.last().expect("last").as_u128(), 0);
         assert!(
-            walk_ancestors_by_hash(&store, ids.last().expect("last").as_u128(), 0).is_empty(),
+            zero_limit.is_empty(),
             "PROPERTY: hash-based ancestor traversal with limit=0 must return an empty vector."
         );
+        assert_eq!(
+            zero_boundary,
+            AncestryBoundary::LimitReached,
+            "PROPERTY: a limit=0 walk is bounded by the limit, not a completed chain."
+        );
+
+        let (unknown, unknown_boundary) = walk_ancestors_outcome_by_hash(&store, 0xDEAD_BEEF, 4);
         assert!(
-            walk_ancestors_by_hash(&store, 0xDEAD_BEEF, 4).is_empty(),
+            unknown.is_empty(),
             "PROPERTY: hash-based ancestor traversal must return empty for an unknown anchor event."
+        );
+        assert_eq!(
+            unknown_boundary,
+            AncestryBoundary::NoAnchor,
+            "PROPERTY: an unknown anchor must report NoAnchor, not a completed or truncated walk."
         );
     }
 }
