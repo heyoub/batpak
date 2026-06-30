@@ -11,7 +11,10 @@
 //! no escape hatch required (see ADR-0012).
 
 use batpak::coordinate::CoordinateError;
-use batpak::event::{EventPayloadKindCollision, EventPayloadRegistryError};
+use batpak::event::{
+    EventPayloadKindCollision, EventPayloadRegistryError, IncompleteUpcastChain,
+    UpcastChainRegistryError,
+};
 use batpak::store::{
     CheckpointIdError, HiddenRangesCorruption, HlcPoint, ProfileInvalidKind, StoreError,
     StoreInvariant, StoreLockMode, WatermarkKind,
@@ -60,6 +63,7 @@ pub fn classify(error: &StoreError) -> HandlingClass {
         | StoreError::Coordinate(_)
         | StoreError::CheckpointId(_)
         | StoreError::EventPayloadRegistry(_)
+        | StoreError::UpcastChainIncomplete(_)
         | StoreError::InvalidPayloadVersion { .. }
         | StoreError::NotFound(_)
         | StoreError::SequenceMismatch { .. }
@@ -323,6 +327,24 @@ pub fn domain_cases() -> Vec<Case> {
                 "duplicate kind assignment",
                 "category=0xF",
                 "crate_a::Widget",
+            ],
+        },
+        Case {
+            name: "upcast_chain_incomplete",
+            error: StoreError::UpcastChainIncomplete(UpcastChainRegistryError::new(vec![
+                IncompleteUpcastChain {
+                    kind: batpak::event::EventKind::custom(0xE, 0x7A2),
+                    current_version: 2,
+                    missing_from_versions: vec![1],
+                    type_name: "crate_a::Widget",
+                },
+            ])),
+            class: HandlingClass::Domain,
+            source_needle: Some("missing upcast step(s)"),
+            display_needles: &[
+                "without a complete upcast chain",
+                "category=0xE",
+                "missing upcast step(s)",
             ],
         },
         Case {

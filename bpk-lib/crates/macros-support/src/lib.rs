@@ -18,6 +18,13 @@ pub struct EventPayloadRegistration {
     /// Packed `(category << 12) | type_id`; equals `EventKind::as_raw_u16`
     /// for the resulting kind.
     pub kind_bits: u16,
+    /// The derived type's declared `EventPayload::PAYLOAD_VERSION` (>= 1).
+    ///
+    /// Carried here so a binary-wide scan can enumerate `(kind, version)` pairs
+    /// at `Store::open` and confirm a `version > 1` kind has a complete
+    /// registered upcast chain (see [`find_incomplete_upcast_chains`]) instead
+    /// of letting its older events become undecodable at read time.
+    pub payload_version: u16,
     /// `std::any::type_name::<T>()` for the derived type.
     pub type_name: &'static str,
 }
@@ -54,6 +61,73 @@ pub fn upcast_steps_for(kind_bits: u16) -> Vec<&'static UpcastRegistration> {
     inventory::iter::<UpcastRegistration>()
         .filter(|reg| reg.kind_bits == kind_bits)
         .collect()
+}
+
+/// A registered payload kind whose declared `PAYLOAD_VERSION > 1` is missing one
+/// or more `from_version` hops in its registered upcast chain.
+///
+/// Such a kind compiles fine, but an event stored at any uncovered version would
+/// be undecodable at read time (the decode seam hits `UpcastError::MissingStep`
+/// with no step to run). Surfacing it lets `Store::open` fail closed up front.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IncompleteUpcastChain {
+    /// Packed `(category << 12) | type_id`; equals `EventKind::as_raw_u16`.
+    pub kind_bits: u16,
+    /// The declared current payload version (always `> 1` for a reported gap).
+    pub current_version: u16,
+    /// The `from_version` hops in `1..current_version` that have no registered
+    /// step, ascending. Always non-empty for a reported gap.
+    pub missing_from_versions: Vec<u16>,
+    /// A registered type name for `kind_bits`, for diagnostics.
+    pub type_name: &'static str,
+}
+
+/// Return every registered payload kind whose declared version `> 1` lacks a
+/// complete `1 -> ... -> N` upcast chain in the linked registry.
+///
+/// Mirrors [`find_kind_collisions`]: a binary-wide scan over the link-time
+/// `inventory` registries so a downstream binary can refuse to open before any
+/// historical event silently becomes undecodable. The result is sorted by
+/// `kind_bits` for deterministic diagnostics. A kind registered more than once
+/// (a separate collision error) is scored against the highest declared version
+/// so the completeness bar is never understated.
+pub fn find_incomplete_upcast_chains() -> Vec<IncompleteUpcastChain> {
+    let mut declared: std::collections::HashMap<u16, (u16, &'static str)> =
+        std::collections::HashMap::new();
+    for reg in inventory::iter::<EventPayloadRegistration>() {
+        declared
+            .entry(reg.kind_bits)
+            .and_modify(|current| {
+                if reg.payload_version > current.0 {
+                    *current = (reg.payload_version, reg.type_name);
+                }
+            })
+            .or_insert((reg.payload_version, reg.type_name));
+    }
+
+    let mut out = Vec::new();
+    for (kind_bits, (current_version, type_name)) in declared {
+        if current_version <= 1 {
+            continue;
+        }
+        let registered: std::collections::HashSet<u16> = inventory::iter::<UpcastRegistration>()
+            .filter(|step| step.kind_bits == kind_bits)
+            .map(|step| step.from_version)
+            .collect();
+        let missing_from_versions: Vec<u16> = (1..current_version)
+            .filter(|hop| !registered.contains(hop))
+            .collect();
+        if !missing_from_versions.is_empty() {
+            out.push(IncompleteUpcastChain {
+                kind_bits,
+                current_version,
+                missing_from_versions,
+                type_name,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.kind_bits.cmp(&b.kind_bits));
+    out
 }
 
 /// One duplicate `EventKind` registration discovered in the current binary.

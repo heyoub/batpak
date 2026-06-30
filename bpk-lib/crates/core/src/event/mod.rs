@@ -26,7 +26,10 @@ pub use sourcing::{
     ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput, Reactive,
     ReplayLane, StateExtent, StateExtentCost, TypedReactive,
 };
-pub use upcast::{Upcast, UpcastError};
+pub use upcast::{
+    revalidate_upcast_chain_registry, validate_upcast_chain_registry, IncompleteUpcastChain,
+    Upcast, UpcastChainRegistryError, UpcastError,
+};
 
 use crate::coordinate::Coordinate;
 use serde::{Deserialize, Serialize};

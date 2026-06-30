@@ -392,10 +392,24 @@ impl core::error::Error for batpak::event::upcast::UpcastError
 pub fn batpak::event::upcast::UpcastError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::event::upcast::UpcastError
 pub fn batpak::event::upcast::UpcastError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct batpak::event::upcast::IncompleteUpcastChain
+pub batpak::event::upcast::IncompleteUpcastChain::current_version: u16
+pub batpak::event::upcast::IncompleteUpcastChain::kind: batpak::event::kind::EventKind
+pub batpak::event::upcast::IncompleteUpcastChain::missing_from_versions: alloc::vec::Vec<u16>
+pub batpak::event::upcast::IncompleteUpcastChain::type_name: &'static str
+pub struct batpak::event::upcast::UpcastChainRegistryError
+impl batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::incomplete_chains(&self) -> &[batpak::event::upcast::IncompleteUpcastChain]
+pub fn batpak::event::upcast::UpcastChainRegistryError::new(incomplete: alloc::vec::Vec<batpak::event::upcast::IncompleteUpcastChain>) -> Self
+impl core::error::Error for batpak::event::upcast::UpcastChainRegistryError
+impl core::fmt::Display for batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait batpak::event::upcast::Upcast
 pub const batpak::event::upcast::Upcast::FROM_VERSION: u16
 pub const batpak::event::upcast::Upcast::KIND: batpak::event::kind::EventKind
 pub fn batpak::event::upcast::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
+pub fn batpak::event::upcast::revalidate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
+pub fn batpak::event::upcast::validate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 #[non_exhaustive] pub enum batpak::event::DecodeSource
 pub batpak::event::DecodeSource::Json(serde_json::error::Error)
 pub batpak::event::DecodeSource::Msgpack(rmp_serde::decode::Error)
@@ -568,6 +582,11 @@ pub fn batpak::event::payload::EventPayloadRegistryError::fmt(&self, f: &mut cor
 pub struct batpak::event::HashChain
 pub batpak::event::HashChain::event_hash: [u8; 32]
 pub batpak::event::HashChain::prev_hash: [u8; 32]
+pub struct batpak::event::IncompleteUpcastChain
+pub batpak::event::IncompleteUpcastChain::current_version: u16
+pub batpak::event::IncompleteUpcastChain::kind: batpak::event::kind::EventKind
+pub batpak::event::IncompleteUpcastChain::missing_from_versions: alloc::vec::Vec<u16>
+pub batpak::event::IncompleteUpcastChain::type_name: &'static str
 pub struct batpak::event::JsonValueInput
 impl batpak::event::sourcing::ProjectionInput for batpak::event::sourcing::JsonValueInput
 pub type batpak::event::sourcing::JsonValueInput::Payload = serde_json::value::Value
@@ -586,6 +605,13 @@ pub const fn batpak::event::sourcing::StateExtent::unavailable() -> Self
 pub struct batpak::event::StoredEvent<P>
 pub batpak::event::StoredEvent::coordinate: batpak::coordinate::Coordinate
 pub batpak::event::StoredEvent::event: batpak::event::Event<P>
+pub struct batpak::event::UpcastChainRegistryError
+impl batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::incomplete_chains(&self) -> &[batpak::event::upcast::IncompleteUpcastChain]
+pub fn batpak::event::upcast::UpcastChainRegistryError::new(incomplete: alloc::vec::Vec<batpak::event::upcast::IncompleteUpcastChain>) -> Self
+impl core::error::Error for batpak::event::upcast::UpcastChainRegistryError
+impl core::fmt::Display for batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait batpak::event::DecodeTyped
 pub fn batpak::event::DecodeTyped::decode_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<T, batpak::event::decode::TypedDecodeError>
 pub fn batpak::event::DecodeTyped::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
@@ -630,7 +656,9 @@ pub const batpak::event::Upcast::FROM_VERSION: u16
 pub const batpak::event::Upcast::KIND: batpak::event::kind::EventKind
 pub fn batpak::event::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
 pub fn batpak::event::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::revalidate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 pub fn batpak::event::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::validate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 pub type batpak::event::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::event::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
 pub mod batpak::guard
@@ -1328,6 +1356,7 @@ pub batpak::prelude::StoreError::Serialization(alloc::boxed::Box<(dyn core::erro
 pub batpak::prelude::StoreError::StoreLocked
 pub batpak::prelude::StoreError::StoreLocked::mode: batpak::store::StoreLockMode
 pub batpak::prelude::StoreError::StoreLocked::path: std::path::PathBuf
+pub batpak::prelude::StoreError::UpcastChainIncomplete(batpak::event::upcast::UpcastChainRegistryError)
 pub batpak::prelude::StoreError::VisibilityFenceActive
 pub batpak::prelude::StoreError::VisibilityFenceCancelled
 pub batpak::prelude::StoreError::VisibilityFenceNotActive
@@ -3069,6 +3098,7 @@ pub batpak::store::StoreError::Serialization(alloc::boxed::Box<(dyn core::error:
 pub batpak::store::StoreError::StoreLocked
 pub batpak::store::StoreError::StoreLocked::mode: batpak::store::StoreLockMode
 pub batpak::store::StoreError::StoreLocked::path: std::path::PathBuf
+pub batpak::store::StoreError::UpcastChainIncomplete(batpak::event::upcast::UpcastChainRegistryError)
 pub batpak::store::StoreError::VisibilityFenceActive
 pub batpak::store::StoreError::VisibilityFenceCancelled
 pub batpak::store::StoreError::VisibilityFenceNotActive

@@ -81,6 +81,7 @@ impl StoreError {
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::EventPayloadRegistry(_)
+            | Self::UpcastChainIncomplete(_)
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
             | Self::VisibilityFenceNotActive
@@ -184,6 +185,7 @@ impl StoreError {
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::EventPayloadRegistry(_)
+            | Self::UpcastChainIncomplete(_)
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
             | Self::VisibilityFenceNotActive
@@ -290,6 +292,20 @@ impl StoreError {
         }
         Ok(())
     }
+
+    /// Render the link-time `EventPayload` registry violations, both of which
+    /// delegate to their inner error's own `Display`. Grouped behind one
+    /// `Display::fmt` arm (mirroring `fmt_platform_violation`) so the two
+    /// registry variants do not each add a branch to the already-pinned `fmt`.
+    fn fmt_registry_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::EventPayloadRegistry(error) = self {
+            return write!(f, "{error}");
+        }
+        if let Self::UpcastChainIncomplete(error) = self {
+            return write!(f, "{error}");
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for StoreError {
@@ -352,7 +368,9 @@ impl std::fmt::Display for StoreError {
             Self::PlatformProfileInvalid { .. }
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. } => self.fmt_platform_violation(f),
-            Self::EventPayloadRegistry(error) => write!(f, "{error}"),
+            Self::EventPayloadRegistry(_) | Self::UpcastChainIncomplete(_) => {
+                self.fmt_registry_violation(f)
+            }
             Self::IdempotencyRequired => write!(
                 f,
                 "group commit (batch > 1) requires an idempotency key on every append"

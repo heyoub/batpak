@@ -22,6 +22,7 @@ const COLLIDING_KIND_BITS: u16 = ((COLLIDING_CATEGORY as u16) << 12) | COLLIDING
 batpak::__private::inventory::submit! {
     batpak::__private::EventPayloadRegistration {
         kind_bits: COLLIDING_KIND_BITS,
+        payload_version: 1,
         type_name: "event_payload_collision_default_fail_fast::FirstColliding",
     }
 }
@@ -29,6 +30,7 @@ batpak::__private::inventory::submit! {
 batpak::__private::inventory::submit! {
     batpak::__private::EventPayloadRegistration {
         kind_bits: COLLIDING_KIND_BITS,
+        payload_version: 1,
         type_name: "event_payload_collision_default_fail_fast::SecondColliding",
     }
 }

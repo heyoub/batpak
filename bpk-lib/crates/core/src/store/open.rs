@@ -12,7 +12,19 @@ struct OpenComponents {
     store_lock: dir_lock::StoreDirLock,
 }
 
+/// Open-time health checks over the link-time `EventPayload` registries, both
+/// gated by the single [`EventPayloadValidation`] policy (default `FailFast`):
+///   1. kind collisions — two payload types claiming the same wire identity;
+///   2. incomplete upcast chains — a `version > 1` kind whose registered
+///      `Upcast` steps don't cover every `1 -> ... -> N` hop, which would let
+///      its older events silently become undecodable at read time.
 fn validate_payload_registry_for_open(config: &StoreConfig) -> Result<(), StoreError> {
+    validate_payload_collisions_for_open(config)?;
+    validate_upcast_chains_for_open(config)?;
+    Ok(())
+}
+
+fn validate_payload_collisions_for_open(config: &StoreConfig) -> Result<(), StoreError> {
     let Err(error) = event::payload::cached_event_payload_registry_validation() else {
         return Ok(());
     };
@@ -28,6 +40,26 @@ fn validate_payload_registry_for_open(config: &StoreConfig) -> Result<(), StoreE
             Ok(())
         }
         EventPayloadValidation::FailFast => Err(StoreError::EventPayloadRegistry(error)),
+        EventPayloadValidation::Silent => Ok(()),
+    }
+}
+
+fn validate_upcast_chains_for_open(config: &StoreConfig) -> Result<(), StoreError> {
+    let Err(error) = event::upcast::cached_upcast_chain_registry_validation() else {
+        return Ok(());
+    };
+    match config.event_payload_validation {
+        EventPayloadValidation::Warn => {
+            if event::upcast::mark_upcast_chain_registry_warning_emitted() {
+                tracing::warn!(
+                    target: "batpak::event_registry",
+                    incomplete_chains = ?error.incomplete_chains(),
+                    "EventPayload kind(s) declare version > 1 without a complete upcast chain; EventPayloadValidation::Warn is set, so the store opened despite events at older versions being undecodable at read time. The default EventPayloadValidation::FailFast refuses to open on an incomplete chain"
+                );
+            }
+            Ok(())
+        }
+        EventPayloadValidation::FailFast => Err(StoreError::UpcastChainIncomplete(error)),
         EventPayloadValidation::Silent => Ok(()),
     }
 }

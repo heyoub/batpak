@@ -1,5 +1,7 @@
 use crate::coordinate::CoordinateError;
-use crate::event::{EventPayloadRegistryError, ProjectionStateContract, StateExtent};
+use crate::event::{
+    EventPayloadRegistryError, ProjectionStateContract, StateExtent, UpcastChainRegistryError,
+};
 use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
@@ -132,6 +134,13 @@ pub enum StoreError {
     },
     /// Linked typed payloads claimed duplicate EventKind assignments.
     EventPayloadRegistry(EventPayloadRegistryError),
+    /// A linked payload kind declares `PAYLOAD_VERSION > 1` but its registered
+    /// `Upcast` steps do not form a complete `1 -> ... -> N` chain, so events
+    /// stored at an uncovered version would be undecodable at read time. The
+    /// store refuses to open (fail closed) under the default
+    /// [`EventPayloadValidation::FailFast`](crate::event::EventPayloadValidation)
+    /// rather than letting those historical events silently strand.
+    UpcastChainIncomplete(UpcastChainRegistryError),
     /// Group commit (batch > 1) requires an idempotency key on every append.
     IdempotencyRequired,
     /// A visibility fence is already active on this store.
@@ -507,6 +516,7 @@ impl std::error::Error for StoreError {
             | Self::InvariantViolation { .. }
             | Self::ChainVerificationFailed { .. } => None,
             Self::EventPayloadRegistry(error) => Some(error),
+            Self::UpcastChainIncomplete(error) => Some(error),
             Self::BatchFailed { source, .. } | Self::BatchSyncFailed { source, .. } => {
                 Some(source.as_ref())
             }
