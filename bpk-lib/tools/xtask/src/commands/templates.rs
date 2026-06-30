@@ -39,19 +39,41 @@ pub(crate) fn templates() -> Result<()> {
             fs::copy(&root_lock, smoke_dir.join("Cargo.lock"))
                 .with_context(|| format!("copy {}", root_lock.display()))?;
         }
+        let manifest_path = smoke_dir.join("Cargo.toml");
+
+        // Lint gate FIRST (fail before spending test time). Each template is its
+        // OWN cargo workspace, so the root `cargo clippy --workspace -- -D warnings`
+        // never reaches it — which is exactly how a dropped `#[must_use]`
+        // AppendReceipt warning once slipped into two templates: `cargo test` does
+        // not deny warnings. Hold every template to the same `-D warnings` bar as
+        // the workspace (clippy ⊇ rustc warnings) before exercising its behavior.
+        // Shares the smoke `--target-dir`, so core is checked once and reused.
+        let mut lint = Command::new("cargo");
+        lint.arg("clippy")
+            .arg("--manifest-path")
+            .arg(&manifest_path)
+            .arg("--target-dir")
+            .arg(&target_dir)
+            .arg("--all-features")
+            .arg("--all-targets")
+            .arg("--")
+            .arg("-D")
+            .arg("warnings")
+            .env("CARGO_NET_OFFLINE", "true");
+        run(lint).with_context(|| format!("template clippy (-D warnings) failed for {rel}"))?;
 
         let mut command = Command::new("cargo");
         command
             .arg("test")
             .arg("--manifest-path")
-            .arg(smoke_dir.join("Cargo.toml"))
+            .arg(&manifest_path)
             .arg("--target-dir")
             .arg(&target_dir)
             .env("CARGO_NET_OFFLINE", "true");
         run(command).with_context(|| format!("template smoke failed for {rel}"))?;
     }
 
-    outln!("template-smoke: ok");
+    outln!("template-smoke: ok (clippy -D warnings + test, per standalone template workspace)");
     Ok(())
 }
 
