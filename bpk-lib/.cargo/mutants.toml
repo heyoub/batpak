@@ -1,4 +1,10 @@
-test_tool = "cargo"
+# nextest (not raw `cargo test`) so a mutation that livelocks one test is reaped
+# as a per-test timeout (the `ci` profile's terminate-after, pinned via
+# NEXTEST_PROFILE in the mutants runner) instead of hanging the shared test
+# binary and masking the fast assertions that convict the mutant. The xtask
+# `mutants_command` also passes `--test-tool nextest` explicitly; this default
+# keeps a bare `cargo mutants` invocation consistent.
+test_tool = "nextest"
 sharding = "slice"
 output = "target/mutants.out"
 minimum_test_timeout = 120.0

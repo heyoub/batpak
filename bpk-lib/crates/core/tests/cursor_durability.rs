@@ -223,3 +223,69 @@ fn cursor_worker_surfaces_checkpoint_write_failure_through_join() {
     store.close().expect("close store after checkpoint failure");
     checkpoint_guard.assert_absent();
 }
+
+#[test]
+fn cursor_worker_stop_and_join_surfaces_startup_failure() {
+    // Distinct, namespaced id so this never collides with the `.join()` sibling
+    // under parallel test execution.
+    const STOP_JOIN_CORRUPT_ID: &str = "batpak-test-stop-join-corrupt";
+
+    let dir = TempDir::new().expect("temp dir");
+    let checkpoint_guard = StrayCheckpointGuard::new(STOP_JOIN_CORRUPT_ID);
+
+    // Plant a corrupt durable checkpoint so the worker fails closed during its
+    // asynchronous startup: it records StoreError::CursorCheckpointCorrupt into
+    // its error slot and exits on its own. That slotted error is exactly what
+    // `stop_and_join` must join-and-drain — the mutant that returns Ok(()) skips
+    // both the join and the drain.
+    let checkpoint_dir = dir.path().join("cursors");
+    std::fs::create_dir_all(&checkpoint_dir).expect("create cursor dir");
+    let checkpoint_path = checkpoint_dir.join(format!("{STOP_JOIN_CORRUPT_ID}.ckpt"));
+    std::fs::write(&checkpoint_path, b"not-msgpack").expect("write corrupt checkpoint");
+
+    let store = Arc::new(Store::open(config(&dir)).expect("open store"));
+    let coord = Coordinate::new("entity:cursor-stop-join", "scope:test").expect("valid coord");
+    // Seed a matching event so a (hypothetical) silent checkpoint-load skip could
+    // not idle forever instead of failing closed.
+    let _ = store
+        .append(&coord, KIND, &serde_json::json!({"i": 0}))
+        .expect("append seed event");
+
+    let mut worker_config = CursorWorkerConfig::default();
+    worker_config.batch_size = 1;
+    worker_config.idle_sleep = Duration::from_millis(1);
+    worker_config.restart = RestartPolicy::Once;
+    worker_config.checkpoint_id = Some(valid_checkpoint_id(STOP_JOIN_CORRUPT_ID));
+
+    let worker = store
+        .cursor_worker(
+            &Region::entity("entity:cursor-stop-join"),
+            worker_config,
+            |_batch, _store, _witness| CursorWorkerAction::Stop,
+        )
+        .expect("spawn cursor worker");
+
+    // The decisive call: route the startup failure through stop_and_join (NOT
+    // join). Real code signals stop, joins the already-exited thread, and
+    // surfaces the slotted error. The `Ok(())` mutant skips all of that, so this
+    // expect_err fails immediately — by assertion, never by hanging.
+    let err = worker.stop_and_join().expect_err(
+        "PROPERTY: stop_and_join must signal-stop, join the worker, and surface its startup error",
+    );
+    let expected_checkpoint_path =
+        std::fs::canonicalize(&checkpoint_path).expect("canonical checkpoint path");
+    assert!(
+        matches!(
+            &err,
+            batpak::store::StoreError::CursorCheckpointCorrupt { path, .. }
+                if *path == expected_checkpoint_path
+        ),
+        "expected CursorCheckpointCorrupt from stop_and_join at {expected_checkpoint_path:?}, got {err:?}"
+    );
+
+    let store = Arc::try_unwrap(store)
+        .map_err(|_| "shared")
+        .expect("cursor worker must release its Arc before close");
+    store.close().expect("close store after corrupt checkpoint");
+    checkpoint_guard.assert_absent();
+}

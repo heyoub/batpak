@@ -98,7 +98,13 @@ pub(super) fn mutants_command(
     args.push("--cargo-arg".to_owned());
     args.push("--locked".to_owned());
     args.push("--test-tool".to_owned());
-    args.push("cargo".to_owned());
+    // nextest, not raw `cargo test`: per-test process isolation + the `ci`
+    // profile's `terminate-after` (pinned via NEXTEST_PROFILE in run.rs) reap a
+    // mutation-induced livelock as a bounded per-test timeout, so a single hung
+    // test can no longer mask the fast-failing assertions that actually convict
+    // the mutant. This aligns the mutation lane with every other test lane in the
+    // house (run_nextest_ci), which has always run under nextest.
+    args.push("nextest".to_owned());
 
     if lane.diff_scoped {
         // Diff-scoped lanes mutate only the lines the PR touched, intersected

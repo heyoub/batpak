@@ -221,4 +221,25 @@ mod tests {
             "PROPERTY: more steps fold more ops into the digest"
         );
     }
+
+    #[test]
+    fn append_seq_increment_pins_digest() {
+        // The append branch folds the monotonic `next_seq` accumulator
+        // (workload.rs `next_seq += 1`) into the op-trace digest: directly, via
+        // the seq-keyed chain hash, and via the durable frontier folded each step.
+        // A mutant that turns `next_seq += 1` into `next_seq *= 1` pins next_seq at
+        // 0 forever (0 * 1 == 0), so every append folds seq 0 instead of 0,1,2,…,
+        // and the final digest diverges. No invariant trips under seq=0, so the
+        // mutant returns Ok with the wrong digest rather than erroring or hanging
+        // — pinning the exact value is what converts it from SURVIVOR to CAUGHT.
+        // The cooperative scheduler runs all work inline (no blocking wait), so
+        // this fails by assertion in microseconds, never by timeout.
+        let digest = Sim::new(0xABCD).run_workload(128).expect("invariants hold");
+        assert_eq!(
+            digest, 0x1E78_4376_CC78_14B4,
+            "PROPERTY: the seeded 128-step workload folds the strictly \
+             incrementing append sequence (next_seq += 1, not *= 1) into a \
+             byte-stable op-trace digest"
+        );
+    }
 }

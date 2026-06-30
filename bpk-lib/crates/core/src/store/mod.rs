@@ -444,3 +444,64 @@ mod writer_queue_len_tests {
         store.abandon_without_shutdown();
     }
 }
+
+#[cfg(test)]
+mod open_writer_queue_len_direct_tests {
+    //! Non-feature-gated companion to `writer_queue_len_tests`: pins
+    //! `<Open as StoreState>::writer_queue_len` WITHOUT `dangerous-test-hooks`,
+    //! so the `--no-default-features` repo-wide mutation surface — where the
+    //! cooperative-mode direct-assert test is not compiled — still catches the
+    //! `Some(0)` constant mutant of the `Open` impl by assertion.
+    //!
+    //! It builds an `Open` over a writer handle with NO draining thread
+    //! (`from_parts_for_test` => `WriterDrive::Threaded { thread: None }`),
+    //! enqueues a known command backlog, and reads the queue length DIRECTLY.
+    //! There is no writer thread and no wait loop, so under the mutant the test
+    //! fails an assertion in microseconds rather than being noticed only by a
+    //! spin-wait that hangs to the cargo-mutants test-timeout.
+    use super::{Open, StoreError, StoreState, SubscriberList, WriterCommand, WriterHandle};
+    use std::sync::Arc;
+
+    #[test]
+    fn open_writer_queue_len_reports_the_undrained_command_backlog() {
+        // `from_parts_for_test` yields `WriterDrive::Threaded { thread: None }`:
+        // nothing consumes the command channel, so every enqueued command stays
+        // counted by `tx.len()`. Keep `_command_rx` alive so the channel stays
+        // connected and the messages stay queued through the observation.
+        let (tx, _command_rx) = flume::bounded::<WriterCommand>(16);
+        let open = Open(WriterHandle::from_parts_for_test(
+            tx,
+            Arc::new(SubscriberList::new()),
+        ));
+
+        let (ack_tx, _ack_rx) = flume::bounded::<Result<(), StoreError>>(1);
+        let mut setup_failures: Vec<String> = Vec::new();
+        for n in 0..3u32 {
+            if open
+                .0
+                .tx
+                .send(WriterCommand::Shutdown {
+                    respond: ack_tx.clone(),
+                })
+                .is_err()
+            {
+                setup_failures.push(format!("could not enqueue writer command {n}"));
+            }
+        }
+
+        // Single, non-blocking read of the mutated method.
+        let observed = open.writer_queue_len();
+
+        assert!(
+            setup_failures.is_empty(),
+            "writer-command enqueue setup failed: {setup_failures:?}"
+        );
+        assert_eq!(
+            observed,
+            Some(3),
+            "Open::writer_queue_len must report the live writer command-channel \
+             backlog (3 un-drained commands); the Some(0) mutant fabricates an \
+             empty queue and the None mutant claims there is no writer at all"
+        );
+    }
+}

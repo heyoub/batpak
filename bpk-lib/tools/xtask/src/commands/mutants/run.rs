@@ -113,6 +113,16 @@ pub(super) fn run_mutation_lane(lane: &MutationLane) -> Result<()> {
     // rebuild. Keep mutation receipts honest by forcing clean codegen for the
     // lane instead of inheriting ambient incremental state.
     command.env("CARGO_INCREMENTAL", "0");
+    // Mutants run under `--test-tool nextest` (see `mutants_command`). Pin the
+    // `ci` nextest profile so every per-mutant run inherits its `terminate-after`
+    // slow-timeout: a mutation that drives a test into a livelock is reaped as a
+    // per-test timeout in bounded wall-clock instead of hanging the whole shared
+    // test binary to cargo-mutants' outer timeout. Under raw `cargo test` a single
+    // hung test masked every fast-failing assertion in the same binary, so
+    // genuinely killable mutants read as TIMEOUT survivors. The `ci` profile also
+    // carries the generous slow-timeout overrides for the known-slow property
+    // surfaces, so the unmutated baseline cannot trip terminate-after.
+    command.env("NEXTEST_PROFILE", "ci");
     let diff_path = if lane.diff_scoped {
         resolve_smoke_diff()?
     } else {
