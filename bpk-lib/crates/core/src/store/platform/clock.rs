@@ -404,4 +404,36 @@ mod tests {
              (>{EARLIEST_PLAUSIBLE_WALL_NS} ns), got {reading}"
         );
     }
+
+    #[test]
+    fn monotonic_clock_process_boot_ns_delegates_real_anchor() {
+        // MonotonicClock must forward the wrapped clock's process-epoch marker
+        // rather than synthesize a value. The static MonotonicAnchor encodes the
+        // wall-clock nanoseconds captured at first use, so any real boot marker is
+        // far above the trivial constants (`0`, `1`) a body-stubbing mutant
+        // substitutes. 1_600_000_000 s (~2020-09-13) is below any real "now" yet
+        // far above those stubs. No blocking wait: process_boot_ns is a direct
+        // return, so a divergent mutant fails an assertion immediately.
+        const EARLIEST_PLAUSIBLE_BOOT_NS: u64 = 1_600_000_000_000_000_000;
+
+        let inner = Arc::new(SystemClock::new());
+        let inner_boot = inner.process_boot_ns();
+        let mono = MonotonicClock::wrap(Arc::clone(&inner) as Arc<dyn Clock>);
+        let wrapped_boot = mono.process_boot_ns();
+
+        let mut failures: Vec<String> = Vec::new();
+        if wrapped_boot != inner_boot {
+            failures.push(format!(
+                "PROPERTY: MonotonicClock::process_boot_ns must delegate to the \
+                 wrapped clock unchanged: wrapped={wrapped_boot}, inner={inner_boot}"
+            ));
+        }
+        if wrapped_boot <= EARLIEST_PLAUSIBLE_BOOT_NS {
+            failures.push(format!(
+                "PROPERTY: the process boot marker is the real anchor wall-ns \
+                 (>{EARLIEST_PLAUSIBLE_BOOT_NS}), never a trivial stub: got {wrapped_boot}"
+            ));
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+    }
 }

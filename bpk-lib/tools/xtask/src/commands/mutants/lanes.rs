@@ -254,11 +254,16 @@ const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 // `store::write::staging::tests::prepared_batch_dedupes_entity_and_scope_strings`
 // (it asserts `len() == 3` and `total_bytes() == sum(payload_len)`; `len -> 0`
 // fails the count assertion and `+= -> -=` panics on usize subtract overflow at
-// the mutation site). They were excluded only because an integration path hung
-// to the 401s lane timeout — a wall-clock concern, not equivalence. cargo-mutants
-// treats a timeout as caught, and the fast unit test catches them first, so the
-// honest classification is "killable"; if the lane wall-clock regresses, tune the
-// per-mutant timeout / fail-fast rather than re-excluding a real, killable mutant.
+// the mutation site). They were excluded only because, under the old raw
+// `cargo test` runner, an integration path in the SAME test binary hung to the
+// lane timeout: `cargo test` never exits until every test finishes, so one hung
+// test masked these fast assertions and the whole binary read as a TIMEOUT
+// survivor (our policy treats a timeout as a FAILURE, not as caught). The lane
+// now runs under `--test-tool nextest` with the `ci` profile's terminate-after
+// (see run.rs / mutants.toml): each test is process-isolated, a livelock is
+// reaped as a bounded per-test timeout, and the fast unit test convicts the
+// mutant by assertion first. So the honest classification really is "killable"
+// and these stay un-excluded.
 const WRITER_COMMIT_MUTANT_EXCLUDE_RES: &[&str] = &[];
 // Equivalent-mutant registry for the projection-flow seam. Each entry is a
 // mutant proven to have no observable effect on projection output; excluding

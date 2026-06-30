@@ -150,7 +150,7 @@ mod tests {
                 "--cargo-arg",
                 "--locked",
                 "--test-tool",
-                "cargo",
+                "nextest",
             ]
             .into_iter()
             .map(str::to_owned)
@@ -192,7 +192,7 @@ mod tests {
                 "--cargo-arg",
                 "--locked",
                 "--test-tool",
-                "cargo",
+                "nextest",
             ]
             .into_iter()
             .map(str::to_owned)

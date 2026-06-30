@@ -543,4 +543,48 @@ mod tests {
             .expect("PROPERTY: publish must wake a parked reader before its timeout");
         waiter.join().expect("park waiter joins");
     }
+
+    #[test]
+    fn publish_on_lanes_accepts_publish_at_allocated_frontier() {
+        // The upper guard rejects ONLY a publish strictly past the frontier
+        // (global_up_to > allocated). A publish exactly AT the frontier
+        // (global_up_to == allocated) is the normal steady-state publish and
+        // MUST be accepted, advancing visibility. A `>` -> `>=` mutant refuses
+        // this case, so the live store never advances `visible`, never signals
+        // the visibility epoch, and frontier waiters block until timeout (the
+        // suite would only notice by hanging). This synchronous unit call catches
+        // the mutant by assertion in microseconds: no park, no hang.
+        let gate = SequenceGate::new();
+        gate.reserve(8);
+        assert_eq!(
+            gate.allocated(),
+            8,
+            "PRECONDITION: reserve(8) advances the allocator to 8"
+        );
+
+        // Publish exactly AT the allocated frontier: global_up_to == allocated == 8.
+        let at_frontier = gate.publish_on_lanes(8, [(1, 8)], "test_publish_at_frontier");
+        assert!(
+            at_frontier.is_ok(),
+            "PROPERTY: publishing at the allocated frontier (global_up_to == allocated) \
+             must be accepted, not refused as a SequenceGateViolation; got {at_frontier:?}"
+        );
+        assert_eq!(
+            gate.visible(),
+            8,
+            "PROPERTY: a frontier publish must advance global visibility to the frontier"
+        );
+
+        // The upper teeth of the guard still bite: strictly past the frontier is refused.
+        let past_frontier = gate.publish_on_lanes(
+            9,
+            std::iter::empty::<(u32, u64)>(),
+            "test_publish_past_frontier",
+        );
+        assert!(
+            past_frontier.is_err(),
+            "PROPERTY: publishing past the allocated frontier (global_up_to > allocated) \
+             must be refused; got {past_frontier:?}"
+        );
+    }
 }
