@@ -42,3 +42,29 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 
 [profile.default.junit]
 path = "junit.xml"
+
+# cargo-mutants runs every per-mutant test invocation under this profile
+# (NEXTEST_PROFILE=mutants, pinned by the mutants runner). `fail-fast = true` is
+# LOAD-BEARING for mutation: a mutant is convicted the instant ANY test fails, so
+# a fast-failing assertion short-circuits the run BEFORE a sibling test that the
+# mutation livelocked can hang it. Under `fail-fast = false` a single hung test
+# grinds the whole suite to cargo-mutants' outer timeout and the mutant reads as a
+# TIMEOUT survivor even though a fast assertion already caught it — cargo-mutants'
+# own docs recommend keeping fail-fast on for mutation. `terminate-after` is the
+# backstop for a pure-hang mutant that no assertion catches: the hung test is
+# reaped as a per-test timeout-failure instead of hanging the run.
+[profile.mutants]
+retries = 0
+fail-fast = true
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+# Mirror the ci profile's generous budgets for the known-slow surfaces so the
+# unmutated baseline (which runs every test, fail-fast never triggering) cannot
+# trip terminate-after.
+[[profile.mutants.overrides]]
+filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reopen_paths_match)"
+slow-timeout = { period = "120s", terminate-after = 2 }
+
+[[profile.mutants.overrides]]
+filter = "test(compile_fail) | test(downstream_fixture)"
+slow-timeout = { period = "300s", terminate-after = 2 }

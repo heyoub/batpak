@@ -259,10 +259,11 @@ const SEGMENT_SCAN_MUTANT_EXCLUDE_RES: &[&str] = &[];
 // lane timeout: `cargo test` never exits until every test finishes, so one hung
 // test masked these fast assertions and the whole binary read as a TIMEOUT
 // survivor (our policy treats a timeout as a FAILURE, not as caught). The lane
-// now runs under `--test-tool nextest` with the `ci` profile's terminate-after
-// (see run.rs / mutants.toml): each test is process-isolated, a livelock is
-// reaped as a bounded per-test timeout, and the fast unit test convicts the
-// mutant by assertion first. So the honest classification really is "killable"
+// now runs under `--test-tool nextest` with the `mutants` profile's
+// `fail-fast = true` (see run.rs / .config/nextest.toml): the run is convicted the
+// instant the fast unit test fails — before any sibling test the mutation
+// livelocked can hang it — with terminate-after as a pure-hang backstop. So the
+// honest classification really is "killable"
 // and these stay un-excluded.
 const WRITER_COMMIT_MUTANT_EXCLUDE_RES: &[&str] = &[];
 // Equivalent-mutant registry for the projection-flow seam. Each entry is a

@@ -1,9 +1,11 @@
-# nextest (not raw `cargo test`) so a mutation that livelocks one test is reaped
-# as a per-test timeout (the `ci` profile's terminate-after, pinned via
-# NEXTEST_PROFILE in the mutants runner) instead of hanging the shared test
-# binary and masking the fast assertions that convict the mutant. The xtask
-# `mutants_command` also passes `--test-tool nextest` explicitly; this default
-# keeps a bare `cargo mutants` invocation consistent.
+# nextest (not raw `cargo test`) so the per-mutant run is convicted by a
+# fast-failing assertion instead of hanging the shared test binary. The runner
+# pins the `mutants` nextest profile (NEXTEST_PROFILE in run.rs), whose
+# `fail-fast = true` short-circuits the run on the first failure — before a
+# sibling test the mutation livelocked can hang it — with `terminate-after` as the
+# backstop for a pure-hang mutant. The xtask `mutants_command` also passes
+# `--test-tool nextest` explicitly; this default keeps a bare `cargo mutants`
+# invocation consistent.
 test_tool = "nextest"
 sharding = "slice"
 output = "target/mutants.out"
