@@ -21,6 +21,26 @@ const HOST_CONTROL_CAPABILITY: &str = "host.control";
 const PROJECTION_QUERY_CAPABILITY: &str = "projection.query";
 const RECEIPT_EMIT_CAPABILITY: &str = "receipt.emit";
 
+/// Return true when `token` is an effect-axis capability auto-declared by an
+/// effect builder (`reads_event`, `appends_event`, `queries_projection`,
+/// `emits_receipt`, `uses_host_control`).
+///
+/// Those axes are already mediated by the observed-effect subset check at
+/// checkout, so their tokens are ambient: the runtime grant gate skips them and
+/// the Core need not be granted them explicitly. Every OTHER declared capability
+/// token (e.g. one added via [`OperationEffectRow::requires_capability`] or the
+/// `#[operation]` macro) is gated against the Core's granted capability set.
+pub(crate) fn is_reserved_effect_capability(token: &str) -> bool {
+    matches!(
+        token,
+        EVENT_APPEND_CAPABILITY
+            | EVENT_READ_CAPABILITY
+            | HOST_CONTROL_CAPABILITY
+            | PROJECTION_QUERY_CAPABILITY
+            | RECEIPT_EMIT_CAPABILITY
+    )
+}
+
 /// Canonical, stable append-target identity for an event kind.
 ///
 /// The runtime records this for every event an operation appends, so an

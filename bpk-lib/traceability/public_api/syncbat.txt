@@ -23,6 +23,8 @@ pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_status_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::effect_backend<B>(&mut self, backend: B) -> &mut Self where B: syncbat::effect_backend::EffectBackend + 'static
 pub fn syncbat::builder::CoreBuilder::effect_backend_boxed(&mut self, backend: alloc::boxed::Box<(dyn syncbat::effect_backend::EffectBackend + 'static)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self where I: core::iter::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
+pub fn syncbat::builder::CoreBuilder::grant_capability(&mut self, capability: impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
 pub fn syncbat::builder::CoreBuilder::receipt_hash_policy(&mut self, policy: syncbat::receipt::ReceiptHashPolicy) -> &mut Self
@@ -1329,6 +1331,8 @@ pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_status_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::effect_backend<B>(&mut self, backend: B) -> &mut Self where B: syncbat::effect_backend::EffectBackend + 'static
 pub fn syncbat::builder::CoreBuilder::effect_backend_boxed(&mut self, backend: alloc::boxed::Box<(dyn syncbat::effect_backend::EffectBackend + 'static)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self where I: core::iter::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
+pub fn syncbat::builder::CoreBuilder::grant_capability(&mut self, capability: impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
 pub fn syncbat::builder::CoreBuilder::receipt_hash_policy(&mut self, policy: syncbat::receipt::ReceiptHashPolicy) -> &mut Self

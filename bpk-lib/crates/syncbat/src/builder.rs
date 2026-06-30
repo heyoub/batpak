@@ -1,6 +1,6 @@
 //! Builder for the synchronous runtime composition root.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::admission::AdmissionGuard;
@@ -37,6 +37,10 @@ pub struct CoreBuilder {
     status_sink: Option<BoxedStatusSink>,
     receipt_hash_policy: ReceiptHashPolicy,
     effect_backend: Option<BoxedEffectBackend>,
+    /// Capability tokens this Core is granted. At checkout the runtime fails
+    /// closed when a dispatched operation declares a required capability token
+    /// that is not in this set (effect-axis tokens are ambient and excluded).
+    granted_capabilities: BTreeSet<String>,
 }
 
 impl CoreBuilder {
@@ -262,6 +266,35 @@ impl CoreBuilder {
         self
     }
 
+    /// Grant one runtime capability token to the built [`Core`].
+    ///
+    /// At checkout the runtime fails closed when a dispatched operation declares
+    /// a required capability token it was not granted. Tokens are declared with
+    /// `OperationEffectRow::requires_capability` or the `#[operation]` macro's
+    /// `requires_capabilities`. Effect-axis tokens auto-declared by the effect
+    /// builders (event read/append, projection query, receipt emit, host
+    /// control) are ambient — they are mediated by the observed-effect subset
+    /// check and never need an explicit grant. A Core granted nothing therefore
+    /// runs only operations that declare no extra capability tokens.
+    pub fn grant_capability(&mut self, capability: impl Into<String>) -> &mut Self {
+        self.granted_capabilities.insert(capability.into());
+        self
+    }
+
+    /// Grant several runtime capability tokens to the built [`Core`].
+    ///
+    /// Convenience over repeated [`Self::grant_capability`] calls; see it for
+    /// the gate semantics.
+    pub fn grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.granted_capabilities
+            .extend(capabilities.into_iter().map(Into::into));
+        self
+    }
+
     /// Configure the runtime-owned effect backend.
     ///
     /// Operations append events only through `Ctx`, which performs the append
@@ -316,6 +349,7 @@ impl CoreBuilder {
             status_sink: self.status_sink,
             receipt_hash_policy: self.receipt_hash_policy,
             effect_backend: self.effect_backend,
+            granted_capabilities: self.granted_capabilities,
         })
     }
 }

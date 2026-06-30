@@ -1,7 +1,7 @@
 //! PROVES: S12-SUBSCRIPTION-RUNTIME-OPERATION-STATUS syncbat runtime engine.
 //! CATCHES: catch-up/live/watermark/ACK/backpressure/cursor/checkout regressions.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -770,6 +770,7 @@ fn subscription_runtime_operation_status_missing_handler_records_failed_terminal
         status_sink: Some(Arc::new(StoreOperationStatusSink::new(Arc::clone(&store)))),
         receipt_hash_policy: ReceiptHashPolicy::default(),
         effect_backend: None,
+        granted_capabilities: BTreeSet::new(),
     };
 
     let error = match core.invoke(OPERATION, b"hello".to_vec()) {
