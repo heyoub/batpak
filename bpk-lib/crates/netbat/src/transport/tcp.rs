@@ -139,6 +139,13 @@ pub struct TcpServeStats {
     /// misbehaving peer can't tear down the whole listener; counting
     /// them keeps the failure mode observable for operators.
     pub connection_io_failures: usize,
+    /// Connection workers whose per-connection path unwound on a panic
+    /// (a buggy handler, an arithmetic overflow under `overflow-checks`,
+    /// etc.). The panic is caught at the worker boundary so it can't
+    /// poison the listener's join or stop the accept loop from serving
+    /// other connections; counting it keeps a server-side fault
+    /// observable instead of silently swallowed.
+    pub worker_panics: usize,
     /// True when the listener exited because its shutdown handle was set.
     pub shutdown_requested: bool,
 }
@@ -232,6 +239,12 @@ where
 /// or service of other clients. `max_connections` remains a lifetime accept
 /// budget, not an in-flight concurrency cap.
 ///
+/// A panic inside a connection worker (a buggy handler, an overflow-checked
+/// wrap, etc.) is caught at the worker boundary, counted in
+/// [`TcpServeStats::worker_panics`], and otherwise contained: it never poisons
+/// the listener's worker join nor stops the accept loop from serving the next
+/// connection.
+///
 /// # Errors
 /// Returns [`NetbatError`] when listener configuration, accept, worker spawn,
 /// timeout configuration, or response writes fail. Per-request decode/runtime
@@ -314,8 +327,28 @@ where
                 Err(_) => return,
             };
             let mut conn_stats = TcpServeStats::default();
-            if serve_tcp_connection(stream, &mut core, &config, &mut conn_stats).is_ok() {
-                let _ = stats_tx.send(conn_stats);
+            // Contain a per-connection panic HERE rather than letting the
+            // worker thread unwind out. An escaped panic would surface at the
+            // listener's `worker.join()` as an `Err`, which the join loop
+            // escalated to a listener-wide failure AND short-circuited (so
+            // every later worker went un-joined). Catching at the worker
+            // boundary keeps `join()` infallible, the listener `Ok`, and the
+            // accept loop serving; the panic is counted so it stays observable.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                serve_tcp_connection(stream, &mut core, &config, &mut conn_stats)
+            }));
+            match outcome {
+                Ok(Ok(())) => {
+                    let _ = stats_tx.send(conn_stats);
+                }
+                // serve_tcp_connection already classifies its own fatal
+                // returns; preserve the prior behaviour of not reporting
+                // stats for that connection.
+                Ok(Err(_)) => {}
+                Err(_panic) => {
+                    conn_stats.worker_panics += 1;
+                    let _ = stats_tx.send(conn_stats);
+                }
             }
         })
         .map_err(NetbatError::from)
@@ -334,6 +367,7 @@ fn merge_tcp_serve_stats(total: &mut TcpServeStats, partial: TcpServeStats) {
     total.limit_failures += partial.limit_failures;
     total.runtime_failures += partial.runtime_failures;
     total.connection_io_failures += partial.connection_io_failures;
+    total.worker_panics += partial.worker_panics;
 }
 
 fn serve_tcp_connection(
@@ -527,6 +561,21 @@ mod tests {
         };
         merge_tcp_serve_stats(&mut total, partial);
         assert_eq!(total.connection_io_failures, 5);
+    }
+
+    #[test]
+    fn merge_tcp_serve_stats_sums_worker_panics() {
+        // KILLS mutants on the `worker_panics += partial.worker_panics`
+        // merge line (`+=` -> `*=`/`-=`, or a dropped merge). With `*=` the
+        // merged total stays 0; with `-=` it underflows. Only real addition
+        // yields 3.
+        let mut total = TcpServeStats::default();
+        let partial = TcpServeStats {
+            worker_panics: 3,
+            ..Default::default()
+        };
+        merge_tcp_serve_stats(&mut total, partial);
+        assert_eq!(total.worker_panics, 3);
     }
 
     #[test]

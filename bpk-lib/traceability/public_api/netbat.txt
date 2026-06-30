@@ -214,6 +214,7 @@ pub netbat::TcpServeStats::malformed_requests: usize
 pub netbat::TcpServeStats::runtime_failures: usize
 pub netbat::TcpServeStats::served_requests: usize
 pub netbat::TcpServeStats::shutdown_requested: bool
+pub netbat::TcpServeStats::worker_panics: usize
 #[non_exhaustive] pub struct netbat::TcpServerConfig
 pub netbat::TcpServerConfig::idle_sleep: core::time::Duration
 pub netbat::TcpServerConfig::limits: netbat::Limits
