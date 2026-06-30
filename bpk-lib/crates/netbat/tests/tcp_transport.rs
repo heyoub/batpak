@@ -5,9 +5,17 @@
 use netbat as nb;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
+use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 use syncbat::{Core, EffectClass, Handler, HandlerResult, OperationDescriptor};
+
+/// Construct a `Lifetime` connection limit of `value` — the pre-0.9
+/// `max_connections` semantics these tests rely on to make the listener exit
+/// after a fixed number of accepts.
+fn lifetime(value: usize) -> nb::ConnectionLimit {
+    nb::ConnectionLimit::Lifetime(NonZeroUsize::new(value).expect("nonzero connection limit"))
+}
 
 const PING: OperationDescriptor = OperationDescriptor::new(
     "ping",
@@ -101,7 +109,7 @@ fn tcp_listener_serves_one_real_socket_request() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig::default().with_max_connections(1);
+    let config = nb::TcpServerConfig::default().with_connection_limit(lifetime(1));
     let handle = spawn_server("netbat-tcp-one", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -132,7 +140,7 @@ fn tcp_listener_enforces_request_limit_per_connection() {
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(1)
+        .with_connection_limit(lifetime(1))
         .with_max_requests_per_connection(1);
     let handle = spawn_server("netbat-tcp-limit", listener, config, server_shutdown);
 
@@ -171,7 +179,7 @@ fn tcp_listener_writes_stable_error_response_for_bad_request() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig::default().with_max_connections(1);
+    let config = nb::TcpServerConfig::default().with_connection_limit(lifetime(1));
     let handle = spawn_server("netbat-tcp-error", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -198,7 +206,7 @@ fn tcp_listener_keeps_connection_after_request_error_when_limit_allows() {
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(1)
+        .with_connection_limit(lifetime(1))
         .with_max_requests_per_connection(2);
     let handle = spawn_server(
         "netbat-tcp-keepalive-error",
@@ -235,7 +243,7 @@ fn tcp_listener_rejects_unsupported_protocol_version() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig::default().with_max_connections(1);
+    let config = nb::TcpServerConfig::default().with_connection_limit(lifetime(1));
     let handle = spawn_server("netbat-tcp-version", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -265,7 +273,7 @@ fn tcp_listener_accounts_limit_failures() {
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(1)
+        .with_connection_limit(lifetime(1))
         .with_limits(nb::Limits::default().with_max_line_bytes(8));
     let handle = spawn_server("netbat-tcp-line-limit", listener, config, server_shutdown);
 
@@ -295,7 +303,7 @@ fn tcp_listener_accounts_runtime_failures() {
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
 
-    let config = nb::TcpServerConfig::default().with_max_connections(1);
+    let config = nb::TcpServerConfig::default().with_connection_limit(lifetime(1));
     let handle = spawn_server("netbat-tcp-runtime", listener, config, server_shutdown);
 
     let mut stream = connect_client(addr);
@@ -352,7 +360,7 @@ fn connect_and_close_does_not_kill_the_listener() {
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(3)
+        .with_connection_limit(lifetime(3))
         .with_idle_sleep(Duration::from_millis(1));
     let handle = spawn_server("netbat-empty-stream", listener, config, server_shutdown);
 
@@ -407,7 +415,7 @@ fn line_too_long_closes_connection_to_keep_framing_synchronized() {
     let tiny_limits = nb::Limits::default().with_max_line_bytes(32);
     let config = nb::TcpServerConfig::default()
         .with_limits(tiny_limits)
-        .with_max_connections(1)
+        .with_connection_limit(lifetime(1))
         .with_max_requests_per_connection(5);
     let handle = spawn_server("netbat-line-too-long", listener, config, server_shutdown);
 
@@ -471,7 +479,7 @@ fn peer_close_mid_response_does_not_kill_the_listener() {
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(2)
+        .with_connection_limit(lifetime(2))
         .with_idle_sleep(Duration::from_millis(1));
     let handle = spawn_server(
         "netbat-peer-close-mid-response",
@@ -531,7 +539,7 @@ fn concurrent_accept_slow_client_does_not_block_fast_client(
     let server_shutdown = shutdown.clone();
 
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(2)
+        .with_connection_limit(lifetime(2))
         .with_idle_sleep(Duration::from_millis(1));
     let handle = thread::Builder::new()
         .name("netbat-tcp-concurrent".to_owned())
@@ -621,7 +629,7 @@ fn handler_panic_is_contained_counted_and_not_listener_fatal(
     // max_connections == 2: the accept loop takes the panicking connection and
     // the clean connection, then exits and joins both workers.
     let config = nb::TcpServerConfig::default()
-        .with_max_connections(2)
+        .with_connection_limit(lifetime(2))
         .with_idle_sleep(Duration::from_millis(1));
     let handle = thread::Builder::new()
         .name("netbat-tcp-panic".to_owned())

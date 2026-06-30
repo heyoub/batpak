@@ -9,10 +9,9 @@ use syncbat::CoreFactory;
 
 use super::error::NetbatError;
 use super::frame::{decode_line, dispatch_frame, encode_response, ResponseFrame};
+use super::limiter::{stats_lane, Admission, ConnectionLimit, ConnectionPermit, Limiter};
 use super::limits::{IoTimeouts, Limits};
 
-/// Default maximum accepted connections for [`serve_tcp_listener`].
-pub const DEFAULT_MAX_CONNECTIONS: usize = 1024;
 /// Default maximum requests served from one accepted TCP connection.
 pub const DEFAULT_MAX_REQUESTS_PER_CONNECTION: usize = 1;
 
@@ -27,8 +26,10 @@ pub struct TcpServerConfig {
     pub limits: Limits,
     /// Optional per-connection read/write timeouts.
     pub timeouts: IoTimeouts,
-    /// Maximum accepted connections before the listener returns.
-    pub max_connections: usize,
+    /// How accepted connections are capped. Defaults to
+    /// [`ConnectionLimit::Concurrent`] — an in-flight permit pool, not a
+    /// lifetime accept budget.
+    pub connection_limit: ConnectionLimit,
     /// Maximum requests served per accepted connection.
     pub max_requests_per_connection: usize,
     /// Sleep interval used by the nonblocking accept loop when no connection
@@ -41,7 +42,7 @@ impl Default for TcpServerConfig {
         Self {
             limits: Limits::default(),
             timeouts: IoTimeouts::default(),
-            max_connections: DEFAULT_MAX_CONNECTIONS,
+            connection_limit: ConnectionLimit::default(),
             max_requests_per_connection: DEFAULT_MAX_REQUESTS_PER_CONNECTION,
             idle_sleep: Duration::from_millis(10),
         }
@@ -70,10 +71,10 @@ impl TcpServerConfig {
         self
     }
 
-    /// Override [`TcpServerConfig::max_connections`].
+    /// Override [`TcpServerConfig::connection_limit`].
     #[must_use]
-    pub const fn with_max_connections(mut self, value: usize) -> Self {
-        self.max_connections = value;
+    pub const fn with_connection_limit(mut self, value: ConnectionLimit) -> Self {
+        self.connection_limit = value;
         self
     }
 
@@ -234,10 +235,18 @@ where
 /// The accept loop stays on the caller's thread and spawns one worker thread
 /// per accepted connection. Each worker opens a fresh [`syncbat::Core`] from
 /// `core_factory` because `Core` dispatch is `&mut` and handlers are not
-/// required to be `Send`. Connection stats are merged through a bounded flume
-/// lane after workers join, so a slow client cannot head-of-line-block accept
-/// or service of other clients. `max_connections` remains a lifetime accept
-/// budget, not an in-flight concurrency cap.
+/// required to be `Send`. Connection stats are merged through a flume lane as
+/// workers finish, so a slow client cannot head-of-line-block accept or service
+/// of other clients.
+///
+/// Admission is governed by [`TcpServerConfig::connection_limit`]. The default
+/// [`ConnectionLimit::Concurrent`] is a flume permit pool: a connection acquires
+/// a permit before serving and releases it on every exit path, so the in-flight
+/// count never exceeds the cap and a freed slot is reused; the accept loop
+/// blocks for a free slot when the pool is empty. [`ConnectionLimit::Lifetime`]
+/// retains the pre-0.9 behavior (stop accepting after N total). Finished worker
+/// handles are pruned each accept iteration so a long-lived `Concurrent` or
+/// `Unlimited` listener does not accumulate join handles without bound.
 ///
 /// A panic inside a connection worker (a buggy handler, an overflow-checked
 /// wrap, etc.) is caught at the worker boundary, counted in
@@ -252,7 +261,7 @@ where
 /// response is written.
 #[tracing::instrument(name = "netbat.serve_tcp_listener", skip_all, fields(
     addr = %listener.local_addr().map(|a| a.to_string()).unwrap_or_default(),
-    max_connections = config.max_connections,
+    connection_limit = ?config.connection_limit,
 ))]
 pub fn serve_tcp_listener<F>(
     listener: TcpListener,
@@ -265,15 +274,25 @@ where
 {
     listener.set_nonblocking(true)?;
     let mut stats = TcpServeStats::default();
-    let (stats_tx, stats_rx) = flume::bounded(config.max_connections.max(1));
+    let limiter = Limiter::from_limit(config.connection_limit);
+    let (stats_tx, stats_rx) = stats_lane(config.connection_limit);
     let factory = Arc::new(Mutex::new(core_factory));
     let mut workers: Vec<JoinHandle<()>> = Vec::new();
     tracing::info!("accept loop started");
 
-    while !shutdown.is_shutdown() && stats.accepted_connections < config.max_connections {
+    while !shutdown.is_shutdown() && limiter.accepting(stats.accepted_connections) {
         drain_connection_stats(&mut stats, &stats_rx);
+        workers.retain(|worker| !worker.is_finished());
         match listener.accept() {
             Ok((stream, addr)) => {
+                // Acquire a concurrency permit BEFORE serving (blocks for the
+                // `Concurrent` pool, instant otherwise). Holding the just-
+                // accepted stream while blocking is the intended back-pressure:
+                // we never spawn beyond the in-flight cap.
+                let permit = match limiter.admit(shutdown, config.idle_sleep) {
+                    Admission::Permit(permit) => permit,
+                    Admission::Shutdown => break,
+                };
                 stats.accepted_connections += 1;
                 tracing::debug!(peer = %addr, "connection accepted");
                 stream.set_nonblocking(false)?;
@@ -281,7 +300,9 @@ where
                 let config = *config;
                 let stats_tx = stats_tx.clone();
                 let factory = Arc::clone(&factory);
-                workers.push(spawn_connection_worker(stream, config, stats_tx, factory)?);
+                workers.push(spawn_connection_worker(
+                    stream, config, stats_tx, factory, permit,
+                )?);
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(config.idle_sleep);
@@ -315,6 +336,7 @@ fn spawn_connection_worker<F>(
     config: TcpServerConfig,
     stats_tx: flume::Sender<TcpServeStats>,
     factory: Arc<Mutex<F>>,
+    permit: ConnectionPermit,
 ) -> Result<JoinHandle<()>, NetbatError>
 where
     F: CoreFactory + Send + 'static,
@@ -322,6 +344,12 @@ where
     thread::Builder::new()
         .name("netbat-tcp-conn".to_owned())
         .spawn(move || {
+            // The permit lives for the whole worker body and releases its
+            // concurrency slot on drop — on the early `return` below, the
+            // normal return, the error return, AND the caught-panic path —
+            // because `Drop` runs on every scope exit, unwinding included. Held
+            // OUTSIDE the `catch_unwind` so a panic cannot skip the release.
+            let _permit = permit;
             let mut core = match factory.lock() {
                 Ok(mut factory) => factory.open_core(),
                 Err(_) => return,

@@ -6,7 +6,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use syncbat::{
@@ -16,6 +16,7 @@ use syncbat::{
 };
 
 use super::error::NetbatError;
+use super::limiter::{stats_lane, Admission, ConnectionLimit, ConnectionPermit, Limiter};
 use super::limits::IoTimeouts;
 use super::limits::Limits;
 use super::stream_frame::{
@@ -44,8 +45,31 @@ pub struct TcpSubscriptionServeStats {
     pub runtime_failures: usize,
     /// Peer-driven connection IO failures.
     pub connection_io_failures: usize,
+    /// Subscription workers whose session path unwound on a panic. The panic is
+    /// caught at the worker boundary so one bad session cannot poison the
+    /// listener's join nor stop the accept loop; counting it keeps the
+    /// server-side fault observable instead of silently swallowed. Always zero
+    /// in [`SubscriptionDispatch::Sequential`] mode, where a panic propagates
+    /// inline as it did pre-0.9.
+    pub worker_panics: usize,
     /// True when shutdown was requested.
     pub shutdown_requested: bool,
+}
+
+/// How the subscription listener dispatches each accepted session.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SubscriptionDispatch {
+    /// Spawn a worker thread per subscription session (mirrors the request
+    /// listener), so N subscribers stream concurrently while the accept loop
+    /// stays free. Gated by the config's [`ConnectionLimit`] permit pool, with
+    /// the same `catch_unwind` containment as the request path. The default.
+    #[default]
+    Concurrent,
+    /// Serve each session inline on the accept thread, one at a time — the
+    /// pre-0.9 behavior. A long-lived subscriber blocks the accept loop until
+    /// its session ends, so only one subscriber streams at a time. Retained as
+    /// an explicit opt-in.
+    Sequential,
 }
 
 /// Blocking NETBAT/2 subscription listener configuration.
@@ -56,8 +80,12 @@ pub struct TcpSubscriptionServerConfig {
     pub limits: Limits,
     /// Optional per-connection read/write timeouts.
     pub timeouts: IoTimeouts,
-    /// Maximum accepted connections before returning.
-    pub max_connections: usize,
+    /// How accepted subscription connections are capped. Defaults to
+    /// [`ConnectionLimit::Concurrent`].
+    pub connection_limit: ConnectionLimit,
+    /// Whether sessions are served concurrently (default) or inline on the
+    /// accept thread.
+    pub dispatch: SubscriptionDispatch,
     /// Idle sleep for nonblocking accept loops.
     pub idle_sleep: Duration,
 }
@@ -69,7 +97,8 @@ impl Default for TcpSubscriptionServerConfig {
             timeouts: IoTimeouts::default()
                 .with_read(Some(Duration::from_millis(250)))
                 .with_write(Some(Duration::from_secs(5))),
-            max_connections: super::tcp::DEFAULT_MAX_CONNECTIONS,
+            connection_limit: ConnectionLimit::default(),
+            dispatch: SubscriptionDispatch::default(),
             idle_sleep: Duration::from_millis(10),
         }
     }
@@ -137,28 +166,55 @@ pub fn serve_subscription_stream(
     Ok(stats)
 }
 
-/// Serve a blocking NETBAT/2 subscription TCP listener sequentially.
+/// Serve a blocking NETBAT/2 subscription TCP listener.
+///
+/// Admission is governed by [`TcpSubscriptionServerConfig::connection_limit`]
+/// (the same [`ConnectionLimit`] permit pool as the request listener). By
+/// default ([`SubscriptionDispatch::Concurrent`]) each accepted session is
+/// served on its own worker thread — mirroring the request listener's
+/// `catch_unwind`-contained worker — so the accept loop stays free and N
+/// subscribers stream concurrently; the per-session control lane and watermark
+/// delivery are unchanged, only moved off the accept thread.
+/// [`SubscriptionDispatch::Sequential`] keeps the pre-0.9 inline behavior (one
+/// subscriber at a time). The runtime is shared across workers (wrapped in an
+/// `Arc` internally), hence the `Send + Sync + 'static` bound — mirroring the
+/// request listener taking its `CoreFactory` by value.
 ///
 /// # Errors
-/// Listener configuration, accept, timeout, response write, or runtime poll failures.
-pub fn serve_tcp_subscription_listener(
+/// Listener configuration, accept, timeout, worker spawn, or — in `Sequential`
+/// mode only — a per-session response-write/runtime-poll failure (concurrent
+/// workers contain and count their own session failures).
+pub fn serve_tcp_subscription_listener<R>(
     listener: TcpListener,
-    runtime: &(impl SubscriptionSessionFactory + ?Sized),
+    runtime: R,
     config: &TcpSubscriptionServerConfig,
     shutdown: &ShutdownHandle,
-) -> Result<TcpSubscriptionServeStats, NetbatError> {
+) -> Result<TcpSubscriptionServeStats, NetbatError>
+where
+    R: SubscriptionSessionFactory + Send + Sync + 'static,
+{
     listener.set_nonblocking(true)?;
+    let runtime = Arc::new(runtime);
     let mut stats = TcpSubscriptionServeStats::default();
-    while !shutdown.is_shutdown() && stats.accepted_connections < config.max_connections {
+    let limiter = Limiter::from_limit(config.connection_limit);
+    let (stats_tx, stats_rx) = stats_lane(config.connection_limit);
+    let mut workers: Vec<JoinHandle<()>> = Vec::new();
+    while !shutdown.is_shutdown() && limiter.accepting(stats.accepted_connections) {
+        drain_subscription_stats(&mut stats, &stats_rx);
+        workers.retain(|worker| !worker.is_finished());
         match listener.accept() {
             Ok((stream, _addr)) => {
+                let permit = match limiter.admit(shutdown, config.idle_sleep) {
+                    Admission::Permit(permit) => permit,
+                    Admission::Shutdown => break,
+                };
                 stats.accepted_connections += 1;
                 stream.set_nonblocking(false)?;
                 apply_timeouts(&stream, config.timeouts)?;
-                match serve_tcp_subscription_connection(stream, runtime, config) {
-                    Ok(connection_stats) => merge_stats(&mut stats, connection_stats),
-                    Err(NetbatError::Io { .. }) => stats.connection_io_failures += 1,
-                    Err(error) => return Err(error),
+                if let Some(worker) =
+                    dispatch_subscription(stream, &runtime, config, &stats_tx, &mut stats, permit)?
+                {
+                    workers.push(worker);
                 }
             }
             Err(error) => match classify_accept_error(error.kind()) {
@@ -168,9 +224,116 @@ pub fn serve_tcp_subscription_listener(
             },
         }
     }
+    for worker in workers {
+        worker.join().map_err(|_| NetbatError::Io {
+            kind: io::ErrorKind::Other,
+        })?;
+    }
+    drain_subscription_stats(&mut stats, &stats_rx);
     stats.shutdown_requested = shutdown.is_shutdown();
     drop(listener);
     Ok(stats)
+}
+
+/// Route one accepted subscription connection per
+/// [`TcpSubscriptionServerConfig::dispatch`]. Sequential serves inline (updating
+/// `stats`, propagating a fatal per-session error as before); Concurrent spawns
+/// a contained worker and returns its handle for the listener to join.
+fn dispatch_subscription<R>(
+    stream: TcpStream,
+    runtime: &Arc<R>,
+    config: &TcpSubscriptionServerConfig,
+    stats_tx: &flume::Sender<TcpSubscriptionServeStats>,
+    stats: &mut TcpSubscriptionServeStats,
+    permit: ConnectionPermit,
+) -> Result<Option<JoinHandle<()>>, NetbatError>
+where
+    R: SubscriptionSessionFactory + Send + Sync + 'static,
+{
+    match config.dispatch {
+        SubscriptionDispatch::Sequential => {
+            serve_subscription_inline(stream, runtime.as_ref(), config, stats, permit)?;
+            Ok(None)
+        }
+        SubscriptionDispatch::Concurrent => Ok(Some(spawn_subscription_worker(
+            stream,
+            Arc::clone(runtime),
+            *config,
+            stats_tx.clone(),
+            permit,
+        )?)),
+    }
+}
+
+/// Pre-0.9 inline path: serve the session on the accept thread. `permit`
+/// releases the slot when the session ends. A non-IO error is fatal to the
+/// listener, exactly as before this mode became opt-in.
+fn serve_subscription_inline<R>(
+    stream: TcpStream,
+    runtime: &R,
+    config: &TcpSubscriptionServerConfig,
+    stats: &mut TcpSubscriptionServeStats,
+    permit: ConnectionPermit,
+) -> Result<(), NetbatError>
+where
+    R: SubscriptionSessionFactory,
+{
+    let _permit = permit;
+    match serve_tcp_subscription_connection(stream, runtime, config) {
+        Ok(connection_stats) => merge_stats(stats, connection_stats),
+        Err(NetbatError::Io { .. }) => stats.connection_io_failures += 1,
+        Err(error) => return Err(error),
+    }
+    Ok(())
+}
+
+/// Spawn a worker thread that serves one subscription session, mirroring the
+/// request listener's `spawn_connection_worker`: the session's control lane and
+/// watermark delivery run unchanged on this thread, a panic is caught at the
+/// worker boundary (counted, never listener-fatal), and `permit` releases the
+/// concurrency slot on every exit path including that caught panic.
+fn spawn_subscription_worker<R>(
+    stream: TcpStream,
+    runtime: Arc<R>,
+    config: TcpSubscriptionServerConfig,
+    stats_tx: flume::Sender<TcpSubscriptionServeStats>,
+    permit: ConnectionPermit,
+) -> Result<JoinHandle<()>, NetbatError>
+where
+    R: SubscriptionSessionFactory + Send + Sync + 'static,
+{
+    thread::Builder::new()
+        .name("netbat.sub-conn".to_owned())
+        .spawn(move || {
+            // Held OUTSIDE catch_unwind so a panic cannot skip the slot release.
+            let _permit = permit;
+            let mut conn_stats = TcpSubscriptionServeStats::default();
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                serve_tcp_subscription_connection(stream, runtime.as_ref(), &config)
+            }));
+            match outcome {
+                Ok(Ok(connection_stats)) => conn_stats = connection_stats,
+                // Peer-driven IO: count, do not escalate.
+                Ok(Err(NetbatError::Io { .. })) => conn_stats.connection_io_failures += 1,
+                // A non-IO session error (invalid config, runtime poll failure)
+                // is contained to this worker and counted, not escalated to a
+                // listener-wide failure: one bad subscriber must not tear down
+                // the others now that sessions run concurrently.
+                Ok(Err(_)) => conn_stats.failed_subscriptions += 1,
+                Err(_panic) => conn_stats.worker_panics += 1,
+            }
+            let _ = stats_tx.send(conn_stats);
+        })
+        .map_err(|error| NetbatError::Io { kind: error.kind() })
+}
+
+fn drain_subscription_stats(
+    total: &mut TcpSubscriptionServeStats,
+    stats_rx: &flume::Receiver<TcpSubscriptionServeStats>,
+) {
+    while let Ok(partial) = stats_rx.try_recv() {
+        merge_stats(total, partial);
+    }
 }
 
 fn serve_tcp_subscription_connection(
@@ -518,6 +681,7 @@ fn merge_stats(total: &mut TcpSubscriptionServeStats, connection: TcpSubscriptio
     total.malformed_pre_subscribe += connection.malformed_pre_subscribe;
     total.runtime_failures += connection.runtime_failures;
     total.connection_io_failures += connection.connection_io_failures;
+    total.worker_panics += connection.worker_panics;
 }
 
 fn map_runtime_error(error: &SubscriptionRuntimeError) -> NetbatError {
@@ -541,200 +705,5 @@ fn map_runtime_error(error: &SubscriptionRuntimeError) -> NetbatError {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Unit tests for private NETBAT/2 stream-TCP helpers. The public
-    //! `serve_*` entry points are exercised end-to-end in
-    //! `tests/mutation_kill_netbat-transport.rs`; these cover the small
-    //! pure helpers and the control-reader loop without TCP timing.
-
-    use super::*;
-    use std::io::Cursor;
-    use syncbat::SessionEventDelivery;
-
-    fn cursor(byte: u8) -> RuntimeCursor {
-        RuntimeCursor::from_bytes(vec![byte])
-    }
-
-    fn token() -> SubscriptionToken {
-        SubscriptionToken::new("orders.open.v1", &Limits::default()).expect("token")
-    }
-
-    #[test]
-    fn maybe_cursor_bytes_maps_present_and_absent() {
-        // KILLS stream_tcp.rs:264 (-> None / Some(vec![0]) / Some(vec![1]) /
-        // Some(vec![])). Present must yield the exact wrapped bytes; Absent
-        // must yield None.
-        assert_eq!(maybe_cursor_bytes(MaybeCursor::Absent), None);
-        assert_eq!(
-            maybe_cursor_bytes(MaybeCursor::Present(CursorBytes::new(vec![7, 9, 3]))),
-            Some(vec![7, 9, 3])
-        );
-    }
-
-    #[test]
-    fn classify_accept_error_maps_each_kind() {
-        // KILLS the accept-loop classification at the listener `accept()` site
-        // (formerly the WouldBlock/Interrupted match guards): WouldBlock ->
-        // retry-after-sleep, Interrupted (EINTR) -> retry-immediately, every
-        // other kind -> fatal. A real TcpListener cannot be coerced into
-        // returning Interrupted or an arbitrary fatal kind on demand, so this
-        // pure classifier is the only deterministic seam. Asserting all three
-        // distinct outcomes kills any constant-return or arm-swap mutation.
-        assert_eq!(
-            classify_accept_error(io::ErrorKind::WouldBlock),
-            AcceptError::WouldBlock
-        );
-        assert_eq!(
-            classify_accept_error(io::ErrorKind::Interrupted),
-            AcceptError::Interrupted
-        );
-        assert_eq!(
-            classify_accept_error(io::ErrorKind::BrokenPipe),
-            AcceptError::Fatal
-        );
-        assert_eq!(
-            classify_accept_error(io::ErrorKind::ConnectionReset),
-            AcceptError::Fatal
-        );
-    }
-
-    #[test]
-    fn timeout_kind_classifies_block_and_timeout_only() {
-        // KILLS stream_tcp.rs:369 (-> false / true). WouldBlock and TimedOut
-        // are timeout kinds; BrokenPipe is not.
-        assert!(timeout_kind(io::ErrorKind::WouldBlock));
-        assert!(timeout_kind(io::ErrorKind::TimedOut));
-        assert!(!timeout_kind(io::ErrorKind::BrokenPipe));
-    }
-
-    #[test]
-    fn terminal_delivery_is_true_only_for_error_and_end() {
-        // KILLS stream_tcp.rs:475 (-> false). End is terminal; an Event is not.
-        let end = SessionDelivery::End(SessionEnd {
-            subscription_id: "orders.open.v1".to_owned(),
-            reason_code: "stream.complete",
-            cursor_after: None,
-        });
-        let event = SessionDelivery::Event(SessionEventDelivery {
-            subscription_id: "orders.open.v1".to_owned(),
-            delivery_index: 1,
-            cursor_before: cursor(1),
-            cursor_after: cursor(2),
-            wire_payload_schema_ref: "hostbat.event.orders.v1".to_owned(),
-            envelope_bytes: vec![0],
-        });
-        assert!(terminal_delivery(&end));
-        assert!(!terminal_delivery(&event));
-    }
-
-    #[test]
-    fn merge_stats_sums_each_field() {
-        // KILLS stream_tcp.rs:489-493 (each `+=` -> `*=`/`-=`) and the
-        // merge_stats -> () body-drop. Distinct nonzero source values mean a
-        // dropped or multiplied/subtracted merge cannot reproduce the sums.
-        let mut total = TcpSubscriptionServeStats::default();
-        let connection = TcpSubscriptionServeStats {
-            served_subscriptions: 2,
-            failed_subscriptions: 3,
-            malformed_pre_subscribe: 4,
-            runtime_failures: 5,
-            connection_io_failures: 6,
-            ..Default::default()
-        };
-        merge_stats(&mut total, connection);
-        assert_eq!(total.served_subscriptions, 2);
-        assert_eq!(total.failed_subscriptions, 3);
-        assert_eq!(total.malformed_pre_subscribe, 4);
-        assert_eq!(total.runtime_failures, 5);
-        assert_eq!(total.connection_io_failures, 6);
-    }
-
-    const CANCEL_LINE: &[u8] = b"NETBAT/2 SUB_CANCEL orders.open.v1 client.cancel\n";
-
-    fn run_loop(reader: &mut impl Read, stop: &AtomicBool) -> Vec<SessionControl> {
-        let (tx, rx) = flume::bounded(16);
-        let limits = Limits::default();
-        let id = token();
-        let _ = read_control_loop(reader, &tx, &limits, &id, stop);
-        drop(tx);
-        rx.try_iter().collect()
-    }
-
-    #[test]
-    fn read_control_loop_matching_cancel_emits_cancel() {
-        // KILLS stream_tcp.rs:348 (`!=` -> `==`). A SUB_CANCEL whose id MATCHES
-        // the session must forward Cancel; under the inverted comparison a
-        // matching id would be reported Malformed instead.
-        let mut reader = Cursor::new(CANCEL_LINE.to_vec());
-        let stop = AtomicBool::new(false);
-        let got = run_loop(&mut reader, &stop);
-        assert!(
-            matches!(got.first(), Some(SessionControl::Cancel)),
-            "expected Cancel, got {got:?}"
-        );
-    }
-
-    /// Returns WouldBlock once, then replays `rest`.
-    struct WouldBlockThen {
-        fired: bool,
-        rest: Cursor<Vec<u8>>,
-    }
-
-    impl Read for WouldBlockThen {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            if !self.fired {
-                self.fired = true;
-                return Err(io::Error::from(io::ErrorKind::WouldBlock));
-            }
-            self.rest.read(buf)
-        }
-    }
-
-    #[test]
-    fn read_control_loop_retries_after_timeout_then_reads_frame() {
-        // KILLS stream_tcp.rs:313 (timeout_kind guard -> false). A WouldBlock
-        // must be retried so the following SUB_CANCEL is read and forwarded as
-        // Cancel; with the guard false the WouldBlock is treated as a
-        // disconnect and Cancel never arrives.
-        let mut reader = WouldBlockThen {
-            fired: false,
-            rest: Cursor::new(CANCEL_LINE.to_vec()),
-        };
-        let stop = AtomicBool::new(false);
-        let got = run_loop(&mut reader, &stop);
-        assert!(
-            matches!(got.first(), Some(SessionControl::Cancel)),
-            "expected Cancel after timeout retry, got {got:?}"
-        );
-    }
-
-    /// Returns BrokenPipe and flips `stop` so the loop cannot spin forever
-    /// when the timeout guard is forced true.
-    struct BrokenPipeSetsStop {
-        stop: Arc<AtomicBool>,
-    }
-
-    impl Read for BrokenPipeSetsStop {
-        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            self.stop.store(true, Ordering::Release);
-            Err(io::Error::from(io::ErrorKind::BrokenPipe))
-        }
-    }
-
-    #[test]
-    fn read_control_loop_reports_disconnect_on_broken_pipe() {
-        // KILLS stream_tcp.rs:313 (timeout_kind guard -> true). A BrokenPipe is
-        // NOT a timeout, so the loop must emit Disconnected. Under the guard
-        // forced true the error is mistaken for a timeout and (with stop now
-        // set) the loop breaks WITHOUT emitting Disconnected.
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut reader = BrokenPipeSetsStop {
-            stop: Arc::clone(&stop),
-        };
-        let got = run_loop(&mut reader, &stop);
-        assert!(
-            matches!(got.first(), Some(SessionControl::Disconnected)),
-            "expected Disconnected on broken pipe, got {got:?}"
-        );
-    }
-}
+#[path = "stream_tcp_tests.rs"]
+mod tests;
