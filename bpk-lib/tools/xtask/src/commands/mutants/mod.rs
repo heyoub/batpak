@@ -186,6 +186,13 @@ mod tests {
                 "crates/core/src/schema.rs",
                 "--file",
                 "crates/core/src/store/**/*.rs",
+                // store/sim/** is `dangerous-test-hooks`-gated, so it is NOT compiled
+                // under --no-default-features; cargo-mutants still generates ~359
+                // mutants there, every one a phantom "missed". surface_excludes strips
+                // the sim tree from this surface only (the all-features critical-seam
+                // golden above carries no such --exclude — proving it is no-default-only).
+                "--exclude",
+                "crates/core/src/store/sim/**/*.rs",
                 "--exclude-re",
                 INDEX_TOPOLOGY_DEFAULT_EQUIVALENT_MUTANT,
                 "--no-default-features",
