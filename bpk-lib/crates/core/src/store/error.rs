@@ -432,6 +432,21 @@ pub enum StoreError {
         /// Typed invariant failure.
         kind: StoreInvariant,
     },
+    /// An at-open hash-chain recompute (opted into via
+    /// [`ChainVerification::Recompute`](crate::store::ChainVerification)) found
+    /// the store is not intact, so the open failed closed. A plain `Crc` open
+    /// trusts the per-frame CRC and never produces this; only the regulated
+    /// recompute path — equivalently [`Store::verify_chain`](crate::store::Store::verify_chain)
+    /// — recomputes blake3 over every committed event and refuses to hand back a
+    /// tampered store.
+    ChainVerificationFailed {
+        /// Committed events whose recomputed blake3 content hash did NOT match
+        /// the stored `event_hash` (content no longer matches its identity).
+        content_hash_mismatches: usize,
+        /// Non-genesis events whose `prev_hash` referenced no verified event (a
+        /// dangling chain link).
+        dangling_links: usize,
+    },
 }
 
 impl std::error::Error for StoreError {
@@ -489,7 +504,8 @@ impl std::error::Error for StoreError {
             | Self::InvalidClock { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => None,
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => None,
             Self::EventPayloadRegistry(error) => Some(error),
             Self::BatchFailed { source, .. } | Self::BatchSyncFailed { source, .. } => {
                 Some(source.as_ref())

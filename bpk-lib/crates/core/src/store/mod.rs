@@ -82,8 +82,9 @@ pub use compaction_report::{
     CompactionStrategyShape, COMPACTION_REPORT_SCHEMA_VERSION,
 };
 pub use config::{
-    BatchConfig, IdempotencyRetention, IndexConfig, IndexTopology, OpenReportObserver,
-    OverflowPolicy, SigningPolicy, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+    BatchConfig, ChainVerification, IdempotencyRetention, IndexConfig, IndexTopology,
+    OpenReportObserver, OverflowPolicy, SigningPolicy, StoreConfig, SyncConfig, SyncMode,
+    WriterConfig,
 };
 pub use delivery::canal::{Canal, CanalBatch, CanalClosed, CanalHandle, CanalItem, ReactorCanal};
 pub use delivery::cursor::{

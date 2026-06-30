@@ -18,8 +18,8 @@ mod validation;
 pub use crate::store::index::idemp::{IdempotencyRetention, OverflowPolicy};
 pub(crate) use types::WriterMode;
 pub use types::{
-    BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, SigningPolicy, SyncConfig,
-    SyncMode, WriterConfig,
+    BatchConfig, ChainVerification, IndexConfig, IndexTopology, OpenReportObserver, SigningPolicy,
+    SyncConfig, SyncMode, WriterConfig,
 };
 pub(crate) use validation::ValidatedStoreConfig;
 
@@ -74,6 +74,9 @@ pub struct StoreConfig {
     /// permit a best-effort downgrade to an unsigned receipt instead of failing
     /// the append. Default `false` (fail closed).
     pub(crate) allow_signing_downgrade: bool,
+    /// Whether the full hash chain is recomputed at open (`Recompute`) or the
+    /// per-frame CRC alone is trusted (`Crc`, default). See [`ChainVerification`].
+    pub(crate) chain_verification: ChainVerification,
     /// Payload-registry collision policy applied during `Store::open`.
     pub(crate) event_payload_validation: EventPayloadValidation,
     /// Fault injector for testing failure scenarios.
@@ -114,6 +117,10 @@ impl StoreConfig {
             // signing key. Signing is a deliberate per-deployment choice.
             signing_policy: SigningPolicy::Optional,
             allow_signing_downgrade: false,
+            // Crc: a regular store pays nothing extra at open; the per-frame CRC
+            // already guarded every frame at read time. Regulated callers opt
+            // into ChainVerification::Recompute for tamper-evidence at open.
+            chain_verification: ChainVerification::Crc,
             event_payload_validation: EventPayloadValidation::default(),
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
@@ -264,6 +271,17 @@ impl StoreConfig {
     /// fails closed rather than silently emitting an unsigned receipt).
     pub fn with_signing_downgrade_allowed(mut self, allow: bool) -> Self {
         self.allow_signing_downgrade = allow;
+        self
+    }
+
+    /// Set whether the full hash chain is recomputed at open.
+    ///
+    /// `Crc` (default) trusts the per-frame CRC and rehashes nothing at open;
+    /// `Recompute` runs [`Store::verify_chain`](crate::store::Store::verify_chain)
+    /// at open and refuses to open on any content-hash mismatch or dangling
+    /// chain link. See [`ChainVerification`].
+    pub fn with_chain_verification(mut self, chain_verification: ChainVerification) -> Self {
+        self.chain_verification = chain_verification;
         self
     }
 
@@ -423,6 +441,11 @@ impl StoreConfig {
         self.writer_mode
     }
 
+    /// Whether the full hash chain is recomputed at open.
+    pub(crate) fn chain_verification(&self) -> ChainVerification {
+        self.chain_verification
+    }
+
     /// Install a custom filesystem backend for store data-path operations.
     ///
     /// Production uses the default [`RealFs`] (every op delegates to `std::fs`).
@@ -481,6 +504,7 @@ impl Clone for StoreConfig {
             signing_keys: self.signing_keys.clone(),
             signing_policy: self.signing_policy,
             allow_signing_downgrade: self.allow_signing_downgrade,
+            chain_verification: self.chain_verification,
             event_payload_validation: self.event_payload_validation,
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: self.fault_injector.clone(),
@@ -512,6 +536,7 @@ impl std::fmt::Debug for StoreConfig {
             .field("signing_keys", &self.signing_keys.len())
             .field("signing_policy", &self.signing_policy)
             .field("allow_signing_downgrade", &self.allow_signing_downgrade)
+            .field("chain_verification", &self.chain_verification)
             .field("event_payload_validation", &self.event_payload_validation)
             .finish()
     }

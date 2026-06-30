@@ -137,6 +137,38 @@ fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport
     }
 }
 
+/// Run the opt-in at-open hash-chain recompute.
+///
+/// Default [`ChainVerification::Crc`] pays nothing — the per-frame CRC already
+/// guarded every frame at read time, so this skips the `O(events)` rehash.
+/// Under [`ChainVerification::Recompute`] the store recomputes blake3 over every
+/// committed event at open and FAILS CLOSED with
+/// [`StoreError::ChainVerificationFailed`] on any content-hash mismatch or
+/// dangling chain link — the regulated tamper-evidence-at-open posture. Shared
+/// by both the read-write and read-only open paths so neither drifts.
+fn run_open_chain_verification<State: StoreState>(store: &Store<State>) -> Result<(), StoreError> {
+    if store.config.chain_verification() != ChainVerification::Recompute {
+        return Ok(());
+    }
+    if let Some(error) = chain_verification_failure(&store.verify_chain()?) {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Map an at-open recompute report to its fail-closed error, or `None` when the
+/// store verifies intact. Pure so the Recompute-vs-intact decision is unit
+/// testable without forging on-disk tampering.
+fn chain_verification_failure(report: &ChainVerificationReport) -> Option<StoreError> {
+    if report.is_intact() {
+        return None;
+    }
+    Some(StoreError::ChainVerificationFailed {
+        content_hash_mismatches: report.content_hash_mismatches.len(),
+        dangling_links: report.dangling_links.len(),
+    })
+}
+
 fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
     index
         .all_entries()
@@ -449,6 +481,9 @@ impl Store<Open> {
             highest_visible_index_hlc_by_lane(&store.index),
         );
 
+        // Opt-in tamper-evidence at open: with the store fully built, recompute
+        // the hash chain and fail closed if it is not intact (no-op under Crc).
+        run_open_chain_verification(&store)?;
         Ok(store)
     }
 }
@@ -524,6 +559,9 @@ impl Store<ReadOnly> {
 
         emit_open_report_observability(&store.config, &open_report);
 
+        // Opt-in tamper-evidence at open: with the store fully built, recompute
+        // the hash chain and fail closed if it is not intact (no-op under Crc).
+        run_open_chain_verification(&store)?;
         Ok(store)
     }
 }

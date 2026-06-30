@@ -110,7 +110,8 @@ impl StoreError {
             | Self::CheckpointWriteFailed { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => Ok(()),
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => Ok(()),
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => Ok(()),
         }
@@ -211,7 +212,8 @@ impl StoreError {
             | Self::CheckpointWriteFailed { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => Ok(()),
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => Ok(()),
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => Ok(()),
         }
@@ -244,6 +246,25 @@ impl StoreError {
             return write!(
                 f,
                 "projection {projection} exceeded declared state bound {declared:?}; actual={actual:?}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `Display` body for the at-open hash-chain verification refusal. Kept off
+    /// the main `Display::fmt` match so the integrity-refusal surface can grow
+    /// without pushing `fmt` past its complexity ratchet.
+    fn fmt_chain_verification_failed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::ChainVerificationFailed {
+            content_hash_mismatches,
+            dangling_links,
+        } = self
+        {
+            return write!(
+                f,
+                "at-open hash-chain verification failed: {content_hash_mismatches} content-hash \
+                 mismatch(es) and {dangling_links} dangling chain link(s); refusing to open the \
+                 store (ChainVerification::Recompute fail-closed)"
             );
         }
         Ok(())
@@ -459,6 +480,9 @@ impl std::fmt::Display for StoreError {
                 expected
             ),
             Self::InvariantViolation { kind } => write!(f, "invariant violation: {kind}"),
+            // Delegated so this match stays within its complexity ratchet rather
+            // than growing the integrity-refusal render inline.
+            Self::ChainVerificationFailed { .. } => self.fmt_chain_verification_failed(f),
         }
     }
 }

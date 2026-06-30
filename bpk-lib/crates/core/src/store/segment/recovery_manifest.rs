@@ -206,8 +206,14 @@ fn read_frame_event_hash<R: Read + Seek>(
 /// 1. A corroborated entry ANCHORS the entire entry table to THIS segment. An
 ///    entry is corroborated iff there is a recovered frame at `entry.frame_offset`
 ///    whose `frame_length` AND content `event_hash` (blake3) match the entry. The
-///    `event_hash` is content-addressed and unforgeable: a forger cannot fabricate
-///    an entry that matches a real frame's blake3. So once >= 1 entry corroborates,
+///    `event_hash` is content-addressed and CRC-guarded by default: the value
+///    matched here is the one STORED in the frame (re-read under the per-frame
+///    CRC), not one re-derived from the payload on this path, so a forger cannot
+///    ACCIDENTALLY fabricate an entry matching a real frame's blake3. A deliberate
+///    rewrite of both the payload and its stored hash is caught only by the full
+///    recompute ([`ChainVerification::Recompute`](crate::store::ChainVerification)
+///    / [`Store::verify_chain`](crate::store::Store::verify_chain)), never by CRC
+///    alone. So once >= 1 entry corroborates,
 ///    the append-ordered entries and `entry_count` are trustworthy enough to assert
 ///    "a committed frame at offset X should exist."
 ///
@@ -244,8 +250,9 @@ pub(crate) fn corroborate_untrusted_entries(
     _fallback_fail_closed: bool,
 ) -> UntrustedRecovery {
     // An entry is CORROBORATED when a recovered frame sits at its offset with a
-    // matching length AND a matching content event_hash. event_hash match is the
-    // unforgeable anchor.
+    // matching length AND a matching content event_hash. The event_hash match is
+    // the anchor: content-addressed and CRC-guarded here (a full blake3 recompute
+    // happens only under ChainVerification::Recompute / Store::verify_chain).
     let is_corroborated = |entry: &sidx::SidxEntry| -> bool {
         match recovered.get(&entry.frame_offset) {
             Some(frame) => {

@@ -1205,6 +1205,9 @@ pub batpak::prelude::StoreError::BatchSyncFailed
 pub batpak::prelude::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::prelude::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::prelude::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::prelude::StoreError::ChainVerificationFailed
+pub batpak::prelude::StoreError::ChainVerificationFailed::content_hash_mismatches: usize
+pub batpak::prelude::StoreError::ChainVerificationFailed::dangling_links: usize
 pub batpak::prelude::StoreError::CheckpointFutureVersion
 pub batpak::prelude::StoreError::CheckpointFutureVersion::found: u16
 pub batpak::prelude::StoreError::CheckpointFutureVersion::supported: u16
@@ -1702,6 +1705,7 @@ pub fn batpak::prelude::StoreConfig::sync(&self) -> &batpak::store::SyncConfig
 pub fn batpak::prelude::StoreConfig::with_batch_max_bytes(self, batch_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_batch_max_size(self, batch_max_size: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_broadcast_capacity(self, broadcast_capacity: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_chain_verification(self, chain_verification: batpak::store::ChainVerification) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Option<alloc::sync::Arc<dyn batpak::store::Clock>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock_fn<F>(self, clock: F) -> Self where F: core::ops::function::Fn() -> i64 + core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
@@ -2547,6 +2551,9 @@ pub batpak::store::CausationRef::None
 pub batpak::store::CausationRef::PriorItem(usize)
 impl batpak::store::CausationRef
 pub fn batpak::store::CausationRef::absolute_typed(id: batpak::id::CausationId) -> Self
+#[non_exhaustive] pub enum batpak::store::ChainVerification
+pub batpak::store::ChainVerification::Crc
+pub batpak::store::ChainVerification::Recompute
 pub enum batpak::store::ChainWalkFinding
 pub batpak::store::ChainWalkFinding::CycleDetected
 pub batpak::store::ChainWalkFinding::CycleDetected::event_id: u128
@@ -2939,6 +2946,9 @@ pub batpak::store::StoreError::BatchSyncFailed
 pub batpak::store::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::store::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::store::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::store::StoreError::ChainVerificationFailed
+pub batpak::store::StoreError::ChainVerificationFailed::content_hash_mismatches: usize
+pub batpak::store::StoreError::ChainVerificationFailed::dangling_links: usize
 pub batpak::store::StoreError::CheckpointFutureVersion
 pub batpak::store::StoreError::CheckpointFutureVersion::found: u16
 pub batpak::store::StoreError::CheckpointFutureVersion::supported: u16
@@ -3871,6 +3881,7 @@ pub fn batpak::prelude::StoreConfig::sync(&self) -> &batpak::store::SyncConfig
 pub fn batpak::prelude::StoreConfig::with_batch_max_bytes(self, batch_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_batch_max_size(self, batch_max_size: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_broadcast_capacity(self, broadcast_capacity: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_chain_verification(self, chain_verification: batpak::store::ChainVerification) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Option<alloc::sync::Arc<dyn batpak::store::Clock>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock_fn<F>(self, clock: F) -> Self where F: core::ops::function::Fn() -> i64 + core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
