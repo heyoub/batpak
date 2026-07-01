@@ -15,20 +15,24 @@ impl Reader {
     ) -> Result<(), StoreError> {
         let segment_id = pos.segment_id;
         let offset = pos.offset;
+        let fs = &self.fs;
         self.with_fd(segment_id, |f| {
-            crate::store::platform::fs::read_exact_at(f, offset, buf).map_err(|error| match error {
-                crate::store::platform::fs::PositionedReadError::Io(error) => StoreError::Io(error),
-                crate::store::platform::fs::PositionedReadError::ShortRead { bytes_read } => {
-                    if bytes_read == 0 {
-                        StoreError::corrupt_eof(segment_id)
-                    } else {
-                        StoreError::corrupt_segment_with_detail(
-                            segment_id,
-                            "active frame read ended before requested length",
-                        )
+            fs.read_exact_at(f, offset, buf)
+                .map_err(|error| match error {
+                    crate::store::platform::fs::PositionedReadError::Io(error) => {
+                        StoreError::Io(error)
                     }
-                }
-            })
+                    crate::store::platform::fs::PositionedReadError::ShortRead { bytes_read } => {
+                        if bytes_read == 0 {
+                            StoreError::corrupt_eof(segment_id)
+                        } else {
+                            StoreError::corrupt_segment_with_detail(
+                                segment_id,
+                                "active frame read ended before requested length",
+                            )
+                        }
+                    }
+                })
         })
     }
 

@@ -25,7 +25,7 @@
 //! [`fastrand::Rng`], advanced in the order the store reaches its fsync seam.
 //! Same seed ⇒ same drop schedule ⇒ same durable prefix ⇒ same recovered state.
 
-use crate::store::platform::fs::StoreFs;
+use crate::store::platform::fs::{PositionedReadError, StoreFs};
 use crate::store::{StoreError, SyncMode};
 use std::collections::BTreeMap;
 use std::fs::{File, ReadDir};
@@ -67,6 +67,16 @@ pub(crate) struct SimFs {
     /// ops ([`StoreFs::rename`] / [`StoreFs::remove_file`] /
     /// [`StoreFs::persist_temp_with_parent_sync`]). `None`/unarmed disables it.
     op_fault: Mutex<OpFaultSchedule>,
+    /// Deterministic positioned-read fault schedule for the routed
+    /// [`StoreFs::read_exact_at`] primitive (the active-segment frame read).
+    /// DISTINCT from the [`CrashOp`] atomic-op schedule above: a read is not an
+    /// atomic-rename / persist, so it carries its own targeted-Nth counter and
+    /// its own fault taxonomy ([`ReadFaultKind`], D1 = model BOTH a hard I/O
+    /// error and a short read). `None`/unarmed disables it. Test-only: the
+    /// production build never faults a read, so the whole read-fault subsystem is
+    /// compiled out of the non-test `Store`-over-`SimFs` fixtures.
+    #[cfg(test)]
+    read_fault: Mutex<ReadFaultSchedule>,
 }
 
 /// ENOSPC-mid-copy injection bookkeeping. `fail_at` is the 1-based
@@ -103,6 +113,40 @@ struct OpFaultSchedule {
     seen: u32,
 }
 
+/// How a scheduled [`StoreFs::read_exact_at`] fault manifests (DECISION D1 =
+/// support BOTH). These map onto the two failure shapes the reader's
+/// active-frame read already distinguishes:
+///
+///   * [`ReadFaultKind::Io`] — a hard positioned-read error
+///     ([`PositionedReadError::Io`]); surfaces as [`StoreError::Io`].
+///   * [`ReadFaultKind::ShortRead`] — the read ended before the requested slice
+///     was filled ([`PositionedReadError::ShortRead`]). `bytes_read == 0` is an
+///     EOF at the frame boundary (reader maps it to `corrupt_eof`); a non-zero
+///     partial is a torn frame (reader maps it to a corrupt-segment error).
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadFaultKind {
+    /// Inject a hard I/O error on the positioned read.
+    Io,
+    /// Inject a short read that stops after `bytes_read` bytes.
+    ShortRead {
+        /// Bytes "read" before the short read stops (`0` ⇒ EOF at the boundary).
+        bytes_read: usize,
+    },
+}
+
+/// Deterministic positioned-read fault bookkeeping. `target` is the 1-based
+/// occurrence of [`StoreFs::read_exact_at`] to fault and the [`ReadFaultKind`] to
+/// inject; `seen` counts positioned reads reached so far. Same target ⇒ the same
+/// read faults every run. Kept distinct from [`OpFaultSchedule`] so a read fault
+/// and an atomic-op fault can be armed independently in one run.
+#[cfg(test)]
+#[derive(Default)]
+struct ReadFaultSchedule {
+    target: Option<(u32, ReadFaultKind)>,
+    seen: u32,
+}
+
 impl SimFs {
     /// Construct a filesystem model seeded from `seed`, dropping roughly one in
     /// `fsync_drop_one_in` fsyncs (`0` ⇒ never drop; the crash boundary is then
@@ -114,6 +158,8 @@ impl SimFs {
             fsync_drop_one_in,
             enospc_on_copy: Mutex::new(EnospcSchedule::default()),
             op_fault: Mutex::new(OpFaultSchedule::default()),
+            #[cfg(test)]
+            read_fault: Mutex::new(ReadFaultSchedule::default()),
         }
     }
 
@@ -166,6 +212,47 @@ impl SimFs {
     /// The injected-fault I/O error a faulted atomic op returns.
     fn injected_op_fault(op: CrashOp) -> io::Error {
         io::Error::other(format!("SimFs: injected fault on {op:?}"))
+    }
+
+    /// Arm a deterministic positioned-read fault on the `fail_at`-th (1-based)
+    /// [`StoreFs::read_exact_at`], consuming `self` (builder form for a `SimFs`
+    /// not yet shared). See [`SimFs::arm_read_fault_on`].
+    #[cfg(test)]
+    pub(crate) fn with_read_fault_on(self, fail_at: u32, kind: ReadFaultKind) -> Self {
+        self.arm_read_fault_on(fail_at, kind);
+        self
+    }
+
+    /// Arm (or re-arm) a deterministic positioned-read fault: the `fail_at`-th
+    /// (1-based) [`StoreFs::read_exact_at`] injects `kind` instead of reading,
+    /// modelling a torn/short active-segment frame read. Same `(fail_at, kind)` ⇒
+    /// the same read faults every run.
+    ///
+    /// Interior-mutable (takes `&self`) so a test can build a `Store` over a
+    /// shared `Arc<SimFs>` FIRST and arm the fault only once the store is open —
+    /// the occurrence counter resets here, so any reads the build itself
+    /// performed are not counted toward `fail_at`.
+    #[cfg(test)]
+    pub(crate) fn arm_read_fault_on(&self, fail_at: u32, kind: ReadFaultKind) {
+        let mut sched = self
+            .read_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        sched.target = Some((fail_at, kind));
+        sched.seen = 0;
+    }
+
+    /// Advance the positioned-read counter and return the [`ReadFaultKind`] when
+    /// THIS read must fault. A no-op (returns `None`) when no schedule is armed.
+    #[cfg(test)]
+    fn read_fault_strikes(&self) -> Option<ReadFaultKind> {
+        let mut sched = self
+            .read_fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (fail_at, kind) = sched.target?;
+        sched.seen = sched.seen.saturating_add(1);
+        (sched.seen == fail_at).then_some(kind)
     }
 
     /// Arm deterministic ENOSPC injection: the `fail_at`-th file-materialization
@@ -405,6 +492,32 @@ impl StoreFs for SimFs {
         crate::store::platform::sync::persist_temp_with_parent_sync(
             named_temp, final_path, admission,
         )
+    }
+
+    fn read_exact_at(
+        &self,
+        file: &mut File,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<(), PositionedReadError> {
+        // A faulted read never touches the real file: it returns the injected
+        // positioned-read error directly, so the reader's active-frame read
+        // surfaces the same StoreError it would on a genuinely torn read. No
+        // `read_at` here — the raw pread contact stays in `platform::fs`. The
+        // fault path is test-only; the production `Store`-over-`SimFs` fixtures
+        // never fault a read, so they compile straight to the honest delegate.
+        #[cfg(test)]
+        if let Some(kind) = self.read_fault_strikes() {
+            return Err(match kind {
+                ReadFaultKind::Io => PositionedReadError::Io(io::Error::other(
+                    "SimFs: injected positioned-read fault",
+                )),
+                ReadFaultKind::ShortRead { bytes_read } => {
+                    PositionedReadError::ShortRead { bytes_read }
+                }
+            });
+        }
+        crate::store::platform::fs::read_exact_at(file, offset, buf)
     }
 }
 

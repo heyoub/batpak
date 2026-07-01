@@ -384,6 +384,14 @@ fn with_fs_installs_custom_filesystem_backend() {
             self.inner
                 .persist_temp_with_parent_sync(named_temp, final_path, admission)
         }
+        fn read_exact_at(
+            &self,
+            file: &mut std::fs::File,
+            offset: u64,
+            buf: &mut [u8],
+        ) -> Result<(), crate::store::platform::fs::PositionedReadError> {
+            self.inner.read_exact_at(file, offset, buf)
+        }
     }
 
     let created = Arc::new(AtomicBool::new(false));

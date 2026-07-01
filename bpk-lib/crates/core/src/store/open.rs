@@ -92,6 +92,7 @@ fn open_components(
         config.data_dir.clone(),
         config.fd_budget,
         &runtime.clock_arc(),
+        Arc::clone(config.fs()),
     ));
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.

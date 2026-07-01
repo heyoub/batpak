@@ -6,6 +6,7 @@ mod validate;
 use crate::event::{Event, EventHeader, EventKind, HashChain};
 use crate::store::cold_start::ColdStartIndexRow;
 use crate::store::index::DiskPos;
+use crate::store::platform::fs::StoreFs;
 use crate::store::segment::{self, FramePayload};
 use crate::store::{Clock, EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
@@ -89,6 +90,11 @@ pub struct Reader {
     /// `None` means mmap is not admitted; sealed reads then fall back to the
     /// FD/pread path, which produces byte-identical results.
     sealed_mmap_admission: Option<crate::store::platform::mmap::SealedSegmentMmapAdmission>,
+    /// Filesystem seam for the active-segment positioned frame read. Production
+    /// installs [`crate::store::platform::fs::RealFs`]; a deterministic
+    /// simulation installs a `SimFs` so the FD/pread read is fault-injectable.
+    /// Sealed reads go through mmap and do not consult this seam.
+    fs: Arc<dyn StoreFs>,
 }
 
 struct FdCache {
@@ -224,7 +230,12 @@ impl Reader {
         Self::frame_decode_error(pos.segment_id, pos.offset, error)
     }
 
-    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize, clock: &Arc<dyn Clock>) -> Self {
+    pub(crate) fn new(
+        data_dir: PathBuf,
+        fd_budget: usize,
+        clock: &Arc<dyn Clock>,
+        fs: Arc<dyn StoreFs>,
+    ) -> Self {
         // Probe mmap admission ONCE here. This is the only temp-file probe over
         // the Reader's lifetime; sealed reads never re-probe. A probe failure
         // (e.g. a read-only data dir, where the probe's temp file cannot be
@@ -247,6 +258,7 @@ impl Reader {
             sealed_maps: DashMap::new(),
             active_segment_id: AtomicU64::new(0),
             sealed_mmap_admission,
+            fs,
         }
     }
 

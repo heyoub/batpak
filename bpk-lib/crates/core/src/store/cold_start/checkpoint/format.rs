@@ -1,7 +1,7 @@
 use super::{checkpoint_entries_to_index_entries, CheckpointEntry};
 use crate::store::cold_start::{FileLoad, ReservedKindFallbackStats};
 use crate::store::index::{recommended_restore_chunk_count, RoutingSummary};
-use crate::store::platform::fs::{read, write_file_atomically};
+use crate::store::platform::fs::{read, write_file_atomically_with_fs, StoreFs};
 use crate::store::StoreError;
 use serde::{Deserialize, Serialize};
 use std::io::{BufWriter, Write};
@@ -259,19 +259,29 @@ pub(super) fn encode_checkpoint_body<T: Serialize + ?Sized>(
     crate::encoding::to_bytes(body)
 }
 
-pub(super) fn write_checkpoint_file(data_dir: &Path, body: &[u8]) -> Result<(), StoreError> {
+pub(super) fn write_checkpoint_file(
+    data_dir: &Path,
+    body: &[u8],
+    fs: &dyn StoreFs,
+) -> Result<(), StoreError> {
     let crc: u32 = crc32fast::hash(body);
     let final_path = data_dir.join(CHECKPOINT_FILENAME);
-    write_file_atomically(data_dir, &final_path, "checkpoint", |file| {
-        let mut w = BufWriter::new(file);
+    write_file_atomically_with_fs(
+        data_dir,
+        &final_path,
+        "checkpoint",
+        |file| {
+            let mut w = BufWriter::new(file);
 
-        w.write_all(CHECKPOINT_MAGIC)?;
-        w.write_all(&CHECKPOINT_VERSION.to_le_bytes())?;
-        w.write_all(&crc.to_le_bytes())?;
-        w.write_all(body)?;
-        w.flush()?;
-        Ok(())
-    })?;
+            w.write_all(CHECKPOINT_MAGIC)?;
+            w.write_all(&CHECKPOINT_VERSION.to_le_bytes())?;
+            w.write_all(&crc.to_le_bytes())?;
+            w.write_all(body)?;
+            w.flush()?;
+            Ok(())
+        },
+        fs,
+    )?;
     Ok(())
 }
 

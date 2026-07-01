@@ -72,6 +72,7 @@ fn shutdown_in_group_commit_drain_exits_before_shutdown_queue_drain() {
         config.data_dir.clone(),
         config.fd_budget,
         &validated_cfg.clock_arc(),
+        Arc::clone(config.fs()),
     ));
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
@@ -188,6 +189,7 @@ fn single_append_publishes_global_visibility_frontier_past_event() {
         config.data_dir.clone(),
         config.fd_budget,
         &validated_cfg.clock_arc(),
+        Arc::clone(config.fs()),
     ));
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
@@ -301,6 +303,7 @@ fn recreate_restart_segment_returns_some_on_valid_restart_precondition() {
         config.data_dir.clone(),
         config.fd_budget,
         &validated_cfg.clock_arc(),
+        Arc::clone(config.fs()),
     ));
     let watermark_handle = WatermarkState::handle(Arc::new(SystemClock::new()));
     let (_tx, rx) = flume::bounded::<WriterCommand>(1);

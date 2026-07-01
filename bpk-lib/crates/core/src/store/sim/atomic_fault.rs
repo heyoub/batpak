@@ -154,3 +154,34 @@ fn compaction_swap_rename_is_routed_and_faultable() {
         );
     }
 }
+
+#[test]
+fn cold_start_checkpoint_persist_is_routed_and_faultable() {
+    use crate::store::cold_start::checkpoint::write_checkpoint_with_reserved_kind_fallbacks;
+    use crate::store::cold_start::ReservedKindFallbackStats;
+    use crate::store::index::StoreIndex;
+
+    // An empty index still writes a full checkpoint artifact (header + footer),
+    // which is enough to drive the temp-create + atomic-publish sequence.
+    let index = StoreIndex::new();
+    let fallbacks = ReservedKindFallbackStats::default();
+
+    // CONTROL: the production backend publishes the checkpoint artifact — proving
+    // the routed `write_file_atomically_with_fs` path is behavior-preserving.
+    let dir = tempfile::tempdir().expect("tmpdir");
+    write_checkpoint_with_reserved_kind_fallbacks(&index, dir.path(), 0, 0, &fallbacks, &RealFs)
+        .expect("RealFs checkpoint artifact persist must succeed");
+
+    // FAULT: a SimFs armed on the atomic publish tears the checkpoint persist.
+    // Before this routing the checkpoint reached the free fn
+    // `write_file_atomically` (no fs handle), so no backend could intercept it —
+    // the cold-start artifact write was unfaultable.
+    let fresh = tempfile::tempdir().expect("tmpdir");
+    let fs = SimFs::new(0xC4EC_9001, 0).with_fault_on(CrashOp::PersistTemp, 1);
+    let result =
+        write_checkpoint_with_reserved_kind_fallbacks(&index, fresh.path(), 0, 0, &fallbacks, &fs);
+    assert!(
+        matches!(result, Err(StoreError::Io(_))),
+        "PROPERTY: a SimFs fault on the routed checkpoint artifact persist must surface as StoreError::Io, got {result:?}"
+    );
+}

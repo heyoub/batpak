@@ -417,6 +417,126 @@ pub struct RecoveryOutcomePublic {
     pub durable_acked: usize,
 }
 
+/// Drive a seeded op stream over a real `Store` backed by `SimFs`, acknowledge
+/// the full appended prefix durable via an honored `sync`, then crash by TEARING
+/// a cold-start artifact atomic publish (rather than eating an unsynced tail):
+/// arm [`CrashOp::PersistTemp`] and trigger the publish through `Store::close`.
+///
+/// DECISION D5 — the reopen oracle: a torn cold-start artifact is an OPTIMISATION,
+/// never a correctness dependency. Reopen is legal when it is either a canonical
+/// corruption refusal OR a success whose recovered visible state
+/// (`durable_acked <= recovered_visible <= appended`, hash chain intact) has lost
+/// no acknowledged-durable commit. The store falls back to a full segment scan
+/// over the intact (honestly-fsynced) segments, so the torn artifact costs a
+/// slow open, not a lost commit.
+///
+/// Same shape as [`drive`]; the only differences are the crash trigger (torn
+/// publish vs unsynced tail) and that the full appended prefix is acknowledged
+/// durable up front.
+#[cfg(test)]
+fn drive_torn_publish(seed: u64, steps: usize) -> Result<RecoveryOutcome, Violation> {
+    use super::fs::CrashOp;
+    use crate::store::platform::fs::StoreFs;
+
+    let dir = tempfile::tempdir().map_err(|e| Violation::NonCanonicalReopen(e.to_string()))?;
+    // Honest disk: the ONLY fault is the torn artifact publish. The segments
+    // holding acknowledged-durable commits are fsynced honestly, so the no-loss
+    // contract must hold across the reopen full-scan.
+    let sim_fs = Arc::new(SimFs::new(seed, 0));
+    let coord = Coordinate::new("entity:dst", "scope:torn-publish")
+        .map_err(|e| Violation::NonCanonicalReopen(e.to_string()))?;
+
+    let plan = OpPlan::seeded(seed, steps);
+    let mut digest = fold(FNV_OFFSET, seed);
+
+    let appended;
+    let durable_acked;
+    {
+        let config = StoreConfig::new(dir.path())
+            .with_fs(Arc::clone(&sim_fs) as Arc<dyn StoreFs>)
+            .with_sync_every_n_events(1_000_000)
+            .with_sync_mode(SyncMode::SyncAll);
+        let store =
+            Store::open(config).map_err(|e| Violation::NonCanonicalReopen(e.to_string()))?;
+
+        let (a, _plan_durable, run_digest) = run_op_plan(&store, &coord, &plan, digest)?;
+        appended = a;
+        digest = run_digest;
+
+        // Acknowledge the FULL appended prefix durable via an honored sync, so
+        // every appended commit MUST survive regardless of the torn artifact.
+        Store::sync(&store).map_err(|e| Violation::NonCanonicalReopen(e.to_string()))?;
+        durable_acked = appended;
+        digest = fold(digest, 0x5_4_C);
+
+        // Arm the atomic-publish fault, then trigger the cold-start artifact
+        // publish via close(). close() drains the writer, flushes the durable
+        // idempotency store, then writes the checkpoint/mmap artifact — both now
+        // routed through StoreFs::persist_temp_with_parent_sync. The first such
+        // publish tears, so close() returns Err with the artifact un-published.
+        sim_fs.arm_fault_on(CrashOp::PersistTemp, 1);
+        let close_result = store.close();
+        debug_assert!(
+            close_result.is_err(),
+            "the armed PersistTemp fault must tear a cold-start artifact publish during close"
+        );
+        drop(close_result);
+
+        // Truncate any write-but-unsynced tail (e.g. the post-sync close marker).
+        // The durable (synced) segment prefix stays intact.
+        sim_fs.crash();
+    }
+
+    // Reopen over the persisted tree. The torn/absent cold-start artifact forces a
+    // full segment scan; D5 says that is legal recovery, never a lost commit.
+    let reopen = Store::open(StoreConfig::new(dir.path()));
+    let store = match reopen {
+        Ok(store) => store,
+        Err(error) if is_canonical_refusal(&error) => {
+            digest = fold(digest, 0xCA11_AB1E);
+            return Ok(RecoveryOutcome {
+                digest,
+                recovered_visible: 0,
+                durable_acked,
+            });
+        }
+        Err(other) => return Err(Violation::NonCanonicalReopen(format!("{other:?}"))),
+    };
+
+    let recovered = recovered_user_events(&store);
+    let recovered_visible = recovered.len();
+    if recovered_visible < durable_acked {
+        return Err(Violation::LostDurableCommit {
+            durable: durable_acked,
+            recovered: recovered_visible,
+        });
+    }
+    if recovered_visible > appended {
+        return Err(Violation::UndeadEvent {
+            recovered: recovered_visible,
+            appended,
+        });
+    }
+    verify_hash_chain(&recovered)?;
+
+    digest = fold(fold(digest, recovered_visible as u64), durable_acked as u64);
+    for ev in &recovered {
+        digest = fold(digest, ev.event_hash_token);
+    }
+    Ok(RecoveryOutcome {
+        digest,
+        recovered_visible,
+        durable_acked,
+    })
+}
+
+/// Seed-tagged wrapper over [`drive_torn_publish`], mirroring [`run`].
+#[cfg(test)]
+fn run_torn_publish(seed: u64, steps: usize) -> Result<RecoveryOutcome, String> {
+    drive_torn_publish(seed, steps)
+        .map_err(|v| format!("torn-publish DST violation (seed={seed}): {v}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +571,29 @@ mod tests {
         assert!(
             outcome.recovered_visible >= outcome.durable_acked,
             "PROPERTY: every acknowledged-durable commit must survive the crash"
+        );
+    }
+
+    #[test]
+    fn torn_publish_same_seed_recovers_identically() {
+        let a = run_torn_publish(0x7091_0001, 48).expect("legal torn-publish recovery");
+        let b = run_torn_publish(0x7091_0001, 48).expect("legal torn-publish recovery");
+        assert_eq!(
+            a, b,
+            "PROPERTY: identical seeds must recover the same state with the same digest \
+             after a torn cold-start artifact publish"
+        );
+    }
+
+    #[test]
+    fn torn_publish_preserves_durable_prefix_via_full_scan() {
+        // A torn cold-start artifact publish must never lose an acknowledged-durable
+        // commit: reopen falls back to a full segment scan over the intact segments.
+        let outcome = run_torn_publish(0x7091_0002, 64).expect("legal torn-publish recovery");
+        assert!(
+            outcome.recovered_visible >= outcome.durable_acked,
+            "PROPERTY: a torn cold-start artifact is an optimization, not a correctness \
+             dependency — every acknowledged-durable commit must survive it"
         );
     }
 }

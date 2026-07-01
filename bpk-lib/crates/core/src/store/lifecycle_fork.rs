@@ -40,7 +40,10 @@ pub(crate) fn fork(
     let fork_fence = store.begin_visibility_fence()?;
     let fence_token = fork_fence.token();
     sync(store)?;
-    store.index.idemp.flush(&store.config.data_dir)?;
+    store
+        .index
+        .idemp
+        .flush(&store.config.data_dir, fs.as_ref())?;
     let (source_watermark_segment_id, source_watermark_offset) =
         latest_segment_watermark(&store.config.data_dir)?;
     let active_segment_id = source_watermark_segment_id;

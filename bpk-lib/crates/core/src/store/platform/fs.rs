@@ -32,20 +32,50 @@ pub(crate) fn reject_cache_symlink_leaf(path: &Path) -> Result<(), StoreError> {
     }
 }
 
+/// Atomic write via the production default backend ([`RealFs`]).
+///
+/// A thin wrapper over [`write_file_atomically_with_fs`] that preserves the
+/// standalone (fs-less) test forge (`checkpoint::tests`); every production
+/// cold-start artifact write path (checkpoint / mmap-index / idempotency-store /
+/// compaction marker) now drives the `_with_fs` variant with the store's
+/// configured filesystem so a `SimFs` can tear the atomic publish. Test-only
+/// because no production call site remains.
+#[cfg(test)]
 pub(crate) fn write_file_atomically(
     data_dir: &Path,
     final_path: &Path,
     purpose: &str,
     write: impl FnOnce(&mut File) -> Result<(), StoreError>,
 ) -> Result<(), StoreError> {
-    reject_symlink_leaf(final_path, purpose)?;
-    let tmp = named_temp_in(data_dir)?;
+    write_file_atomically_with_fs(data_dir, final_path, purpose, write, &RealFs)
+}
+
+/// [`write_file_atomically`], routed through the supplied [`StoreFs`] backend.
+///
+/// A composite of already-routed primitives — the symlink-leaf guard, the
+/// temp-file create ([`StoreFs::named_temp_in`]), and the atomic publish
+/// ([`StoreFs::persist_temp_with_parent_sync`]) — so a fault-injecting backend
+/// can tear the publish and a crash harness can observe a cold-start artifact
+/// the store believed durable. The temp-contents fsync stays on the direct
+/// `platform::sync` seam (the staging half), mirroring
+/// [`super::super::hidden_ranges::write_cancelled_ranges`] and
+/// [`super::super::delivery::cursor::Cursor::save_checkpoint_with_fs`]. `RealFs`
+/// makes it byte-for-byte the production behavior.
+pub(crate) fn write_file_atomically_with_fs(
+    data_dir: &Path,
+    final_path: &Path,
+    purpose: &str,
+    write: impl FnOnce(&mut File) -> Result<(), StoreError>,
+    fs: &dyn StoreFs,
+) -> Result<(), StoreError> {
+    fs.reject_symlink_leaf(final_path, purpose)?;
+    let tmp = fs.named_temp_in(data_dir)?;
     let mut file = tmp.reopen().map_err(StoreError::Io)?;
     write(&mut file)?;
-    file.sync_all().map_err(StoreError::Io)?;
+    crate::store::platform::sync::sync_file_all_io(&file).map_err(StoreError::Io)?;
     drop(file);
     let admission = crate::store::platform::sync::admit_current_parent_dir_sync()?;
-    crate::store::platform::sync::persist_temp_with_parent_sync(tmp, final_path, admission)
+    fs.persist_temp_with_parent_sync(tmp, final_path, admission)
         .map_err(StoreError::Io)?;
     Ok(())
 }
@@ -333,11 +363,16 @@ pub(crate) fn read_exact_at(
     }
 }
 
-// Platform free functions not yet routed through [`StoreFs`] (release row
-// `STORE-PLATFORM-FS-ROUTING`, terminal FAIL-CLOSED boundary). After W3 only the
-// positioned-read primitive (`read_exact_at`) remains a direct free fn; the
+// Platform free-function routing status (release row `STORE-PLATFORM-FS-ROUTING`,
+// terminal FAIL-CLOSED boundary). The tail is now EMPTY: every store call site
+// that reaches the target filesystem does so through [`StoreFs`]. The
 // crash-sensitive atomic-rename / persist cluster (`rename`, `remove_file`,
-// `named_temp_in`, `persist_temp_with_parent_sync`) is now on the seam. Listed in
+// `named_temp_in`, `persist_temp_with_parent_sync`) was routed by W3; the
+// positioned-read primitive (`read_exact_at`) is now routed too, so a `SimFs` can
+// fault the active-segment frame read that, as a free fn, was unfaultable. The
+// free fn itself STAYS here — it holds the `read_at` / `#[cfg(unix)]` /
+// `FileExt` contact the `platform_boundary` gate confines to `platform/` —
+// and `RealFs::read_exact_at` delegates straight to it. Asserted empty by
 // `store_fs_fail_closed_boundary_lists_unrouted_tail_ops`.
 
 /// Filesystem seam for production and (future) deterministic simulation.
@@ -361,10 +396,10 @@ pub(crate) fn read_exact_at(
 /// (W3) the crash-sensitive atomic-rename / persist cluster — `rename`,
 /// `remove_file`, `named_temp_in`, `persist_temp_with_parent_sync` — so the
 /// compaction swap/rollback, visibility-range persist, and cursor-checkpoint
-/// persist sequences are fault-injectable under [`super::super::sim::fs::SimFs`].
-/// The only remaining direct `platform::fs::*` free fn on a store call site is
-/// the positioned read `read_exact_at` (a read, not an atomic-rename/persist),
-/// tracked under release row `STORE-PLATFORM-FS-ROUTING`.
+/// persist sequences are fault-injectable under [`super::super::sim::fs::SimFs`],
+/// and the positioned read `read_exact_at`, so the active-segment frame read is
+/// fault-injectable too. The routing tail is now empty: no store call site
+/// reaches `platform::fs::*` directly (release row `STORE-PLATFORM-FS-ROUTING`).
 pub(crate) trait StoreFs: Send + Sync {
     /// Iterate a directory's entries. Mirrors [`std::fs::read_dir`].
     fn read_dir(&self, path: &Path) -> io::Result<ReadDir>;
@@ -474,6 +509,22 @@ pub(crate) trait StoreFs: Send + Sync {
         final_path: &Path,
         admission: super::sync::ParentDirSyncAdmission,
     ) -> io::Result<()>;
+
+    /// Read exactly `buf.len()` bytes into `buf` starting at byte `offset` of
+    /// `file`. Mirrors the [`read_exact_at`] free fn.
+    ///
+    /// This is the active-segment frame read (the FD/pread path;
+    /// [`super::super::segment::scan::Reader`] holds the open handle). Routed so a
+    /// fault-injecting backend can inject a positioned-read error or a short read
+    /// where the free fn — which takes no fs handle — could not be intercepted.
+    /// The `read_at` / `#[cfg(unix)]` / `FileExt` contact stays in the free fn
+    /// under `platform/`; [`RealFs`] delegates straight to it.
+    fn read_exact_at(
+        &self,
+        file: &mut File,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<(), PositionedReadError>;
 }
 
 /// Production [`StoreFs`]: every method delegates to the existing
@@ -563,6 +614,15 @@ impl StoreFs for RealFs {
         crate::store::platform::sync::persist_temp_with_parent_sync(
             named_temp, final_path, admission,
         )
+    }
+
+    fn read_exact_at(
+        &self,
+        file: &mut File,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<(), PositionedReadError> {
+        read_exact_at(file, offset, buf)
     }
 }
 

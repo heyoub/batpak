@@ -16,6 +16,7 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
             dir.path().to_path_buf(),
             4,
             &runtime.clock_arc(),
+            Arc::clone(config.fs()),
         )),
         cache: Box::new(NoCache),
         projection_registry: projection::registry::ProjectionRegistry::new(

@@ -13,6 +13,7 @@ use crate::store::{Open, Store, StoreError};
 /// close() cost at high event counts.
 pub(super) fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result<(), StoreError> {
     let (seg_id, offset) = latest_segment_watermark(&store.config.data_dir)?;
+    let fs = store.config.fs().as_ref();
     match store.runtime.cold_start.write_target() {
         Some(ColdStartArtifactKind::MmapIndex) => {
             crate::store::cold_start::mmap::write_mmap_index_with_reserved_kind_fallbacks(
@@ -21,6 +22,7 @@ pub(super) fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result
                 seg_id,
                 offset,
                 &store.cumulative_reserved_kind_fallbacks,
+                fs,
             )?;
         }
         Some(ColdStartArtifactKind::Checkpoint) => {
@@ -30,6 +32,7 @@ pub(super) fn write_cold_start_artifacts_on_close(store: &Store<Open>) -> Result
                 seg_id,
                 offset,
                 &store.cumulative_reserved_kind_fallbacks,
+                fs,
             )?;
         }
         None => {}

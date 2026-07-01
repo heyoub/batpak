@@ -1,15 +1,17 @@
-// After W3 the crash-sensitive atomic-rename / persist cluster
-// (`remove_file`, `rename`, `named_temp_in`, `persist_temp_with_parent_sync`)
-// is routed through `StoreFs`. Only the positioned-read primitive remains a
-// direct free fn (a read, not an atomic-rename/persist) — tracked here so the
-// fail-closed boundary stays explicit and any later routing of it must shrink
-// this list deliberately.
-const UNROUTED_STORE_FS_TAIL_OPS: &[&str] = &["read_exact_at"];
-const ROUTED_BY_W3: &[&str] = &[
+// The routing tail is now EMPTY: every store call site that reaches the target
+// filesystem does so through `StoreFs`. W3 routed the crash-sensitive
+// atomic-rename / persist cluster (`remove_file`, `rename`, `named_temp_in`,
+// `persist_temp_with_parent_sync`); the positioned-read primitive
+// (`read_exact_at`) is now routed too, so the active-segment frame read is
+// fault-injectable. Any regression that reintroduces a direct `platform::fs::*`
+// call on a store path must extend this list deliberately and justify it.
+const UNROUTED_STORE_FS_TAIL_OPS: &[&str] = &[];
+const ROUTED_STORE_FS_OPS: &[&str] = &[
     "remove_file",
     "rename",
     "named_temp_in",
     "persist_temp_with_parent_sync",
+    "read_exact_at",
 ];
 
 use super::{reject_copy_source, remove_dir_all};
@@ -182,13 +184,13 @@ fn reject_copy_source_rejects_symlink_source() -> Result<(), Box<dyn Error>> {
 fn store_fs_fail_closed_boundary_lists_unrouted_tail_ops() {
     assert_eq!(
         UNROUTED_STORE_FS_TAIL_OPS,
-        &["read_exact_at"],
-        "PROPERTY: fail-closed boundary — only the positioned-read primitive remains a direct platform free fn after W3"
+        &[] as &[&str],
+        "PROPERTY: fail-closed boundary — the routing tail is empty; no store call site reaches a platform::fs::* free fn directly"
     );
-    for routed in ROUTED_BY_W3 {
+    for routed in ROUTED_STORE_FS_OPS {
         assert!(
             !UNROUTED_STORE_FS_TAIL_OPS.contains(routed),
-            "PROPERTY: {routed} is now routed through StoreFs and must not appear in the unrouted tail"
+            "PROPERTY: {routed} is routed through StoreFs and must not appear in the unrouted tail"
         );
     }
 }
@@ -236,6 +238,57 @@ fn real_fs_routes_w3_atomic_cluster() -> Result<(), Box<dyn Error>> {
     assert!(
         !fs.remove_file_if_present(&renamed)?,
         "PROPERTY: remove_file_if_present must report Ok(false) for an absent file"
+    );
+    Ok(())
+}
+
+// `read_exact_at` is a live vtable entry: exercising it through a trait object
+// proves RealFs dispatches the positioned read and delegates byte-for-byte to
+// the platform free fn (a `-> Ok(())` / no-op mutant on the body is caught by
+// the observed bytes below), and that a read past EOF surfaces the ShortRead
+// discriminant the reader's active-frame mapping depends on.
+#[test]
+fn real_fs_routes_positioned_read_exact_at() -> Result<(), Box<dyn Error>> {
+    use crate::store::platform::fs::PositionedReadError;
+    use std::io::Write;
+    let dir = tempfile::tempdir()?;
+    let fs: std::sync::Arc<dyn StoreFs> = std::sync::Arc::new(RealFs);
+
+    let path = dir.path().join("frame.bin");
+    let mut file = std::fs::File::create(&path)?;
+    file.write_all(b"0123456789abcdef")?;
+    file.sync_all()?;
+    let mut handle = std::fs::File::open(&path)?;
+
+    // Round-trip: a positioned read at offset 3 returns exactly the requested
+    // slice, proving RealFs::read_exact_at delegates to the platform free fn.
+    // (`PositionedReadError` is not `std::error::Error`, so map the control read
+    // to a message rather than `?`-propagating it.)
+    let mut buf = [0u8; 5];
+    fs.read_exact_at(&mut handle, 3, &mut buf)
+        .map_err(|e| format!("positioned read must succeed: {e:?}"))?;
+    assert_eq!(
+        &buf, b"34567",
+        "PROPERTY: RealFs::read_exact_at must fill the buffer from the requested offset like the platform free fn"
+    );
+
+    // EOF: reading a slice that runs past the file end reports a ShortRead with
+    // `bytes_read == 0` (the read started exactly at EOF) — the discriminant the
+    // reader maps to `corrupt_eof`.
+    let mut past_eof = [0u8; 4];
+    let eof = fs.read_exact_at(&mut handle, 16, &mut past_eof);
+    assert!(
+        matches!(eof, Err(PositionedReadError::ShortRead { bytes_read: 0 })),
+        "PROPERTY: a positioned read starting at EOF must surface ShortRead {{ bytes_read: 0 }}, got {eof:?}"
+    );
+
+    // Partial: a read that begins inside the file but requests more than remains
+    // reports a non-zero ShortRead (the torn-frame discriminant).
+    let mut partial = [0u8; 8];
+    let short = fs.read_exact_at(&mut handle, 12, &mut partial);
+    assert!(
+        matches!(short, Err(PositionedReadError::ShortRead { bytes_read }) if bytes_read == 4),
+        "PROPERTY: a positioned read past the tail must surface a non-zero ShortRead carrying the bytes read, got {short:?}"
     );
     Ok(())
 }

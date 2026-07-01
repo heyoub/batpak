@@ -84,6 +84,7 @@ pub(crate) fn compact(
         &store.config.data_dir,
         merged_id,
         &source_segment_ids,
+        fs.as_ref(),
     )?;
 
     let fresh_index = match materialize_compacted_segment(
@@ -129,7 +130,10 @@ pub(crate) fn compact(
         fs.remove_file_if_present(&temp_source_path)
             .map_err(StoreError::Io)?;
     }
-    crate::store::cold_start::rebuild::clear_pending_compaction(&store.config.data_dir)?;
+    crate::store::cold_start::rebuild::clear_pending_compaction(
+        &store.config.data_dir,
+        fs.as_ref(),
+    )?;
 
     let frontier = store.index.global_sequence();
     store.index.mark_idemp_evicted_against_live();
@@ -145,7 +149,10 @@ pub(crate) fn compact(
         "applied window-priority idempotency eviction after compaction"
     );
 
-    store.index.idemp.flush(&store.config.data_dir)?;
+    store
+        .index
+        .idemp
+        .flush(&store.config.data_dir, fs.as_ref())?;
 
     if let Err(e) = write_cold_start_artifacts_on_close(store) {
         tracing::warn!("post-compaction cold-start artifact write failed: {e}");
@@ -179,7 +186,7 @@ fn rollback_compaction_disk_state(
         fs.rename(temp_source_path, merged_path)
             .map_err(StoreError::Io)?;
     }
-    crate::store::cold_start::rebuild::clear_pending_compaction(data_dir)?;
+    crate::store::cold_start::rebuild::clear_pending_compaction(data_dir, fs)?;
     Ok(())
 }
 

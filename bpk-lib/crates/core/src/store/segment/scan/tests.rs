@@ -18,9 +18,13 @@ fn test_clock() -> std::sync::Arc<dyn crate::store::Clock> {
     std::sync::Arc::new(crate::store::SystemClock::new())
 }
 
+fn test_fs() -> std::sync::Arc<dyn crate::store::platform::fs::StoreFs> {
+    std::sync::Arc::new(crate::store::platform::fs::RealFs)
+}
+
 fn test_reader() -> (Reader, TempDir) {
     let dir = TempDir::new().expect("create temp dir for reader test");
-    let reader = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    let reader = Reader::new(dir.path().to_path_buf(), 4, &test_clock(), test_fs());
     (reader, dir)
 }
 
@@ -494,7 +498,7 @@ fn sealed_mmap_and_fd_paths_return_identical_bytes() {
     reader_mmap.set_active_segment(1);
 
     // Build a second reader over the SAME data dir and disable mmap on it.
-    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock(), test_fs());
     reader_fd.disable_sealed_mmap_for_test();
     reader_fd.set_active_segment(1);
 
@@ -540,14 +544,14 @@ fn corrupt_sealed_frame_surfaces_same_error_class_on_both_paths() {
     .expect("rewrite corrupted segment");
 
     // mmap path
-    let reader_mmap = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    let reader_mmap = Reader::new(dir.path().to_path_buf(), 4, &test_clock(), test_fs());
     reader_mmap.set_active_segment(1);
     let err_mmap = reader_mmap
         .read_entry(&pos)
         .expect_err("a corrupt sealed frame must fail to decode on the mmap path");
 
     // FD path
-    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock());
+    let mut reader_fd = Reader::new(dir.path().to_path_buf(), 4, &test_clock(), test_fs());
     reader_fd.disable_sealed_mmap_for_test();
     reader_fd.set_active_segment(1);
     let err_fd = reader_fd
