@@ -37,20 +37,19 @@
 //!
 //! #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 //! #[batpak(category = 0xF, type_id = 1)]
-//! struct PlayerMoved {
-//!     x: i32,
-//!     y: i32,
+//! struct ThingHappened {
+//!     value: i64,
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
 //! let store = Store::open(StoreConfig::new(dir.path()))?;
-//! let coord = Coordinate::new("player:alice", "room:dungeon")?;
+//! let coord = Coordinate::new("entity:a", "scope:1")?;
 //!
-//! let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
+//! let receipt = store.append_typed(&coord, &ThingHappened { value: 42 })?;
 //! let stored = store.get(receipt.event_id)?;
 //!
-//! assert_eq!(stored.coordinate.entity(), "player:alice");
+//! assert_eq!(stored.coordinate.entity(), "entity:a");
 //! assert_eq!(stored.event.header.event_id, receipt.event_id);
 //! # Ok(())
 //! # }

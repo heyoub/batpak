@@ -73,7 +73,7 @@ pub struct StoreConfig {
     /// When a signer is configured but its signature cover cannot be built,
     /// permit a best-effort downgrade to an unsigned receipt instead of failing
     /// the append. Default `false` (fail closed).
-    pub(crate) allow_signing_downgrade: bool,
+    pub(crate) signing_downgrade_allowed: bool,
     /// Whether the full hash chain is recomputed at open (`Recompute`) or the
     /// per-frame CRC alone is trusted (`Crc`, default). See [`ChainVerification`].
     pub(crate) chain_verification: ChainVerification,
@@ -116,7 +116,7 @@ impl StoreConfig {
             // opt into `SigningPolicy::Required`, which refuses to open without a
             // signing key. Signing is a deliberate per-deployment choice.
             signing_policy: SigningPolicy::Optional,
-            allow_signing_downgrade: false,
+            signing_downgrade_allowed: false,
             // Crc: a regular store pays nothing extra at open; the per-frame CRC
             // already guarded every frame at read time. Regulated callers opt
             // into ChainVerification::Recompute for tamper-evidence at open.
@@ -274,7 +274,7 @@ impl StoreConfig {
     /// signer cannot build its signature cover. Default `false` (the append
     /// fails closed rather than silently emitting an unsigned receipt).
     pub fn with_signing_downgrade_allowed(mut self, allow: bool) -> Self {
-        self.allow_signing_downgrade = allow;
+        self.signing_downgrade_allowed = allow;
         self
     }
 
@@ -507,7 +507,7 @@ impl Clone for StoreConfig {
             platform_profile_path: self.platform_profile_path.clone(),
             signing_keys: self.signing_keys.clone(),
             signing_policy: self.signing_policy,
-            allow_signing_downgrade: self.allow_signing_downgrade,
+            signing_downgrade_allowed: self.signing_downgrade_allowed,
             chain_verification: self.chain_verification,
             event_payload_validation: self.event_payload_validation,
             #[cfg(feature = "dangerous-test-hooks")]
@@ -539,7 +539,7 @@ impl std::fmt::Debug for StoreConfig {
             .field("platform_profile_path", &self.platform_profile_path)
             .field("signing_keys", &self.signing_keys.len())
             .field("signing_policy", &self.signing_policy)
-            .field("allow_signing_downgrade", &self.allow_signing_downgrade)
+            .field("signing_downgrade_allowed", &self.signing_downgrade_allowed)
             .field("chain_verification", &self.chain_verification)
             .field("event_payload_validation", &self.event_payload_validation)
             .finish()

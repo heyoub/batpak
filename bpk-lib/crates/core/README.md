@@ -19,9 +19,8 @@ use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 1)]
-struct PlayerMoved {
-    x: i32,
-    y: i32,
+struct ThingHappened {
+    value: i64,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,11 +30,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
     // A Coordinate names where events belong: an entity within a scope.
-    let coord = Coordinate::new("player:alice", "room:dungeon")?;
+    let coord = Coordinate::new("entity:a", "scope:1")?;
 
     // Append source truth. The receipt is verifiable evidence of what
     // was accepted.
-    let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
+    let receipt = store.append_typed(&coord, &ThingHappened { value: 42 })?;
 
     // Accepted events are immutable.
     let fetched = store.get(receipt.event_id)?;

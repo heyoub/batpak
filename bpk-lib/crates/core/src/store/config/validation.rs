@@ -100,7 +100,7 @@ impl StoreConfig {
             group_commit_drain_budget,
             signing_registry: ReceiptSigningRegistry::from_keys(
                 &self.signing_keys,
-                self.allow_signing_downgrade,
+                self.signing_downgrade_allowed,
             ),
             clock: Arc::new(MonotonicClock::wrap(
                 self.clock

@@ -1,7 +1,9 @@
 #![deny(missing_docs)]
-//! Thin sync-first server/network boundary exposure layer.
+//! Lean, sync-first server/network boundary exposure layer (blocking transport, TLS opt-in).
 //!
-//! `netbat` is intentionally thin: nb exposes, sb dispatches, bp records. This
+//! `netbat` is a lean, blocking transport boundary: nb exposes, sb dispatches,
+//! bp records. It stays narrow in remit — synchronous and blocking per
+//! connection, with a small default dependency graph (TLS is opt-in). This
 //! crate can describe server-facing modules, endpoints, and route tables around
 //! [`syncbat`] modules or cores. It can also handle bounded sync transport
 //! frames, but it does not own dispatch decisions, run handlers directly, or

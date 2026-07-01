@@ -1,6 +1,6 @@
 # netbat
 
-Thin sync-first exposure boundary for syncbat.
+A lean, sync-first exposure boundary for syncbat: a blocking transport layer with opt-in TLS.
 
 ```text
 nb exposes.

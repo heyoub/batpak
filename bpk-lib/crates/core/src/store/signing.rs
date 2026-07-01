@@ -129,7 +129,7 @@ impl ReceiptSigningRegistry {
                         "receipt signature cover could not be built: {error}"
                     )));
                 }
-                tracing::error!(error = %error, "receipt signing downgraded to unsigned (allow_signing_downgrade)");
+                tracing::error!(error = %error, "receipt signing downgraded to unsigned (signing_downgrade_allowed)");
                 downgrade_receipt_signing(receipt, error.to_string());
                 return Ok(());
             }
