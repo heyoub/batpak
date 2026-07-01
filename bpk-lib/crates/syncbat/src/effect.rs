@@ -14,6 +14,7 @@ use batpak::event::EventKind;
 
 use crate::effect_backend::{EffectBackend, EffectError};
 use crate::operation::{DescriptorValidationError, EffectClass, MAX_DESCRIPTOR_REF_BYTES};
+use crate::receipt::ReceiptMetadata;
 
 const EVENT_APPEND_CAPABILITY: &str = "event.append";
 const EVENT_READ_CAPABILITY: &str = "event.read";
@@ -592,32 +593,66 @@ impl<'a> ProjectionReadHandle<'a> {
 }
 
 /// Capability handle that performs and records receipt emission.
+///
+/// Emission is a declared effect axis that also contributes evidence: the
+/// runtime already banks exactly one invocation receipt per op, and this handle
+/// stamps the emitted opaque payload into that receipt's LOCAL drawer. So an
+/// `emits_receipt` declaration is not decorative — the emitted bytes ride the
+/// handle into the runtime's single banked receipt.
 pub struct ReceiptEmitHandle<'a> {
     row: &'a mut OperationEffectRow,
     backend: Option<&'a mut (dyn EffectBackend + 'static)>,
+    emit_meta: &'a mut ReceiptMetadata,
 }
 
 impl<'a> ReceiptEmitHandle<'a> {
     pub(crate) fn new(
         row: &'a mut OperationEffectRow,
         backend: Option<&'a mut (dyn EffectBackend + 'static)>,
+        emit_meta: &'a mut ReceiptMetadata,
     ) -> Self {
-        Self { row, backend }
+        Self {
+            row,
+            backend,
+            emit_meta,
+        }
     }
 
-    /// Emit one receipt kind through the runtime backend and record it as an
-    /// observed emission.
+    /// Emit one receipt kind through the runtime backend, stamp `payload` as
+    /// opaque evidence into the invocation's LOCAL receipt drawer, and record it
+    /// as an observed emission.
+    ///
+    /// The backend mediates the emission first (fail-closed when unbound); only
+    /// on a successful mediation is `payload` stamped, under the runtime-owned
+    /// LOCAL drawer key `syncbat.emit_receipt.{receipt_kind}`, so the runtime's
+    /// single banked invocation receipt carries the emitted evidence. The
+    /// payload rides this handle into [`ReceiptMetadata`], so the
+    /// [`EffectBackend`] trait keeps its `&str`-only `emit_receipt` signature.
     ///
     /// # Errors
     /// Returns [`EffectError`] when no backend is bound for this invocation or
-    /// the backend rejects the emission.
-    pub fn emit_receipt(&mut self, receipt_kind: impl Into<String>) -> Result<(), EffectError> {
+    /// the backend rejects the emission; in either case nothing is stamped.
+    pub fn emit_receipt(
+        &mut self,
+        receipt_kind: impl Into<String>,
+        payload: impl Into<Vec<u8>>,
+    ) -> Result<(), EffectError> {
         let receipt_kind = receipt_kind.into();
         let backend = require_effect_backend(self.backend.as_deref_mut(), "emit receipts")?;
         backend.emit_receipt(&receipt_kind)?;
+        self.emit_meta
+            .local
+            .insert(emit_receipt_local_key(&receipt_kind), payload.into());
         self.row.record_emits_receipt(receipt_kind);
         Ok(())
     }
+}
+
+/// Runtime-owned LOCAL receipt-drawer key an emitted receipt's opaque payload is
+/// stamped under, namespaced by `receipt_kind` so distinct emitted kinds do not
+/// collide within one invocation's banked receipt.
+fn emit_receipt_local_key(receipt_kind: &str) -> String {
+    format!("syncbat.emit_receipt.{receipt_kind}")
 }
 
 /// Capability handle that performs and records host-control use.

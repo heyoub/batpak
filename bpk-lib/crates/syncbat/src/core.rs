@@ -641,10 +641,17 @@ impl<'a> Ctx<'a> {
     }
 
     /// Borrow a receipt-emission capability handle for this invocation.
+    ///
+    /// The three arguments are DIRECT disjoint borrows of three distinct `Ctx`
+    /// fields (`observed_effects`, `effect_backend`, `metadata`); borrowing them
+    /// as separate field paths in one expression lets the borrow checker split
+    /// the borrow, whereas routing any of them through a `&mut self` accessor
+    /// would take a whole-`self` borrow and conflict.
     pub fn receipt_emit_handle(&mut self) -> ReceiptEmitHandle<'_> {
         ReceiptEmitHandle::new(
             &mut self.observed_effects,
             self.effect_backend.as_deref_mut(),
+            &mut self.metadata,
         )
     }
 

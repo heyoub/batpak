@@ -124,7 +124,7 @@ impl<'a> syncbat::effect::ProjectionReadHandle<'a>
 pub fn syncbat::effect::ProjectionReadHandle<'a>::query_projection(&mut self, projection_id: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::effect::ReceiptEmitHandle<'a>
 impl<'a> syncbat::effect::ReceiptEmitHandle<'a>
-pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>, payload: impl core::convert::Into<alloc::vec::Vec<u8>>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::effect::append_target(kind: batpak::event::kind::EventKind) -> alloc::string::String
 pub mod syncbat::effect_backend
 pub struct syncbat::effect_backend::EffectError
@@ -1668,7 +1668,7 @@ impl<T> syncbat::SubscriptionSession for syncbat::ProjectionStreamSession<T> whe
 pub fn syncbat::ProjectionStreamSession<T>::poll(&mut self, timeout: core::time::Duration) -> core::result::Result<syncbat::SessionPoll, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::ReceiptEmitHandle<'a>
 impl<'a> syncbat::effect::ReceiptEmitHandle<'a>
-pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>, payload: impl core::convert::Into<alloc::vec::Vec<u8>>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 #[non_exhaustive] pub struct syncbat::ReceiptEnvelope
 pub syncbat::ReceiptEnvelope::descriptor_name: alloc::string::String
 pub syncbat::ReceiptEnvelope::input_hash: core::option::Option<syncbat::receipt::ReceiptHash>

@@ -22,6 +22,7 @@ const PROJECTION_ALLOWED: &str = "proj.orders.v1";
 const PROJECTION_OTHER: &str = "proj.other.v1";
 const RECEIPT_KIND: &str = "receipt.audit.v1";
 const RECEIPT_OTHER: &str = "receipt.other.v1";
+const EMIT_PAYLOAD: &[u8] = b"emit-evidence";
 const HOST_CONTROL_ALLOWED: &str = "ctrl.alpha";
 const HOST_CONTROL_OTHER: &str = "ctrl.beta";
 
@@ -218,15 +219,23 @@ impl Handler for ProjectionHandler {
 
 struct EmitReceiptHandler {
     receipt_kind: String,
+    payload: Vec<u8>,
 }
 
 impl Handler for EmitReceiptHandler {
     fn handle(&mut self, input: &[u8], cx: &mut Ctx<'_>) -> HandlerResult {
         cx.receipt_emit_handle()
-            .emit_receipt(self.receipt_kind.clone())
+            .emit_receipt(self.receipt_kind.clone(), self.payload.clone())
             .map_err(|error| HandlerError::failed(error.message().to_owned()))?;
         Ok(input.to_vec())
     }
+}
+
+/// Mirror of the runtime-owned LOCAL drawer key stamped by
+/// `ReceiptEmitHandle::emit_receipt` (`effect.rs`): the emitted payload lands
+/// under this key in the banked invocation receipt.
+fn emit_local_key(receipt_kind: &str) -> String {
+    format!("syncbat.emit_receipt.{receipt_kind}")
 }
 
 struct HostControlHandler {
@@ -585,14 +594,32 @@ fn declared_receipt_emit_through_handle_completes_and_is_performed() {
         emit_descriptor(OperationEffectRow::new().emits_receipt(RECEIPT_KIND)),
         EmitReceiptHandler {
             receipt_kind: RECEIPT_KIND.to_owned(),
+            payload: EMIT_PAYLOAD.to_vec(),
         },
         Some(backend),
     );
-    core.invoke("audit.emit", b"payload".to_vec())
+    let result = core
+        .invoke("audit.emit", b"payload".to_vec())
         .expect("invoke");
     assert_eq!(
         state.receipts.lock().expect("receipt lock").clone(),
         vec![RECEIPT_KIND.to_owned()]
+    );
+    // Option B: the emitted payload rides the handle -> `ReceiptMetadata` path
+    // into the runtime's single banked invocation receipt, stamped under the
+    // runtime-owned LOCAL drawer key `syncbat.emit_receipt.{kind}`. Drop the
+    // stamp-after-perform step in `emit_receipt` and this drawer entry is absent.
+    let recorded = result
+        .recorded_receipt()
+        .expect("banked invocation receipt");
+    assert_eq!(
+        recorded
+            .envelope
+            .local_extensions
+            .get(&emit_local_key(RECEIPT_KIND))
+            .map(Vec::as_slice),
+        Some(EMIT_PAYLOAD),
+        "banked receipt must carry the emitted payload in its local drawer"
     );
 }
 
@@ -602,6 +629,7 @@ fn emit_receipt_without_a_bound_backend_is_denied() -> Result<(), Box<dyn std::e
         emit_descriptor(OperationEffectRow::new().emits_receipt(RECEIPT_KIND)),
         EmitReceiptHandler {
             receipt_kind: RECEIPT_KIND.to_owned(),
+            payload: EMIT_PAYLOAD.to_vec(),
         },
         None,
     );
@@ -630,6 +658,7 @@ fn emit_receipt_backend_reject_does_not_record_observation(
         emit_descriptor(OperationEffectRow::new().emits_receipt(RECEIPT_KIND)),
         EmitReceiptHandler {
             receipt_kind: RECEIPT_KIND.to_owned(),
+            payload: EMIT_PAYLOAD.to_vec(),
         },
         Some(backend),
     );
@@ -660,6 +689,7 @@ fn dispatch_denies_receipt_emit_outside_declared_row() -> Result<(), Box<dyn std
         emit_descriptor(OperationEffectRow::new().emits_receipt(RECEIPT_KIND)),
         EmitReceiptHandler {
             receipt_kind: RECEIPT_OTHER.to_owned(),
+            payload: EMIT_PAYLOAD.to_vec(),
         },
         Some(backend),
     );
