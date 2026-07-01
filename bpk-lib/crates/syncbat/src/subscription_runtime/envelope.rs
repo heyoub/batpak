@@ -54,6 +54,12 @@ pub struct EventStreamEnvelopeV1 {
 impl EventStreamEnvelopeV1 {
     /// Build and canonically encode an envelope for one committed event.
     ///
+    /// Reads the payload through the key-aware delivery primitive
+    /// ([`read_delivery_stored`]): a readable event yields `Ok(Some(bytes))`
+    /// carrying its PLAINTEXT payload; a crypto-shredded event yields `Ok(None)`
+    /// so the caller skips it and never ships ciphertext into the public
+    /// envelope. Without `payload-encryption` this is byte-identical to a raw read.
+    ///
     /// # Errors
     /// [`SubscriptionRuntimeError::Store`] or [`SubscriptionRuntimeError::EnvelopeEncoding`].
     pub fn encode_for_entry(
@@ -61,14 +67,17 @@ impl EventStreamEnvelopeV1 {
         subscription_id: &str,
         entry: &IndexEntry,
         inner_event_payload_schema_ref: Option<&str>,
-    ) -> Result<Vec<u8>, SubscriptionRuntimeError> {
-        let stored = store.read_raw(entry.event_id())?;
+    ) -> Result<Option<Vec<u8>>, SubscriptionRuntimeError> {
+        let Some(stored) = read_delivery_stored(store, entry.event_id())? else {
+            return Ok(None);
+        };
         event_stream_envelope_bytes_from_stored(
             subscription_id,
             entry,
             &stored,
             inner_event_payload_schema_ref,
         )
+        .map(Some)
     }
 
     fn from_stored(
@@ -340,6 +349,11 @@ pub struct ReceiptStreamEnvelopeV1 {
 impl ReceiptStreamEnvelopeV1 {
     /// Build and canonically encode an envelope for one committed receipt event.
     ///
+    /// Reads the payload through the key-aware delivery primitive
+    /// ([`read_delivery_stored`]): `Ok(None)` means the event was crypto-shredded
+    /// and the caller must skip it, never shipping ciphertext. Without
+    /// `payload-encryption` this is byte-identical to a raw read.
+    ///
     /// # Errors
     /// [`SubscriptionRuntimeError::Store`], [`SubscriptionRuntimeError::EnvelopeEncoding`],
     /// or receipt payload decode failures surfaced as envelope encoding errors.
@@ -349,8 +363,10 @@ impl ReceiptStreamEnvelopeV1 {
         route_receipt_kind: &str,
         entry: &IndexEntry,
         inner_receipt_schema_ref: Option<&str>,
-    ) -> Result<(Self, Vec<u8>), SubscriptionRuntimeError> {
-        let stored = store.read_raw(entry.event_id())?;
+    ) -> Result<Option<(Self, Vec<u8>)>, SubscriptionRuntimeError> {
+        let Some(stored) = read_delivery_stored(store, entry.event_id())? else {
+            return Ok(None);
+        };
         let receipt: crate::ReceiptEnvelope = batpak::canonical::from_bytes(&stored.event.payload)
             .map_err(|error| {
                 SubscriptionRuntimeError::EnvelopeEncoding(format!(
@@ -365,6 +381,7 @@ impl ReceiptStreamEnvelopeV1 {
             &receipt,
             inner_receipt_schema_ref,
         )
+        .map(Some)
     }
 }
 
@@ -416,6 +433,12 @@ pub struct EntityStreamEnvelopeV1 {
 impl EntityStreamEnvelopeV1 {
     /// Build and canonically encode an envelope for one committed entity event.
     ///
+    /// Reads the payload through the key-aware delivery primitive
+    /// ([`read_delivery_stored`]): a readable event yields `Ok(Some(bytes))`
+    /// carrying its PLAINTEXT payload; a crypto-shredded event yields `Ok(None)`
+    /// so the caller skips it and never ships ciphertext into the public
+    /// envelope. Without `payload-encryption` this is byte-identical to a raw read.
+    ///
     /// # Errors
     /// [`SubscriptionRuntimeError::Store`] or [`SubscriptionRuntimeError::EnvelopeEncoding`].
     pub fn encode_for_entry(
@@ -423,14 +446,17 @@ impl EntityStreamEnvelopeV1 {
         subscription_id: &str,
         entry: &IndexEntry,
         inner_event_payload_schema_ref: Option<&str>,
-    ) -> Result<Vec<u8>, SubscriptionRuntimeError> {
-        let stored = store.read_raw(entry.event_id())?;
+    ) -> Result<Option<Vec<u8>>, SubscriptionRuntimeError> {
+        let Some(stored) = read_delivery_stored(store, entry.event_id())? else {
+            return Ok(None);
+        };
         entity_stream_envelope_bytes_from_stored(
             subscription_id,
             entry,
             &stored,
             inner_event_payload_schema_ref,
         )
+        .map(Some)
     }
 
     fn from_stored(

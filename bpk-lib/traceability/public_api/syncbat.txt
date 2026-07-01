@@ -727,7 +727,7 @@ pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::scope: alloc::string:
 pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EntityStreamEnvelopeV1
-pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::EntityStreamRouteBinding
 pub syncbat::subscription_runtime::EntityStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::subscription_runtime::EntityStreamRouteBinding::entity: alloc::string::String
@@ -774,7 +774,7 @@ pub syncbat::subscription_runtime::EventStreamEnvelopeV1::scope: alloc::string::
 pub syncbat::subscription_runtime::EventStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::EventStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EventStreamEnvelopeV1
-pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::EventStreamSession
 impl syncbat::EventStreamSession
 pub fn syncbat::EventStreamSession::drain_control(&mut self) -> core::result::Result<(), syncbat::SubscriptionRuntimeError>
@@ -899,7 +899,7 @@ pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::scope: alloc::string
 pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::ReceiptStreamEnvelopeV1
-pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<(Self, alloc::vec::Vec<u8>), syncbat::SubscriptionRuntimeError>
+pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<(Self, alloc::vec::Vec<u8>)>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::ReceiptStreamRouteBinding
 pub syncbat::subscription_runtime::ReceiptStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::subscription_runtime::ReceiptStreamRouteBinding::inner_receipt_schema_ref: core::option::Option<alloc::string::String>
@@ -1410,7 +1410,7 @@ pub syncbat::EntityStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::EntityStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::EntityStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EntityStreamEnvelopeV1
-pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::EntityStreamRouteBinding
 pub syncbat::EntityStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::EntityStreamRouteBinding::entity: alloc::string::String
@@ -1463,7 +1463,7 @@ pub syncbat::EventStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::EventStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::EventStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EventStreamEnvelopeV1
-pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::EventStreamSession
 impl syncbat::EventStreamSession
 pub fn syncbat::EventStreamSession::drain_control(&mut self) -> core::result::Result<(), syncbat::SubscriptionRuntimeError>
@@ -1741,7 +1741,7 @@ pub syncbat::ReceiptStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::ReceiptStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::ReceiptStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::ReceiptStreamEnvelopeV1
-pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<(Self, alloc::vec::Vec<u8>), syncbat::SubscriptionRuntimeError>
+pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<(Self, alloc::vec::Vec<u8>)>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::ReceiptStreamRouteBinding
 pub syncbat::ReceiptStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::ReceiptStreamRouteBinding::inner_receipt_schema_ref: core::option::Option<alloc::string::String>
