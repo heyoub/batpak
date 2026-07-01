@@ -31,13 +31,15 @@ struct BatchEntityState {
 
 /// Output of [`WriterCore::precompute_batch_items`]: the staged commit facts
 /// plus, when encryption is enabled, the per-item seal results and whether the
-/// batch minted any new key (so the caller raises the durability fence once).
+/// keyset needs the durability fence (any item minted a key, OR a prior mint's
+/// fence-flush failed and left the keyset ahead of disk) so the caller flushes
+/// once before writing the batch's frames.
 struct PrecomputedBatch {
     computed: Vec<StagedCommittedEvent>,
     #[cfg(feature = "payload-encryption")]
     encryptions: Vec<Option<super::encrypt::SealedPayload>>,
     #[cfg(feature = "payload-encryption")]
-    minted_any: bool,
+    needs_fence: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -225,7 +227,7 @@ impl WriterCore {
         item: &PreparedBatchItem,
         event_id: u128,
         encryptions: &mut Vec<Option<super::encrypt::SealedPayload>>,
-        minted_any: &mut bool,
+        needs_fence: &mut bool,
     ) -> Result<[u8; 32], StoreError> {
         match self.seal_event_payload(
             item.coord(),
@@ -234,7 +236,7 @@ impl WriterCore {
             item.payload_bytes(),
         )? {
             Some(sealed) => {
-                *minted_any |= sealed.minted;
+                *needs_fence |= sealed.needs_fence;
                 let hash = crate::event::hash::compute_hash(&sealed.ciphertext);
                 encryptions.push(Some(sealed));
                 Ok(hash)
@@ -253,14 +255,14 @@ impl WriterCore {
     ) -> Result<PrecomputedBatch, StoreError> {
         let mut computed: Vec<StagedCommittedEvent> = Vec::with_capacity(prepared.len());
         // Parallel per-item seal results (opt-in encryption): ciphertext + header
-        // metadata per item, or `None` for a plaintext item. `minted_any` records
+        // metadata per item, or `None` for a plaintext item. `needs_fence` records
         // whether ANY item minted a new key, so the caller raises the durability
         // fence exactly once for the batch.
         #[cfg(feature = "payload-encryption")]
         let mut encryptions: Vec<Option<super::encrypt::SealedPayload>> =
             Vec::with_capacity(prepared.len());
         #[cfg(feature = "payload-encryption")]
-        let mut minted_any = false;
+        let mut needs_fence = false;
         let mut entity_states: std::collections::HashMap<(Arc<str>, u32), BatchEntityState> =
             std::collections::HashMap::new();
 
@@ -306,7 +308,7 @@ impl WriterCore {
             // `blake3(payload)`) when encryption is off.
             #[cfg(feature = "payload-encryption")]
             let event_hash =
-                self.batch_event_hash(item, event_id, &mut encryptions, &mut minted_any)?;
+                self.batch_event_hash(item, event_id, &mut encryptions, &mut needs_fence)?;
             #[cfg(not(feature = "payload-encryption"))]
             let event_hash = crate::event::hash::compute_hash(item.payload_bytes());
 
@@ -359,7 +361,7 @@ impl WriterCore {
             #[cfg(feature = "payload-encryption")]
             encryptions,
             #[cfg(feature = "payload-encryption")]
-            minted_any,
+            needs_fence,
         })
     }
 
@@ -475,13 +477,15 @@ impl WriterCore {
         );
     }
 
-    /// Raise the crypto-shred durability fence for a batch: if any item minted a
-    /// new scope key, flush the keyset durable BEFORE writing the batch's frames
-    /// (and thus before the batch fsync), so a crash can never order ciphertext-
-    /// durable ahead of key-durable. Fails the batch closed on a flush failure.
+    /// Raise the crypto-shred durability fence for a batch: if the keyset is dirty
+    /// (any item minted a new scope key, OR a prior mint's fence-flush failed and
+    /// left the keyset ahead of disk), flush it durable BEFORE writing the batch's
+    /// frames (and thus before the batch fsync), so a crash can never order
+    /// ciphertext-durable ahead of key-durable. Fails the batch closed on a flush
+    /// failure.
     #[cfg(feature = "payload-encryption")]
-    fn raise_batch_durability_fence(&self, minted_any: bool) -> Result<(), StoreError> {
-        if minted_any {
+    fn raise_batch_durability_fence(&self, needs_fence: bool) -> Result<(), StoreError> {
+        if needs_fence {
             self.flush_keyset_durable()?;
         }
         Ok(())
@@ -512,7 +516,7 @@ impl WriterCore {
         // Durability fence BEFORE any batch frame is written (details on the
         // helper). Fails the batch closed on a flush failure — no BEGIN marker.
         #[cfg(feature = "payload-encryption")]
-        self.raise_batch_durability_fence(precomputed.minted_any)?;
+        self.raise_batch_durability_fence(precomputed.needs_fence)?;
 
         let batch_frontier = computed
             .last()

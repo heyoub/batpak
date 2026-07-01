@@ -392,6 +392,17 @@ impl PayloadKey {
 pub struct KeyStore {
     keys: BTreeMap<KeyScope, PayloadKey>,
     granularity: KeyScopeGranularity,
+    /// `true` when the in-memory keyset has diverged from the last durable flush
+    /// — set via [`mark_dirty`](Self::mark_dirty) (the writer calls it whenever an
+    /// append mints a fresh scope key) or by [`destroy`](Self::destroy), and
+    /// cleared ONLY by a successful [`flush`](Self::flush). The append durability
+    /// fence flushes whenever this is set, so a mint whose fence-flush FAILED (the
+    /// key is resident in memory but never reached disk) forces the NEXT ciphertext
+    /// write to re-flush before it can ack, instead of trusting the resident key
+    /// and skipping the fence — which would otherwise leave a durable ciphertext
+    /// whose key is on disk nowhere (a silent, unintended crypto-shred of live
+    /// data).
+    dirty: bool,
 }
 
 impl KeyStore {
@@ -401,7 +412,22 @@ impl KeyStore {
         Self {
             keys: BTreeMap::new(),
             granularity,
+            dirty: false,
         }
+    }
+
+    /// Whether the in-memory keyset is ahead of the last durable flush (see the
+    /// [`dirty`](Self#structfield.dirty) field). The durability fence flushes
+    /// whenever this holds. Internal durability mechanism, not public surface.
+    #[must_use]
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Flag the keyset dirty — the in-memory keys are ahead of the last durable
+    /// flush. Idempotent; cleared only by a successful flush.
+    pub(crate) fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     /// The scope granularity this store partitions keys by.
@@ -447,7 +473,13 @@ impl KeyStore {
     /// [`get`](Self::get) returns `None`, and any ciphertext sealed under the
     /// old key is permanently unrecoverable.
     pub fn destroy(&mut self, scope: &KeyScope) -> bool {
-        self.keys.remove(scope).is_some()
+        let removed = self.keys.remove(scope).is_some();
+        if removed {
+            // The in-memory keyset now differs from the last durable flush; the
+            // erasure is not durable until the next successful flush persists it.
+            self.dirty = true;
+        }
+        removed
     }
 }
 

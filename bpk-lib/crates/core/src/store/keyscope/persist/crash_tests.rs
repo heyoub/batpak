@@ -95,3 +95,72 @@ fn flush_persist_fault_leaves_the_old_keyset_intact_never_torn() {
         "PROPERTY: the torn V2 addition (key B) never landed — keyset is not torn, it is OLD-intact"
     );
 }
+
+/// PROVES: the durability-fence gap is closed. A mint whose fence-flush FAILS
+/// leaves the key resident in memory but off disk — the keyset MUST stay `dirty`
+/// so the next same-scope append's fence (`needs_fence = KeyStore::is_dirty()`)
+/// re-flushes before it can ack, instead of seeing the resident key, computing
+/// `minted = false`, and SKIPPING the fence (which would ack a ciphertext whose
+/// key is on disk nowhere — a silent, unintended crypto-shred of live data).
+/// CATCHES: a regression where a failed flush clears (or never sets) the dirty
+/// signal, or a flush that clears it without persisting — reopening the
+/// "unflushed key, next same-scope write skips the fence" hole.
+/// SEEDED: deterministic / no randomness.
+#[test]
+fn a_failed_fence_flush_keeps_the_keyset_dirty_so_the_next_fence_refires() {
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let scope_a = scope("entity:unflushed-key");
+
+    let mut store = KeyStore::new(GRAN);
+    assert!(!store.is_dirty(), "a fresh keyset is clean");
+
+    // A first encrypted append mints this scope's key; the writer flags the keyset
+    // dirty at the seal site (`mark_dirty`, exactly what `seal_event_payload` calls
+    // on a mint). The key is resident in memory, not yet on disk.
+    let _ = store.get_or_create(&scope_a).expect("mint key A");
+    store.mark_dirty();
+    assert!(
+        store.is_dirty(),
+        "a fresh mint leaves the keyset dirty (a fence is owed)"
+    );
+
+    // The durability fence tries to flush the minted key — but the atomic publish
+    // FAULTS. The minting append fails closed (surfaces the Io error) and writes no
+    // ciphertext.
+    let faulting = SimFs::new(0xBADF_0001, 0).with_fault_on(CrashOp::PersistTemp, 1);
+    assert!(
+        matches!(
+            store.flush_with_fs(dir.path(), &faulting),
+            Err(crate::store::StoreError::Io(_))
+        ),
+        "PROPERTY: the faulted fence flush must fail (the minting append then fails closed)"
+    );
+
+    // THE GAP, CLOSED: a FAILED flush must leave the keyset dirty. The minted key
+    // is still resident, so a naive "did THIS op mint?" fence would compute
+    // `minted = false` for the next same-scope append and SKIP the fence, acking a
+    // ciphertext whose key never reached disk. Because the keyset stays dirty, that
+    // append's `needs_fence = is_dirty()` is TRUE — it re-flushes (and fails closed
+    // again until the flush succeeds) before any ciphertext under this key can ack.
+    assert!(
+        store.is_dirty(),
+        "PROPERTY: a failed fence flush keeps the keyset dirty, so the next same-scope append re-fences instead of stranding its key"
+    );
+
+    // The re-fired fence — an honest flush — finally persists the key and clears
+    // the dirty signal; the key is now durable and a reload recovers it.
+    store
+        .flush(dir.path())
+        .expect("the re-fired fence flush persists the key");
+    assert!(
+        !store.is_dirty(),
+        "PROPERTY: a successful flush clears the dirty signal"
+    );
+    assert!(
+        KeyStore::load(dir.path(), GRAN)
+            .expect("reload")
+            .get(&scope_a)
+            .is_some(),
+        "PROPERTY: after the re-flush the minted key is durable (no stranded ciphertext)"
+    );
+}

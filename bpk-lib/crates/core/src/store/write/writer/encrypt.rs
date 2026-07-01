@@ -34,9 +34,13 @@ pub(super) struct SealedPayload {
     /// Header metadata (scope id + nonce) stamped onto the event, outside the
     /// hashed/signed cover.
     pub(super) meta: PayloadEncryption,
-    /// `true` when this seal minted a fresh key for its scope — the signal that a
-    /// durable keyset flush is required before the append is acknowledged.
-    pub(super) minted: bool,
+    /// `true` when the keyset is dirty at seal time — this seal minted a fresh
+    /// scope key, OR an earlier mint's fence-flush failed and left the in-memory
+    /// keyset ahead of disk. Either way the durability fence must flush the keyset
+    /// before this ciphertext is written, so a resident-but-unflushed key can
+    /// never back an acked ciphertext. NOT merely "did THIS op mint" — that would
+    /// skip the fence for the write after a failed flush, stranding its key.
+    pub(super) needs_fence: bool,
 }
 
 impl WriterCore {
@@ -99,6 +103,16 @@ impl WriterCore {
                     detail: format!("seal: {error}"),
                 })?
         };
+        // A fresh mint puts the in-memory keyset ahead of disk — flag it so the
+        // fence flushes. `get_or_create` already flags the store dirty on a mint;
+        // this keeps the intent explicit at the seal site and is idempotent.
+        if minted {
+            guard.mark_dirty();
+        }
+        // Fence whenever the keyset is DIRTY (this mint, or a prior mint whose
+        // fence-flush failed), never merely when THIS op minted — otherwise the
+        // append after a failed flush would skip the fence and strand its key.
+        let needs_fence = guard.is_dirty();
         drop(guard);
 
         Ok(Some(SealedPayload {
@@ -107,7 +121,7 @@ impl WriterCore {
                 nonce,
             },
             ciphertext,
-            minted,
+            needs_fence,
         }))
     }
 
@@ -134,10 +148,12 @@ impl WriterCore {
         else {
             return Ok(());
         };
-        // Durability fence: flush a freshly-minted key durable BEFORE its
-        // ciphertext is written (and thus before any later segment fsync). Fail
-        // the append closed on flush failure — nothing is written.
-        if sealed.minted {
+        // Durability fence: flush the keyset durable BEFORE this ciphertext is
+        // written (and thus before any later segment fsync) whenever it is dirty —
+        // this mint OR a prior mint whose fence-flush failed and left the keyset
+        // ahead of disk. Fail the append closed on flush failure, so no ciphertext
+        // is ever acked ahead of the key that decrypts it.
+        if sealed.needs_fence {
             self.flush_keyset_durable()?;
         }
         event.header.payload_size = u32::try_from(sealed.ciphertext.len())
@@ -162,7 +178,7 @@ impl WriterCore {
         let Some(key_store) = self.runtime.key_store.as_ref() else {
             return Ok(());
         };
-        let guard = key_store.lock();
+        let mut guard = key_store.lock();
         guard.flush_with_fs(&self.config.data_dir, self.config.fs().as_ref())
     }
 }

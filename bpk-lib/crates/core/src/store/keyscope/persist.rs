@@ -139,7 +139,7 @@ impl KeyStore {
     /// # Errors
     /// Returns [`StoreError::Io`] if the atomic write fails, or
     /// [`StoreError::Serialization`] if the keyset cannot be encoded.
-    pub fn flush(&self, dir: &Path) -> Result<(), StoreError> {
+    pub fn flush(&mut self, dir: &Path) -> Result<(), StoreError> {
         self.flush_with_fs(dir, &RealFs)
     }
 
@@ -154,7 +154,7 @@ impl KeyStore {
     /// # Errors
     /// Returns [`StoreError::Io`] if the atomic write fails, or
     /// [`StoreError::Serialization`] if the keyset cannot be encoded.
-    pub(crate) fn flush_with_fs(&self, dir: &Path, fs: &dyn StoreFs) -> Result<(), StoreError> {
+    pub(crate) fn flush_with_fs(&mut self, dir: &Path, fs: &dyn StoreFs) -> Result<(), StoreError> {
         let mut wire = KeysetWire {
             granularity: granularity_to_disc(self.granularity),
             entries: Vec::with_capacity(self.keys.len()),
@@ -196,6 +196,11 @@ impl KeyStore {
             },
             fs,
         )?;
+        // The whole keyset is now durable on disk — the in-memory keys match the
+        // last flush, so clear the fence's dirty signal. Only reached on a
+        // successful publish; a torn/failed flush leaves `dirty` set so the next
+        // ciphertext write re-flushes before it can ack.
+        self.dirty = false;
         tracing::debug!(
             target: "batpak::keyscope",
             count = self.keys.len(),
@@ -331,6 +336,9 @@ fn rehydrate(wire: &KeysetWire, configured: KeyScopeGranularity) -> Result<KeySt
     Ok(KeyStore {
         keys,
         granularity: configured,
+        // Freshly rehydrated from disk — the in-memory keyset matches the durable
+        // one, so it starts clean; the first mint/destroy flags it dirty.
+        dirty: false,
     })
 }
 
