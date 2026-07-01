@@ -1,0 +1,24 @@
+[package]
+name = "batpak-registry-startup-collision"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Nested workspace: keeps this fixture out of the parent batpak workspace so its
+# deliberately-colliding registrations never leak into the crate's own build.
+[workspace]
+
+# `collide_verify`: a NON-test binary that registers two colliding EventPayload
+# kinds and calls `verify_registry()` in `main` (the always-on A4 path).
+[[bin]]
+name = "collide_verify"
+path = "src/collide_verify.rs"
+
+# `clean_verify`: identical shape with NON-colliding registrations. Exits 0,
+# proving the collide_verify exit-1 is caused by the collision (confirms RED).
+[[bin]]
+name = "clean_verify"
+path = "src/clean_verify.rs"
+
+[dependencies]
+batpak = { path = "../.." }

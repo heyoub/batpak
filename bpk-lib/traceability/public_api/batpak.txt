@@ -298,6 +298,7 @@ pub const batpak::event::payload::EventPayload::KIND: batpak::event::kind::Event
 pub const batpak::event::payload::EventPayload::PAYLOAD_VERSION: u16
 pub fn batpak::event::payload::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::event::payload::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::payload::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub mod batpak::event::sourcing
 pub enum batpak::event::sourcing::MultiDispatchError<E: core::error::Error + core::marker::Send + core::marker::Sync + 'static>
 pub batpak::event::sourcing::MultiDispatchError::Decode(batpak::event::decode::TypedDecodeError)
@@ -659,6 +660,7 @@ pub fn batpak::event::revalidate_event_payload_registry() -> core::result::Resul
 pub fn batpak::event::revalidate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 pub fn batpak::event::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::event::validate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
+pub fn batpak::event::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub type batpak::event::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::event::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
 pub mod batpak::guard
@@ -1802,6 +1804,7 @@ pub type batpak::event::sourcing::RawMsgpackInput::Payload = alloc::vec::Vec<u8>
 pub const batpak::event::sourcing::RawMsgpackInput::MODE: batpak::event::sourcing::ReplayLane
 pub fn batpak::prelude::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::prelude::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::prelude::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub type batpak::prelude::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::prelude::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
 pub mod batpak::registry

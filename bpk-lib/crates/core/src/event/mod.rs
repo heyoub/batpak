@@ -18,8 +18,8 @@ pub use hash::HashChain;
 pub use header::EventHeader;
 pub use kind::{EventKind, EventKindError};
 pub use payload::{
-    revalidate_event_payload_registry, validate_event_payload_registry, EventPayload,
-    EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation,
+    revalidate_event_payload_registry, validate_event_payload_registry, verify_registry,
+    EventPayload, EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation,
 };
 pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,

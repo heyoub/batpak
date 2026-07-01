@@ -10,11 +10,12 @@ pub use crate::coordinate::{
     ClockRange, Coordinate, CoordinateError, EventCategory, KindFilter, Region, RegionFilterError,
 };
 pub use crate::event::{
-    revalidate_event_payload_registry, validate_event_payload_registry, DecodeTyped, Event,
-    EventHeader, EventKind, EventKindError, EventPayload, EventPayloadKindCollision,
-    EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain, JsonValueInput,
-    ProjectionEvent, ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput,
-    ReplayLane, StateExtent, StateExtentCost, StoredEvent, TypedDecodeError,
+    revalidate_event_payload_registry, validate_event_payload_registry, verify_registry,
+    DecodeTyped, Event, EventHeader, EventKind, EventKindError, EventPayload,
+    EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation, EventSourced,
+    HashChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
+    ProjectionStateContract, RawMsgpackInput, ReplayLane, StateExtent, StateExtentCost,
+    StoredEvent, TypedDecodeError,
 };
 pub use crate::id::EventId;
 pub use crate::store::{

@@ -69,7 +69,12 @@
 //! [`EventPayloadValidation`](crate::event::EventPayloadValidation) defaults to
 //! `FailFast`, so a duplicate-kind collision or an incomplete upcast chain is
 //! rejected at [`Store::open`](crate::store::Store::open) (opt out explicitly
-//! with `Warn`/`Silent`). Receipt signing is governed by
+//! with `Warn`/`Silent`). A binary that registers `EventPayload` types but may
+//! never open a store should call
+//! [`verify_registry`](crate::event::verify_registry) once at startup (or enable
+//! the non-default `startup-registry-check` feature for automatic enforcement),
+//! since the derive's own collision test is `#[cfg(test)]`-only and a release
+//! binary would otherwise see no check. Receipt signing is governed by
 //! [`SigningPolicy`](crate::store::SigningPolicy): the default `Optional`
 //! permits a keyless store, while `Required` refuses to open without a signing
 //! key so an unsigned receipt is never accepted. A configured signer fails the

@@ -1,0 +1,20 @@
+[package]
+name = "batpak-registry-startup-ctor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Nested workspace: isolates the `startup-registry-check` feature (and its ctor)
+# to this fixture only, so the crate's own test binaries never link the ctor.
+[workspace]
+
+# `collide_ctor`: TWO colliding registrations + an effectively-empty `main`.
+# Built with batpak's `startup-registry-check` feature, so the library's
+# before-`main` constructor detects the collision and aborts. If `main` is
+# reached (constructor failed to fire) it prints a sentinel and exits 0.
+[[bin]]
+name = "collide_ctor"
+path = "src/collide_ctor.rs"
+
+[dependencies]
+batpak = { path = "../..", features = ["startup-registry-check"] }

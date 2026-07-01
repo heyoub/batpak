@@ -38,6 +38,15 @@ dangerous-test-hooks = ["dep:fastrand", "batpak-testkit/dangerous-test-hooks"]
 # OOM-handling paths deterministically. Neither alters production behavior.
 alloc-count = []
 fault-alloc = []
+# Opt-in automation for the register-but-never-open collision check (item #133).
+# When enabled, ONE process-wide `#[ctor::ctor]` constructor runs
+# `verify_registry()` before `main` and aborts on a linked `EventKind`
+# collision, so a release binary that registers colliding `EventPayload` types
+# and never opens a `Store` still fails fast. NOT a default feature: the
+# always-on, portable path is the explicit `verify_registry()` call, which needs
+# no constructor and no extra dependency. `dep:ctor` keeps `ctor` out of a
+# default build entirely.
+startup-registry-check = ["dep:ctor"]
 # Gauntlet Phase 0B sentinel RED fixtures are gated behind the
 # `--cfg gauntlet_red_fixture` compile flag, NOT a Cargo feature. A red fixture
 # is designed to FAIL (it asserts the illegal/old behavior), so it must never be
@@ -76,6 +85,10 @@ tempfile = ">=3.24, <3.25"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
 zeroize = "1"
+# Optional: only pulled in by the non-default `startup-registry-check` feature,
+# which installs a before-`main` constructor that runs the payload-registry
+# collision check (item #133). MIT OR Apache-2.0, clears deny.toml.
+ctor = { version = "0.2", optional = true }
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
