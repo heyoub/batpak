@@ -52,6 +52,7 @@ pub mod projection;
 mod projection_run;
 /// Typed reactor output batch — accumulator handed to typed reactor handlers.
 pub mod reaction;
+mod reactor_delivery;
 /// Typed reactor public surface + shared internal canal runner.
 pub mod reactor_typed;
 mod read_api;
@@ -165,7 +166,7 @@ pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
 pub use read_api::ChainVerificationReport;
 #[cfg(feature = "payload-encryption")]
-pub use read_api::ReadDisposition;
+pub use read_api::{DeliveryPayload, ReadDisposition};
 pub use read_walk::{
     ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
     ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,

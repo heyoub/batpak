@@ -67,6 +67,40 @@ pub(crate) enum PayloadPlaintext {
     Shredded,
 }
 
+/// Key-aware disposition of a single event's payload for LIVE DELIVERY under
+/// opt-in `payload-encryption`, carrying the DECRYPTED raw MessagePack bytes.
+///
+/// Returned by [`Store::read_delivery_payload`] so a delivery consumer (a reactor
+/// dispatch, a syncbat subscription envelope builder) receives PLAINTEXT bytes
+/// rather than the ciphertext that Stage C wrote to disk — decrypted at the core
+/// boundary so the keyset never crosses to the consumer. A crypto-shredded event
+/// reports [`Shredded`](Self::Shredded) so the consumer emits a LOUD, observable
+/// skip instead of silently shipping (or misdecoding) ciphertext.
+#[cfg(feature = "payload-encryption")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "payload-encryption"))
+)]
+#[derive(Clone, Debug)]
+pub enum DeliveryPayload {
+    /// A readable delivered event: `stored.event.payload` is the PLAINTEXT
+    /// MessagePack bytes (decrypted, or — for a plaintext / system-carve-out
+    /// event, or a store with no keyset — the stored bytes unchanged, so the
+    /// delivered envelope is byte-identical to a non-encryption build).
+    ///
+    /// Boxed so this common variant does not inflate the rare
+    /// [`Shredded`](Self::Shredded) variant.
+    Readable(Box<StoredEvent<Vec<u8>>>),
+    /// The event is present in the chain (its `event_hash` still verifies) but its
+    /// payload key has been destroyed — the plaintext is permanently
+    /// unrecoverable. The consumer must NOT deliver the ciphertext; it emits a
+    /// loud, observable skip and advances its cursor past the event.
+    Shredded {
+        /// Id of the event whose payload key has been shredded.
+        event_id: EventId,
+    },
+}
+
 impl<State: crate::store::StoreState> Store<State> {
     /// READ: get a single event by ID.
     ///
@@ -241,6 +275,95 @@ impl<State: crate::store::StoreState> Store<State> {
             .map_err(|_| StoreError::PayloadDecryptFailed { event_id })?;
         drop(guard);
         Ok(PayloadPlaintext::Plaintext(plaintext))
+    }
+
+    /// DELIVER: key-aware read of one event's payload as raw MessagePack bytes,
+    /// decrypted at the core boundary (opt-in `payload-encryption`).
+    ///
+    /// Live delivery — a reactor's cursor dispatch, a syncbat subscription
+    /// envelope — builds a delivered envelope from a STORED event. Stage C made an
+    /// encrypted event's on-disk payload ciphertext, so a delivery path that
+    /// shipped the raw stored bytes would ship ciphertext: undecryptable
+    /// downstream, silent data loss. This decrypts here, on the core `Store` that
+    /// owns the keyset, so the keys never cross to a delivery consumer:
+    ///
+    /// * A readable event (plaintext, a system-carve-out event, or an encrypted
+    ///   event whose key is present) yields [`DeliveryPayload::Readable`] carrying
+    ///   the PLAINTEXT MessagePack bytes. For a plaintext event, or a store with no
+    ///   keyset, the bytes are the stored bytes unchanged — byte-identical to
+    ///   [`read_raw`](Self::read_raw).
+    /// * A crypto-shredded event yields [`DeliveryPayload::Shredded`] so the
+    ///   consumer emits a loud, observable skip rather than the ciphertext.
+    ///
+    /// Reuses the shared Stage C decrypt primitive
+    /// ([`open_encrypted_payload_bytes`](Self::open_encrypted_payload_bytes)); a
+    /// present key that fails to authenticate is still a tamper error
+    /// ([`StoreError::PayloadDecryptFailed`]), never a shred.
+    ///
+    /// # Errors
+    /// [`StoreError::NotFound`] if no event with that id exists; an I/O / decode /
+    /// authentication error while reading the frame.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    pub fn read_delivery_payload(&self, event_id: EventId) -> Result<DeliveryPayload, StoreError> {
+        let raw = event_id.as_u128();
+        let entry = self
+            .index
+            .get_by_id(raw)
+            .ok_or(StoreError::NotFound(event_id))?;
+        if self.key_store.is_none() {
+            // Encryption not configured: every payload is plaintext-present. The
+            // returned bytes are exactly `read_raw`'s, so the delivered envelope is
+            // byte-identical to a non-encryption build.
+            return Ok(DeliveryPayload::Readable(Box::new(
+                self.reader.read_entry_raw(&entry.disk_pos)?,
+            )));
+        }
+        self.read_raw_delivery_maybe_encrypted(&entry.disk_pos)
+    }
+
+    /// Key-aware delivery read: decrypt an encrypted frame to plaintext bytes,
+    /// pass a plaintext frame through unchanged, or report
+    /// [`DeliveryPayload::Shredded`]. Shared internals of
+    /// [`read_delivery_payload`](Self::read_delivery_payload); reads the RAW frame
+    /// so ciphertext never routes through the Value-decode seam.
+    #[cfg(feature = "payload-encryption")]
+    fn read_raw_delivery_maybe_encrypted(
+        &self,
+        pos: &crate::store::index::DiskPos,
+    ) -> Result<DeliveryPayload, StoreError> {
+        let raw = self.reader.read_entry_raw(pos)?;
+        // Cloned so `raw` can be moved into the returned payload below without the
+        // `meta` borrow outliving it.
+        let Some(meta) = raw.event.header.payload_encryption.clone() else {
+            // Plaintext / system-carve-out event: the stored bytes ARE the
+            // plaintext — byte-identical to `read_raw`.
+            return Ok(DeliveryPayload::Readable(Box::new(raw)));
+        };
+        let event_id = raw.event.header.event_id;
+        match self.open_encrypted_payload_bytes(
+            &raw.coordinate,
+            raw.event.header.event_kind,
+            event_id,
+            &meta,
+            &raw.event.payload,
+        )? {
+            PayloadPlaintext::Shredded => Ok(DeliveryPayload::Shredded { event_id }),
+            PayloadPlaintext::Plaintext(plaintext) => {
+                let StoredEvent { coordinate, event } = raw;
+                Ok(DeliveryPayload::Readable(Box::new(StoredEvent {
+                    coordinate,
+                    event: crate::event::Event {
+                        header: event.header,
+                        payload: plaintext,
+                        hash_chain: event.hash_chain,
+                    },
+                })))
+            }
+        }
     }
 
     /// READ: fetch a single event by ID with the payload left as raw

@@ -1,4 +1,5 @@
 use batpak::event::HashChain;
+use batpak::event::StoredEvent;
 use batpak::id::EntityIdType;
 use batpak::store::IndexEntry;
 use serde::{Deserialize, Serialize};
@@ -62,14 +63,12 @@ impl EventStreamEnvelopeV1 {
         inner_event_payload_schema_ref: Option<&str>,
     ) -> Result<Vec<u8>, SubscriptionRuntimeError> {
         let stored = store.read_raw(entry.event_id())?;
-        let envelope = Self::from_stored(
+        event_stream_envelope_bytes_from_stored(
             subscription_id,
             entry,
             &stored,
             inner_event_payload_schema_ref,
-        );
-        batpak::canonical::to_bytes(&envelope)
-            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
+        )
     }
 
     fn from_stored(
@@ -358,35 +357,14 @@ impl ReceiptStreamEnvelopeV1 {
                     "receipt payload decode failed: {error}"
                 ))
             })?;
-        let receipt_bytes = batpak::canonical::to_bytes(&receipt)
-            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
-        let receipt_hash = blake3_state_hash(&receipt_bytes);
-        let (prev_hash, event_hash) = hash_chain_parts(stored.event.hash_chain.as_ref());
-        let envelope = Self {
-            schema_version: 1,
-            subscription_id: subscription_id.to_owned(),
-            receipt_kind: route_receipt_kind.to_owned(),
-            descriptor_name: receipt.descriptor_name.clone(),
-            outcome_class: receipt.outcome.class().to_owned(),
-            event_id: entry.event_id().as_u128(),
-            correlation_id: entry.correlation_id(),
-            causation_id: entry.causation_id(),
-            entity: stored.coordinate.entity().to_owned(),
-            scope: stored.coordinate.scope().to_owned(),
-            payload_version: stored.event.header.payload_version,
-            timestamp_us: stored.event.header.timestamp_us,
-            hlc_wall_ms: entry.wall_ms(),
-            global_sequence: entry.global_sequence(),
-            content_hash: stored.event.header.content_hash,
-            prev_hash,
-            event_hash,
-            inner_receipt_schema_ref: inner_receipt_schema_ref.map(str::to_owned),
-            receipt_hash,
-            receipt: receipt_bytes,
-        };
-        let envelope_bytes = batpak::canonical::to_bytes(&envelope)
-            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
-        Ok((envelope, envelope_bytes))
+        receipt_envelope_from_stored(
+            subscription_id,
+            route_receipt_kind,
+            entry,
+            &stored,
+            &receipt,
+            inner_receipt_schema_ref,
+        )
     }
 }
 
@@ -447,14 +425,12 @@ impl EntityStreamEnvelopeV1 {
         inner_event_payload_schema_ref: Option<&str>,
     ) -> Result<Vec<u8>, SubscriptionRuntimeError> {
         let stored = store.read_raw(entry.event_id())?;
-        let envelope = Self::from_stored(
+        entity_stream_envelope_bytes_from_stored(
             subscription_id,
             entry,
             &stored,
             inner_event_payload_schema_ref,
-        );
-        batpak::canonical::to_bytes(&envelope)
-            .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
+        )
     }
 
     fn from_stored(
@@ -485,4 +461,156 @@ impl EntityStreamEnvelopeV1 {
             payload: stored.event.payload.clone(),
         }
     }
+}
+
+// ─── Key-aware delivery (crypto-shred, opt-in `payload-encryption`) ────────────
+//
+// The three raw-event stream sessions (event, entity, receipt) build a delivered
+// envelope from a STORED event's payload. Under Stage C an encrypted event's
+// on-disk payload is ciphertext, so shipping the stored bytes would ship
+// ciphertext downstream — undecryptable, silent data loss. These helpers read the
+// payload through the core-boundary decrypt primitive
+// ([`batpak::store::Store::read_delivery_payload`], keys never crossing to
+// syncbat): a readable event yields its PLAINTEXT bytes; a crypto-shredded event
+// yields `None`, so the session skips it LOUDLY and advances its cursor (delivery
+// stays coherent — no stall, no ciphertext). In a build without the feature — or a
+// store with no keyset — this is exactly `read_raw`, byte-identical.
+
+/// Key-aware delivery read: `Some(stored)` carries the plaintext payload bytes;
+/// `None` means the event's payload key was destroyed (crypto-shredded) and the
+/// caller must skip it, never ship the ciphertext.
+///
+/// # Errors
+/// [`SubscriptionRuntimeError::Store`] on an I/O / decode / authentication error.
+#[cfg(feature = "payload-encryption")]
+pub(super) fn read_delivery_stored(
+    store: &batpak::store::Store<batpak::store::Open>,
+    event_id: batpak::id::EventId,
+) -> Result<Option<StoredEvent<Vec<u8>>>, SubscriptionRuntimeError> {
+    match store.read_delivery_payload(event_id)? {
+        batpak::store::DeliveryPayload::Readable(stored) => Ok(Some(*stored)),
+        batpak::store::DeliveryPayload::Shredded { .. } => Ok(None),
+    }
+}
+
+/// Non-encryption build: delivery reads the stored bytes directly — plaintext,
+/// byte-identical to the pre-crypto-shred path. Never reports a shredded skip.
+///
+/// # Errors
+/// [`SubscriptionRuntimeError::Store`] on an I/O / decode error.
+#[cfg(not(feature = "payload-encryption"))]
+pub(super) fn read_delivery_stored(
+    store: &batpak::store::Store<batpak::store::Open>,
+    event_id: batpak::id::EventId,
+) -> Result<Option<StoredEvent<Vec<u8>>>, SubscriptionRuntimeError> {
+    Ok(Some(store.read_raw(event_id)?))
+}
+
+/// Emit the observable warn for a crypto-shredded event skipped during
+/// subscription delivery. The event is not delivered and the session's cursor
+/// advances past it; the skip is LOUD (this warn), never silent.
+///
+/// Always present (the sessions reference it on their shredded-skip path in both
+/// builds; without `payload-encryption` that path is simply never taken).
+pub(super) fn warn_shredded_delivery(
+    stream: &str,
+    subscription_id: &str,
+    event_id: batpak::id::EventId,
+) {
+    tracing::warn!(
+        target: "syncbat::delivery",
+        stream,
+        subscription_id,
+        event_id = event_id.as_u128(),
+        "skipping a crypto-shredded event during subscription delivery; it is not delivered \
+         and the cursor advances past it (payload key destroyed — plaintext gone)"
+    );
+}
+
+/// Build the canonical event-stream envelope bytes from an already-read (and, in
+/// an encryption build, already-decrypted) stored event.
+///
+/// # Errors
+/// [`SubscriptionRuntimeError::EnvelopeEncoding`] on canonical-encode failure.
+pub(super) fn event_stream_envelope_bytes_from_stored(
+    subscription_id: &str,
+    entry: &IndexEntry,
+    stored: &StoredEvent<Vec<u8>>,
+    inner_event_payload_schema_ref: Option<&str>,
+) -> Result<Vec<u8>, SubscriptionRuntimeError> {
+    let envelope = EventStreamEnvelopeV1::from_stored(
+        subscription_id,
+        entry,
+        stored,
+        inner_event_payload_schema_ref,
+    );
+    batpak::canonical::to_bytes(&envelope)
+        .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
+}
+
+/// Build the canonical entity-stream envelope bytes from an already-read (and, in
+/// an encryption build, already-decrypted) stored event.
+///
+/// # Errors
+/// [`SubscriptionRuntimeError::EnvelopeEncoding`] on canonical-encode failure.
+pub(super) fn entity_stream_envelope_bytes_from_stored(
+    subscription_id: &str,
+    entry: &IndexEntry,
+    stored: &StoredEvent<Vec<u8>>,
+    inner_event_payload_schema_ref: Option<&str>,
+) -> Result<Vec<u8>, SubscriptionRuntimeError> {
+    let envelope = EntityStreamEnvelopeV1::from_stored(
+        subscription_id,
+        entry,
+        stored,
+        inner_event_payload_schema_ref,
+    );
+    batpak::canonical::to_bytes(&envelope)
+        .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))
+}
+
+/// Build a receipt-stream envelope (and its canonical bytes) from an already-read
+/// (and, in an encryption build, already-decrypted) stored event plus its decoded
+/// [`crate::ReceiptEnvelope`]. Shared by [`ReceiptStreamEnvelopeV1::encode_for_entry`]
+/// and the key-aware receipt-delivery path so both produce identical bytes.
+///
+/// # Errors
+/// [`SubscriptionRuntimeError::EnvelopeEncoding`] on canonical-encode failure.
+pub(super) fn receipt_envelope_from_stored(
+    subscription_id: &str,
+    route_receipt_kind: &str,
+    entry: &IndexEntry,
+    stored: &StoredEvent<Vec<u8>>,
+    receipt: &crate::ReceiptEnvelope,
+    inner_receipt_schema_ref: Option<&str>,
+) -> Result<(ReceiptStreamEnvelopeV1, Vec<u8>), SubscriptionRuntimeError> {
+    let receipt_bytes = batpak::canonical::to_bytes(receipt)
+        .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
+    let receipt_hash = blake3_state_hash(&receipt_bytes);
+    let (prev_hash, event_hash) = hash_chain_parts(stored.event.hash_chain.as_ref());
+    let envelope = ReceiptStreamEnvelopeV1 {
+        schema_version: 1,
+        subscription_id: subscription_id.to_owned(),
+        receipt_kind: route_receipt_kind.to_owned(),
+        descriptor_name: receipt.descriptor_name.clone(),
+        outcome_class: receipt.outcome.class().to_owned(),
+        event_id: entry.event_id().as_u128(),
+        correlation_id: entry.correlation_id(),
+        causation_id: entry.causation_id(),
+        entity: stored.coordinate.entity().to_owned(),
+        scope: stored.coordinate.scope().to_owned(),
+        payload_version: stored.event.header.payload_version,
+        timestamp_us: stored.event.header.timestamp_us,
+        hlc_wall_ms: entry.wall_ms(),
+        global_sequence: entry.global_sequence(),
+        content_hash: stored.event.header.content_hash,
+        prev_hash,
+        event_hash,
+        inner_receipt_schema_ref: inner_receipt_schema_ref.map(str::to_owned),
+        receipt_hash,
+        receipt: receipt_bytes,
+    };
+    let envelope_bytes = batpak::canonical::to_bytes(&envelope)
+        .map_err(|error| SubscriptionRuntimeError::EnvelopeEncoding(error.to_string()))?;
+    Ok((envelope, envelope_bytes))
 }

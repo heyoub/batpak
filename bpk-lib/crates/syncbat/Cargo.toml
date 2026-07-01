@@ -14,6 +14,11 @@ categories = ["database-implementations"]
 
 [features]
 default = []
+# Opt-in crypto-shred payload encryption, forwarded to batpak. Enables key-aware
+# subscription delivery: encrypted events cross the core boundary decrypted, and a
+# crypto-shredded event is skipped loudly rather than shipped as ciphertext. NOT a
+# default feature — a default build behaves identically (plaintext delivery).
+payload-encryption = ["batpak/payload-encryption"]
 
 [dependencies]
 batpak = { path = "../core", version = "0.8.3", default-features = false }

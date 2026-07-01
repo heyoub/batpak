@@ -7,7 +7,9 @@ use flume::{Receiver, RecvTimeoutError, TryRecvError};
 
 use super::config::SubscriptionRuntimeConfig;
 use super::cursor::EventStreamCursorV1;
-use super::envelope::EventStreamEnvelopeV1;
+use super::envelope::{
+    event_stream_envelope_bytes_from_stored, read_delivery_stored, warn_shredded_delivery,
+};
 use super::error::SubscriptionRuntimeError;
 use super::registry::{SubscriptionRegistry, SubscriptionRoute};
 use super::session::{
@@ -392,50 +394,59 @@ impl EventStreamSession {
             self.resume_after,
             self.config.query_page_size,
         );
-        if entries.is_empty() {
-            return Ok(None);
-        }
-        let entry = &entries[0];
-        if self.in_flight() >= self.route.queue_cap {
-            self.phase = SessionPhase::Ended;
-            let error = SessionDelivery::Error(slow_consumer_error(
+        for entry in &entries {
+            let cursor_after = EventStreamCursorV1::after_global_sequence(
                 &self.subscription_id,
-                self.last_delivered_cursor.clone(),
-                self.last_acked_cursor.clone(),
-            ));
-            self.terminal = Some(error.clone());
-            return Ok(Some(error));
+                self.route.category,
+                entry.global_sequence(),
+                entry.wall_ms(),
+            );
+            // Key-aware delivery read: decrypt at the core boundary. A crypto-shredded
+            // event yields `None` — skip it LOUDLY and advance the cursor past it so
+            // ordering stays coherent (never stall, never ship the ciphertext).
+            let Some(stored) = read_delivery_stored(self.store.inner.as_ref(), entry.event_id())?
+            else {
+                warn_shredded_delivery("event_stream", &self.subscription_id, entry.event_id());
+                self.resume_after = Some(entry.global_sequence());
+                self.cursor_before_next = cursor_after;
+                continue;
+            };
+            if self.in_flight() >= self.route.queue_cap {
+                self.phase = SessionPhase::Ended;
+                let error = SessionDelivery::Error(slow_consumer_error(
+                    &self.subscription_id,
+                    self.last_delivered_cursor.clone(),
+                    self.last_acked_cursor.clone(),
+                ));
+                self.terminal = Some(error.clone());
+                return Ok(Some(error));
+            }
+            let cursor_before = self.cursor_before_next.clone();
+            let envelope_bytes = event_stream_envelope_bytes_from_stored(
+                &self.subscription_id,
+                entry,
+                &stored,
+                self.route.inner_event_payload_schema_ref.as_deref(),
+            )?;
+            let delivery_index = self.delivery_index;
+            self.delivery_index += 1;
+            self.last_sent_delivery_index = delivery_index;
+            let cursor_after_runtime = runtime_cursor(&cursor_after);
+            self.sent_cursors
+                .insert(delivery_index, cursor_after_runtime.clone());
+            self.last_delivered_cursor = Some(cursor_after_runtime.clone());
+            self.cursor_before_next = cursor_after;
+            self.resume_after = Some(entry.global_sequence());
+            return Ok(Some(SessionDelivery::Event(SessionEventDelivery {
+                subscription_id: self.subscription_id.clone(),
+                delivery_index,
+                cursor_before: runtime_cursor(&cursor_before),
+                cursor_after: cursor_after_runtime,
+                wire_payload_schema_ref: self.route.wire_payload_schema_ref.clone(),
+                envelope_bytes,
+            })));
         }
-        let cursor_before = self.cursor_before_next.clone();
-        let cursor_after = EventStreamCursorV1::after_global_sequence(
-            &self.subscription_id,
-            self.route.category,
-            entry.global_sequence(),
-            entry.wall_ms(),
-        );
-        let envelope_bytes = EventStreamEnvelopeV1::encode_for_entry(
-            self.store.inner.as_ref(),
-            &self.subscription_id,
-            entry,
-            self.route.inner_event_payload_schema_ref.as_deref(),
-        )?;
-        let delivery_index = self.delivery_index;
-        self.delivery_index += 1;
-        self.last_sent_delivery_index = delivery_index;
-        let cursor_after_runtime = runtime_cursor(&cursor_after);
-        self.sent_cursors
-            .insert(delivery_index, cursor_after_runtime.clone());
-        self.last_delivered_cursor = Some(cursor_after_runtime.clone());
-        self.cursor_before_next = cursor_after;
-        self.resume_after = Some(entry.global_sequence());
-        Ok(Some(SessionDelivery::Event(SessionEventDelivery {
-            subscription_id: self.subscription_id.clone(),
-            delivery_index,
-            cursor_before: runtime_cursor(&cursor_before),
-            cursor_after: cursor_after_runtime,
-            wire_payload_schema_ref: self.route.wire_payload_schema_ref.clone(),
-            envelope_bytes,
-        })))
+        Ok(None)
     }
 
     fn maybe_emit_watermark(
