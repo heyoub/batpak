@@ -1,4 +1,4 @@
-//! PROVES: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT
+//! PROVES: INV-SYNCBAT-CAPABILITY-GRANT-ENFORCEMENT
 //! CATCHES: a declared capability token checked against nothing. This is the
 //!          declared-authority companion to the observed-effect subset check:
 //!          checkout fails closed when a dispatched operation declares a required

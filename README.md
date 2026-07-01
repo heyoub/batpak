@@ -158,7 +158,7 @@ Judge the evidence, not the version number:
 - Property-based tests over hash-chain integrity and canonical encoding.
 - Chaos testing with fault injection, including disk-fault integration.
 - Mutation testing on critical seams, so the tests are themselves tested.
-- 101 named invariants traced to 148 concrete artifacts, enforced by an
+- 102 named invariants traced to 148 concrete artifacts, enforced by an
   integrity gate that fails CI on orphaned or stale claims —
   see [03_INVARIANTS.md](03_INVARIANTS.md) and [12_CONFORMANCE.md](12_CONFORMANCE.md).
 

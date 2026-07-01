@@ -168,6 +168,7 @@ witnesses:
   - { id: INV-STORE-SYNC-ONLY, witnessed: true }
   - { id: INV-SUBSCRIPTION-STATE-MACHINE, witnessed: true }
   - { id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL, witnessed: true }
+  - { id: INV-SYNCBAT-CAPABILITY-GRANT-ENFORCEMENT, witnessed: true }
   - { id: INV-SYNCBAT-DISPATCH-RECEIPTS, witnessed: true }
   - { id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT, witnessed: true }
   - { id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC, witnessed: true }

@@ -46,6 +46,14 @@
     - ART-SYNCBAT-TESTS
     - ART-SYNCBAT-WIRE-GOLDENS
     - ART-ADR-SYNCBAT-CONTRACT
+- id: INV-SYNCBAT-CAPABILITY-GRANT-ENFORCEMENT
+  statement: syncbat checkout fails closed BEFORE the handler runs when a dispatched operation declares a required capability token (via OperationEffectRow::requires_capability or the #[operation] macro) that was not granted through CoreBuilder::grant_capability / CoreBuilder::grant_capabilities; the operation's declared authority must be a subset of the granted set, effect-axis tokens auto-declared by the effect builders are ambient and exempt from an explicit grant, and the same operation succeeds once the required token is granted.
+  witness_test: crates/syncbat/tests/capability_authz.rs::dispatch_denies_operation_requiring_an_ungranted_capability
+  artifacts:
+    - ART-SYNCBAT-SOURCE
+    - ART-SYNCBAT-TESTS
+    - ART-SYNCBAT-WIRE-GOLDENS
+    - ART-ADR-SYNCBAT-CONTRACT
 - id: INV-NETBAT-LINE-PROTOCOL-STABLE
   statement: netbat request and response frames keep stable NETBAT/1 CALL and OK/ERR line shapes, bounded decode behavior, and deterministic error-code mapping.
   witness_test: crates/netbat/tests/boundary.rs::encodes_request_with_stable_versioned_line_protocol
