@@ -11,8 +11,8 @@ use std::time::Duration;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 0x96)]
-struct AccountAdjusted {
-    amount: i64,
+struct Recorded {
+    value: i64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
@@ -31,12 +31,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_sync_every_n_events(1)
             .with_sync_mode(SyncMode::SyncData),
     )?;
-    let coord = Coordinate::new("account:gate-demo", "ledger:2026")?;
+    let coord = Coordinate::new("entity:gate-demo", "scope:main")?;
 
     // Append-time gates block until the requested watermark crosses the committed event.
     let durable_receipt = store.append_typed_with_options(
         &coord,
-        &AccountAdjusted { amount: 10 },
+        &Recorded { value: 10 },
         AppendOptions::new().with_gate(DurabilityGate::new(
             WatermarkKind::Durable,
             Duration::from_secs(1),
@@ -47,13 +47,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let batch = vec![
         BatchAppendItem::typed(
             coord.clone(),
-            &AccountAdjusted { amount: 20 },
+            &Recorded { value: 20 },
             AppendOptions::new(),
             CausationRef::None,
         )?,
         BatchAppendItem::typed(
             coord.clone(),
-            &AccountAdjusted { amount: -5 },
+            &Recorded { value: -5 },
             AppendOptions::new(),
             CausationRef::PriorItem(0),
         )?,
@@ -73,10 +73,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_sync_every_n_events(1000)
             .with_sync_mode(SyncMode::SyncData),
     )?;
-    let timeout_coord = Coordinate::new("account:gate-timeout", "ledger:2026")?;
+    let timeout_coord = Coordinate::new("entity:gate-timeout", "scope:main")?;
     let timeout = timeout_store.append_typed_with_options(
         &timeout_coord,
-        &AccountAdjusted { amount: 99 },
+        &Recorded { value: 99 },
         AppendOptions::new().with_gate(DurabilityGate::new(
             WatermarkKind::Durable,
             Duration::from_millis(50),
@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     match timeout {
         Err(StoreError::WaitTimeout { .. }) => {
-            let committed = timeout_store.query(&Region::entity("account:gate-timeout"));
+            let committed = timeout_store.query(&Region::entity("entity:gate-timeout"));
             let _ = writeln!(
                 out,
                 "durable gate timed out; committed events: {}",
@@ -101,10 +101,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_sync_every_n_events(25)
             .with_sync_mode(SyncMode::SyncData),
     )?;
-    let wait_coord = Coordinate::new("ledger:acct-1", "ledger:2026")?;
-    let wait_receipt = wait_store.append_typed(&wait_coord, &AccountAdjusted { amount: 42 })?;
+    let wait_coord = Coordinate::new("entity:wait-1", "scope:main")?;
+    let wait_receipt = wait_store.append_typed(&wait_coord, &Recorded { value: 42 })?;
     let wait_entry = wait_store
-        .query(&Region::entity("ledger:acct-1"))
+        .query(&Region::entity("entity:wait-1"))
         .into_iter()
         .find(|entry| entry.event_id() == wait_receipt.event_id)
         .ok_or("appended event missing from query")?;
@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Visibility fence: submit hidden work, then publish on commit.
-    let fence_coord = Coordinate::new("player:fence", "room:hidden")?;
+    let fence_coord = Coordinate::new("entity:fence", "scope:hidden")?;
     let fence = wait_store.begin_visibility_fence()?;
     let ticket = fence.submit(&fence_coord, Hidden::KIND, &Hidden { hidden: true })?;
     assert_eq!(wait_store.by_fact_typed::<Hidden>().len(), 0);

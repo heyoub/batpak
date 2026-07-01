@@ -36,12 +36,25 @@ where
 }
 
 /// Runtime policy for populating receipt input/output hashes.
+///
+/// The default is [`ReceiptHashPolicy::Blake3`]: a runtime receipt always binds
+/// to the exact bytes that produced it. An unhashed receipt
+/// (`input_hash`/`output_hash` both `None`) binds to nothing, so the unhashed
+/// mode is reachable only as the explicit opt-out
+/// [`ReceiptHashPolicy::Deferred`]. This mirrors the store's signing-policy
+/// idiom: the safe behavior is the default and the weaker behavior is an
+/// explicit escape hatch.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub enum ReceiptHashPolicy {
-    /// Defer hash population to a later layer; runtime receipts carry no byte
-    /// hashes.
+    /// Hash raw handler input/output bytes with the built-in deterministic
+    /// Blake3 hasher (a 32-byte digest over the raw bytes). This is the safe
+    /// default: every recorded receipt carries the hash of the bytes it covers.
     #[default]
+    Blake3,
+    /// Defer hash population to a later layer; runtime receipts carry no byte
+    /// hashes. This is the explicit opt-out for callers that truly want unhashed
+    /// receipts (e.g. a higher layer that hashes and binds the bytes itself).
     Deferred,
     /// Hash raw handler input/output bytes with a deterministic caller-owned hasher.
     RawBytes(Arc<dyn ReceiptHasher>),
@@ -58,6 +71,7 @@ impl ReceiptHashPolicy {
     #[must_use]
     pub fn hash(&self, bytes: &[u8]) -> Option<ReceiptHash> {
         match self {
+            Self::Blake3 => Some(*blake3::hash(bytes).as_bytes()),
             Self::Deferred => None,
             Self::RawBytes(hasher) => Some(hasher.hash(bytes)),
         }

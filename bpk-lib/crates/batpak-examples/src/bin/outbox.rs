@@ -21,17 +21,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut outbox = store.outbox();
     outbox.stage(
-        Coordinate::new("player:outbox", "room:batch")?,
+        Coordinate::new("entity:outbox", "scope:batch")?,
         Tick::KIND,
         &Tick { n: 1 },
     )?;
     outbox.stage(
-        Coordinate::new("player:outbox", "room:batch")?,
+        Coordinate::new("entity:outbox", "scope:batch")?,
         Tick::KIND,
         &Tick { n: 2 },
     )?;
     outbox.stage(
-        Coordinate::new("player:outbox", "room:batch")?,
+        Coordinate::new("entity:outbox", "scope:batch")?,
         Tick::KIND,
         &Tick { n: 3 },
     )?;

@@ -1,3 +1,5 @@
+#[cfg(feature = "payload-encryption")]
+use super::super::staging::PreparedBatchItem;
 use super::super::staging::{
     PreparedBatch, StagedCommitMeta, StagedCommitTiming, StagedCommittedEvent,
 };
@@ -16,6 +18,29 @@ use tracing::{debug, trace};
 const BATCH_MARKER_ENTITY: &str = "_batch";
 /// Scope name for batch system markers (BEGIN/COMMIT). Not user-visible.
 const BATCH_MARKER_SCOPE: &str = "_system";
+
+/// Per-(entity, lane) running chain state carried across a batch's items so each
+/// item links to the previous same-entity item's hash and advances its clock.
+#[derive(Clone)]
+struct BatchEntityState {
+    entity_arc: Arc<str>,
+    prev_hash: [u8; 32],
+    next_clock: u32,
+    last_wall_ms: u64,
+}
+
+/// Output of [`WriterCore::precompute_batch_items`]: the staged commit facts
+/// plus, when encryption is enabled, the per-item seal results and whether the
+/// keyset needs the durability fence (any item minted a key, OR a prior mint's
+/// fence-flush failed and left the keyset ahead of disk) so the caller flushes
+/// once before writing the batch's frames.
+struct PrecomputedBatch {
+    computed: Vec<StagedCommittedEvent>,
+    #[cfg(feature = "payload-encryption")]
+    encryptions: Vec<Option<super::encrypt::SealedPayload>>,
+    #[cfg(feature = "payload-encryption")]
+    needs_fence: bool,
+}
 
 #[derive(Clone, Copy, Debug)]
 enum BatchFailureStage {
@@ -107,7 +132,7 @@ impl WriterCore {
                         &coord,
                         durable.kind,
                         durable.prev_hash,
-                    );
+                    )?;
                     cached_receipts[idx] = Some(receipt);
                     cached_count += 1;
                 } else if let Some(entry) = self.index.get_by_id(key.as_u128()) {
@@ -125,7 +150,7 @@ impl WriterCore {
                         &entry.coord,
                         entry.kind,
                         entry.hash_chain.prev_hash,
-                    );
+                    )?;
                     cached_receipts[idx] = Some(receipt);
                     cached_count += 1;
                 }
@@ -158,20 +183,86 @@ impl WriterCore {
         Ok(None)
     }
 
+    /// Get (or lazily seed from the committed index) the running chain state for
+    /// an entity+lane within a batch. Extracted from `precompute_batch_items` to
+    /// keep that function under its complexity ratchet. The returned `&mut` is
+    /// tied only to `entity_states`, so the caller can still use `&self` freely.
+    fn resolve_batch_entity_state<'s>(
+        &self,
+        entity_states: &'s mut std::collections::HashMap<(Arc<str>, u32), BatchEntityState>,
+        entity: &Arc<str>,
+        lane: u32,
+    ) -> Result<&'s mut BatchEntityState, StoreError> {
+        use std::collections::hash_map::Entry;
+        match entity_states.entry((Arc::clone(entity), lane)) {
+            Entry::Occupied(entry) => Ok(entry.into_mut()),
+            Entry::Vacant(entry) => {
+                let latest = self.index.get_latest_committed(entity, lane);
+                Ok(entry.insert(BatchEntityState {
+                    entity_arc: Arc::clone(entity),
+                    prev_hash: latest
+                        .as_ref()
+                        .map(|committed| committed.hash_chain.event_hash)
+                        .unwrap_or([0u8; 32]),
+                    next_clock: super::checked_next_clock(
+                        latest.as_ref().map(|committed| committed.clock),
+                        entity,
+                    )?,
+                    last_wall_ms: latest
+                        .as_ref()
+                        .map(|committed| committed.wall_ms)
+                        .unwrap_or(0),
+                }))
+            }
+        }
+    }
+
+    /// Seal one batch item's payload (opt-in encryption), record the seal result
+    /// in `encryptions`, note whether a key was minted, and return the hash to
+    /// chain — `blake3(ciphertext)` when sealed, `blake3(payload)` otherwise.
+    /// Extracted from `precompute_batch_items` to keep it under its ratchet.
+    #[cfg(feature = "payload-encryption")]
+    fn batch_event_hash(
+        &self,
+        item: &PreparedBatchItem,
+        event_id: u128,
+        encryptions: &mut Vec<Option<super::encrypt::SealedPayload>>,
+        needs_fence: &mut bool,
+    ) -> Result<[u8; 32], StoreError> {
+        match self.seal_event_payload(
+            item.coord(),
+            item.kind(),
+            crate::id::EventId::from(event_id),
+            item.payload_bytes(),
+        )? {
+            Some(sealed) => {
+                *needs_fence |= sealed.needs_fence;
+                let hash = crate::event::hash::compute_hash(&sealed.ciphertext);
+                encryptions.push(Some(sealed));
+                Ok(hash)
+            }
+            None => {
+                encryptions.push(None);
+                Ok(crate::event::hash::compute_hash(item.payload_bytes()))
+            }
+        }
+    }
+
     fn precompute_batch_items(
         &self,
         prepared: &PreparedBatch,
         first_seq: u64,
-    ) -> Result<Vec<StagedCommittedEvent>, StoreError> {
-        #[derive(Clone)]
-        struct BatchEntityState {
-            entity_arc: Arc<str>,
-            prev_hash: [u8; 32],
-            next_clock: u32,
-            last_wall_ms: u64,
-        }
-
+    ) -> Result<PrecomputedBatch, StoreError> {
         let mut computed: Vec<StagedCommittedEvent> = Vec::with_capacity(prepared.len());
+        // Parallel per-item seal results (opt-in encryption): ciphertext + header
+        // metadata per item, or `None` for a plaintext item. `needs_fence` records
+        // whether ANY item minted a new key, so the caller raises the durability
+        // fence exactly once for the batch.
+        #[cfg(feature = "payload-encryption")]
+        let mut encryptions: Vec<Option<super::encrypt::SealedPayload>> =
+            Vec::with_capacity(prepared.len());
+        #[cfg(feature = "payload-encryption")]
+        let mut needs_fence = false;
         let mut entity_states: std::collections::HashMap<(Arc<str>, u32), BatchEntityState> =
             std::collections::HashMap::new();
 
@@ -182,25 +273,8 @@ impl WriterCore {
         for (idx, item) in prepared.items().iter().enumerate() {
             let entity = Arc::clone(item.entity_arc());
             let position_hint = item.options().position_hint.unwrap_or_default();
-            let state_key = (Arc::clone(&entity), position_hint.lane);
-            let state = match entity_states.entry(state_key) {
-                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    let latest = self.index.get_latest_committed(&entity, position_hint.lane);
-                    entry.insert(BatchEntityState {
-                        entity_arc: Arc::clone(&entity),
-                        prev_hash: latest
-                            .as_ref()
-                            .map(|entry| entry.hash_chain.event_hash)
-                            .unwrap_or([0u8; 32]),
-                        next_clock: super::checked_next_clock(
-                            latest.as_ref().map(|entry| entry.clock),
-                            &entity,
-                        )?,
-                        last_wall_ms: latest.as_ref().map(|entry| entry.wall_ms).unwrap_or(0),
-                    })
-                }
-            };
+            let state =
+                self.resolve_batch_entity_state(&mut entity_states, &entity, position_hint.lane)?;
 
             debug_assert!(
                 Arc::ptr_eq(&state.entity_arc, item.entity_arc()),
@@ -229,6 +303,13 @@ impl WriterCore {
                 )
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Validation, e))?;
 
+            // Encrypt-on-append (opt-in) hashes the CIPHERTEXT so the per-entity
+            // chain is built over ciphertext hashes from the start; a no-op (plain
+            // `blake3(payload)`) when encryption is off.
+            #[cfg(feature = "payload-encryption")]
+            let event_hash =
+                self.batch_event_hash(item, event_id, &mut encryptions, &mut needs_fence)?;
+            #[cfg(not(feature = "payload-encryption"))]
             let event_hash = crate::event::hash::compute_hash(item.payload_bytes());
 
             state.prev_hash = event_hash;
@@ -275,7 +356,13 @@ impl WriterCore {
                 },
             ));
         }
-        Ok(computed)
+        Ok(PrecomputedBatch {
+            computed,
+            #[cfg(feature = "payload-encryption")]
+            encryptions,
+            #[cfg(feature = "payload-encryption")]
+            needs_fence,
+        })
     }
 
     fn write_batch_marker_frame(
@@ -368,11 +455,12 @@ impl WriterCore {
         self.handle_prepared_batch(&prepared, fence)
     }
 
-    fn handle_prepared_batch(
-        &mut self,
-        prepared: &PreparedBatch,
-        fence: Option<&mut FenceLedger>,
-    ) -> Result<Vec<AppendReceipt>, StoreError> {
+    /// Debug-only structural invariants a `PreparedBatch` must satisfy: `len()`
+    /// equals `items().len()` (the writer derives sequence reservation, marker
+    /// offsets, and publish span from it) and `total_bytes()` equals the summed
+    /// item payload lengths. Extracted from `handle_prepared_batch` to keep it
+    /// under its complexity ratchet.
+    fn debug_assert_prepared_batch_consistent(prepared: &PreparedBatch) {
         debug_assert_eq!(
             prepared.len(),
             prepared.items().len(),
@@ -387,6 +475,28 @@ impl WriterCore {
                 .map(|item| item.payload_bytes().len())
                 .sum::<usize>()
         );
+    }
+
+    /// Raise the crypto-shred durability fence for a batch: if the keyset is dirty
+    /// (any item minted a new scope key, OR a prior mint's fence-flush failed and
+    /// left the keyset ahead of disk), flush it durable BEFORE writing the batch's
+    /// frames (and thus before the batch fsync), so a crash can never order
+    /// ciphertext-durable ahead of key-durable. Fails the batch closed on a flush
+    /// failure.
+    #[cfg(feature = "payload-encryption")]
+    fn raise_batch_durability_fence(&self, needs_fence: bool) -> Result<(), StoreError> {
+        if needs_fence {
+            self.flush_keyset_durable()?;
+        }
+        Ok(())
+    }
+
+    fn handle_prepared_batch(
+        &mut self,
+        prepared: &PreparedBatch,
+        fence: Option<&mut FenceLedger>,
+    ) -> Result<Vec<AppendReceipt>, StoreError> {
+        Self::debug_assert_prepared_batch_consistent(prepared);
 
         let batch_id = self.index.global_sequence();
         let first_seq = self.index.reserve_sequences(prepared.len() as u64);
@@ -400,7 +510,14 @@ impl WriterCore {
             &self.config.fault_injector,
         )?;
 
-        let computed = self.precompute_batch_items(prepared, first_seq)?;
+        let precomputed = self.precompute_batch_items(prepared, first_seq)?;
+        let computed = precomputed.computed;
+
+        // Durability fence BEFORE any batch frame is written (details on the
+        // helper). Fails the batch closed on a flush failure — no BEGIN marker.
+        #[cfg(feature = "payload-encryption")]
+        self.raise_batch_durability_fence(precomputed.needs_fence)?;
+
         let batch_frontier = computed
             .last()
             .map(|staged| HlcPoint {
@@ -429,7 +546,13 @@ impl WriterCore {
             &self.config.fault_injector,
         )?;
 
-        let receipts = self.write_batch_event_frames(prepared, &computed, batch_id)?;
+        let receipts = self.write_batch_event_frames(
+            prepared,
+            &computed,
+            #[cfg(feature = "payload-encryption")]
+            &precomputed.encryptions,
+            batch_id,
+        )?;
 
         #[cfg(feature = "dangerous-test-hooks")]
         crate::store::fault::maybe_inject(
@@ -534,6 +657,9 @@ impl WriterCore {
         &mut self,
         prepared: &PreparedBatch,
         staged: &[StagedCommittedEvent],
+        #[cfg(feature = "payload-encryption")] encryptions: &[Option<
+            super::encrypt::SealedPayload,
+        >],
         _batch_id: u64,
     ) -> Result<Vec<AppendReceipt>, StoreError> {
         let mut receipts: Vec<AppendReceipt> = Vec::with_capacity(prepared.len());
@@ -541,9 +667,30 @@ impl WriterCore {
         for (idx, item) in prepared.items().iter().enumerate() {
             let staged = &staged[idx];
             let item_options = item.options();
-            let event = staged
-                .borrowed_frame_event(item.payload_bytes())
+            // Encrypted item: frame the CIPHERTEXT (its hash was chained in
+            // precompute) and stamp the scope id + nonce into the header. The
+            // borrowed ciphertext outlives this frame encode. Plaintext item (or
+            // encryption off): frame the original bytes, byte-identical to today.
+            #[cfg(feature = "payload-encryption")]
+            let frame_payload_bytes: &[u8] = match &encryptions[idx] {
+                Some(sealed) => &sealed.ciphertext,
+                None => item.payload_bytes(),
+            };
+            #[cfg(not(feature = "payload-encryption"))]
+            let frame_payload_bytes: &[u8] = item.payload_bytes();
+
+            #[cfg(feature = "payload-encryption")]
+            let mut event = staged
+                .borrowed_frame_event(frame_payload_bytes)
                 .map_err(|e| batch_failed(idx, BatchFailureStage::Encoding, e))?;
+            #[cfg(not(feature = "payload-encryption"))]
+            let event = staged
+                .borrowed_frame_event(frame_payload_bytes)
+                .map_err(|e| batch_failed(idx, BatchFailureStage::Encoding, e))?;
+            #[cfg(feature = "payload-encryption")]
+            if let Some(sealed) = &encryptions[idx] {
+                event.header.payload_encryption = Some(sealed.meta.clone());
+            }
 
             let mut receipt = AppendReceipt {
                 event_id: crate::id::EventId::from(staged.event_id()),
@@ -563,7 +710,7 @@ impl WriterCore {
                 &staged.coord,
                 staged.meta.kind,
                 staged.hash_chain.prev_hash,
-            );
+            )?;
 
             let frame_payload = FramePayloadRef {
                 event: &event,

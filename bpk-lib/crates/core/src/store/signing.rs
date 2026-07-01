@@ -3,6 +3,7 @@ use crate::event::EventKind;
 use crate::store::append::{signing_downgrade_extension_key, SigningDowngradeBody};
 use crate::store::{
     AppendReceipt, DenialReceipt, ExtensionKey, ReceiptVerification, ReceiptVerificationError,
+    StoreError,
 };
 use ed25519_compact::{KeyPair, PublicKey, Seed, Signature};
 use std::collections::BTreeMap;
@@ -61,6 +62,9 @@ impl std::fmt::Debug for SigningKey {
 pub(crate) struct ReceiptSigningRegistry {
     current: Option<Arc<SigningKey>>,
     verifying_keys: Arc<BTreeMap<[u8; 32], [u8; 32]>>,
+    /// When a signer is configured but its cover cannot be built, permit a
+    /// best-effort downgrade to unsigned instead of failing the append.
+    allow_downgrade: bool,
 }
 
 impl ReceiptSigningRegistry {
@@ -72,7 +76,7 @@ impl ReceiptSigningRegistry {
     /// that produce this slice silently changes which key signs new receipts.
     /// This is the intended key-rotation mechanism (append the new active key
     /// last); callers must not treat the order as cosmetic.
-    pub(crate) fn from_keys(keys: &[SigningKey]) -> Self {
+    pub(crate) fn from_keys(keys: &[SigningKey], allow_downgrade: bool) -> Self {
         let mut verifying_keys = BTreeMap::new();
         let mut current = None;
         for key in keys {
@@ -85,6 +89,7 @@ impl ReceiptSigningRegistry {
         Self {
             current,
             verifying_keys: Arc::new(verifying_keys),
+            allow_downgrade,
         }
     }
 
@@ -94,7 +99,14 @@ impl ReceiptSigningRegistry {
         coord: &Coordinate,
         kind: EventKind,
         prev_hash: [u8; 32],
-    ) {
+    ) -> Result<(), StoreError> {
+        let Some(current) = &self.current else {
+            // No active signer: the receipt stays unsigned. No cover is needed,
+            // and there is nothing to downgrade.
+            receipt.key_id = [0; 32];
+            receipt.signature = None;
+            return Ok(());
+        };
         let cover = match cover_bytes(
             {
                 use crate::id::EntityIdType;
@@ -109,18 +121,22 @@ impl ReceiptSigningRegistry {
         ) {
             Ok(cover) => cover,
             Err(error) => {
-                tracing::error!(error = %error, "failed to build receipt signature cover");
+                // A signer is configured but its cover cannot be built. Fail the
+                // append closed rather than silently committing an unsigned
+                // receipt — unless downgrade is explicitly permitted.
+                if cover_failure_fails_closed(self.allow_downgrade) {
+                    return Err(StoreError::ser_msg(&format!(
+                        "receipt signature cover could not be built: {error}"
+                    )));
+                }
+                tracing::error!(error = %error, "receipt signing downgraded to unsigned (signing_downgrade_allowed)");
                 downgrade_receipt_signing(receipt, error.to_string());
-                return;
+                return Ok(());
             }
         };
-        if let Some(current) = &self.current {
-            receipt.key_id = current.key_id();
-            receipt.signature = Some(current.sign_cover(cover));
-            return;
-        }
-        receipt.key_id = [0; 32];
-        receipt.signature = None;
+        receipt.key_id = current.key_id();
+        receipt.signature = Some(current.sign_cover(cover));
+        Ok(())
     }
 
     pub(crate) fn verify_append_receipt(
@@ -234,6 +250,15 @@ impl ReceiptSigningRegistry {
     }
 }
 
+/// A configured signer fails the append closed on cover-build failure unless
+/// downgrade is explicitly permitted. The cover-build failure is itself a
+/// defensive guard — it requires the coordinate/extension MessagePack encoding
+/// to fail, which does not occur for valid inputs — so this disposition is the
+/// directly unit-tested policy.
+const fn cover_failure_fails_closed(allow_downgrade: bool) -> bool {
+    !allow_downgrade
+}
+
 fn downgrade_receipt_signing(receipt: &mut AppendReceipt, error: impl Into<String>) {
     let body = SigningDowngradeBody::cover_build_failed(error);
     match body.encode_extension() {
@@ -313,6 +338,15 @@ fn cover_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cover_failure_is_fatal_unless_downgrade_allowed() {
+        // Default: a configured signer that cannot build its cover FAILS the
+        // append closed (never silently emits an unsigned receipt).
+        assert!(cover_failure_fails_closed(false));
+        // Opt-in: best-effort downgrade is permitted only when explicitly asked.
+        assert!(!cover_failure_fails_closed(true));
+    }
 
     #[test]
     fn cover_bytes_separates_event_kind_category_and_type_bits() {

@@ -1,5 +1,6 @@
 use crate::store::file_classification::StoreFileKind;
 use crate::store::platform;
+use crate::store::platform::fs::StoreFs;
 use crate::store::segment;
 use crate::store::StoreError;
 use std::path::{Path, PathBuf};
@@ -40,25 +41,30 @@ pub(crate) fn write_pending_compaction(
     data_dir: &Path,
     merged_id: u64,
     source_segment_ids: &[u64],
+    fs: &dyn StoreFs,
 ) -> Result<(), StoreError> {
     let marker = PendingCompaction {
         merged_id,
         source_segment_ids: source_segment_ids.to_vec(),
     };
     let final_path = pending_compaction_path(data_dir);
-    crate::store::platform::fs::write_file_atomically(
+    crate::store::platform::fs::write_file_atomically_with_fs(
         data_dir,
         &final_path,
         "compaction marker",
         |file| {
             serde_json::to_writer(file, &marker).map_err(|e| StoreError::Serialization(Box::new(e)))
         },
+        fs,
     )
 }
 
-pub(crate) fn clear_pending_compaction(data_dir: &Path) -> Result<(), StoreError> {
+pub(crate) fn clear_pending_compaction(
+    data_dir: &Path,
+    fs: &dyn StoreFs,
+) -> Result<(), StoreError> {
     let path = pending_compaction_path(data_dir);
-    match platform::fs::remove_file(&path) {
+    match fs.remove_file(&path) {
         Ok(()) => {
             crate::store::platform::sync::sync_parent_dir(&path)?;
             Ok(())
@@ -73,26 +79,21 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
     for entry in platform::fs::read_dir(data_dir).map_err(StoreError::Io)? {
         let entry = entry.map_err(StoreError::Io)?;
         let path = entry.path();
-        let segment_id = match StoreFileKind::from_path(&path) {
-            StoreFileKind::Segment(segment_id) => segment_id.as_u64(),
-            StoreFileKind::MalformedSegment(error) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    %error,
-                    "skipping malformed segment filename"
-                );
-                continue;
-            }
-            StoreFileKind::VisibilityRanges
-            | StoreFileKind::Checkpoint
-            | StoreFileKind::MmapIndex
-            | StoreFileKind::IdempotencyStore
-            | StoreFileKind::PendingCompactionMarker
-            | StoreFileKind::CompactSource
-            | StoreFileKind::CursorDirectory
-            | StoreFileKind::Other => continue,
+        let kind = StoreFileKind::from_path(&path);
+        if let StoreFileKind::MalformedSegment(error) = &kind {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "skipping malformed segment filename"
+            );
+            continue;
+        }
+        // Every non-segment artifact (keyset, idempotency store, checkpoint, …)
+        // reports no segment id and is skipped.
+        let Some(segment_id) = kind.segment_id() else {
+            continue;
         };
-        entries.push((segment_id, path));
+        entries.push((segment_id.as_u64(), path));
     }
     if let Some(marker) = load_pending_compaction(data_dir)? {
         let merged_present = entries
@@ -147,6 +148,7 @@ pub(super) fn segment_paths(data_dir: &Path) -> Result<Vec<(u64, PathBuf)>, Stor
 #[cfg(test)]
 mod tests {
     use super::{clear_pending_compaction, pending_compaction_path};
+    use crate::store::platform::fs::RealFs;
     use crate::store::StoreError;
 
     #[test]
@@ -159,7 +161,7 @@ mod tests {
         let marker = pending_compaction_path(dir.path());
         std::fs::create_dir(&marker).expect("create directory at marker path");
 
-        let result = clear_pending_compaction(dir.path());
+        let result = clear_pending_compaction(dir.path(), &RealFs);
         assert!(
             matches!(result, Err(StoreError::Io(_))),
             "a non-NotFound removal failure must propagate as Err(Io), not be \
@@ -172,6 +174,6 @@ mod tests {
         // The NotFound arm: an absent marker is a clean no-op success — this
         // anchors that the error-path test above is the discriminating case.
         let dir = tempfile::tempdir().expect("tempdir");
-        clear_pending_compaction(dir.path()).expect("absent marker clears cleanly");
+        clear_pending_compaction(dir.path(), &RealFs).expect("absent marker clears cleanly");
     }
 }

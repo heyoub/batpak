@@ -368,7 +368,7 @@ pub(crate) fn parse_anchor(regex: &str) -> Option<ExclusionAnchor> {
 }
 
 /// Pull the most specific mutated symbol from a cargo-mutants description tail.
-/// Priority: the identifier after ` in ` (cargo-mutants' "in <fn>" suffix), then
+/// Priority: the identifier after ` in ` (cargo-mutants' "in `<fn>`" suffix), then
 /// the method of a `Type::method ->` return-type mutant, then the last bare
 /// identifier (e.g. `reflink_impl`).
 fn extract_symbol(description: &str) -> Option<String> {

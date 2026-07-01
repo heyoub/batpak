@@ -16,6 +16,7 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
             dir.path().to_path_buf(),
             4,
             &runtime.clock_arc(),
+            Arc::clone(config.fs()),
         )),
         cache: Box::new(NoCache),
         projection_registry: projection::registry::ProjectionRegistry::new(
@@ -29,6 +30,8 @@ fn test_store_with_writer(tx: flume::Sender<writer::WriterCommand>) -> (Store, T
         open_report: None,
         cumulative_reserved_kind_fallbacks:
             crate::store::segment::sidx::ReservedKindFallbackStats::default(),
+        #[cfg(feature = "payload-encryption")]
+        key_store: None,
         state: Open(writer::WriterHandle::from_parts_for_test(tx, subscribers)),
         _store_lock: dir_lock::StoreDirLock::acquire(dir.path(), StoreLockMode::Mutable)
             .expect("test store lock"),

@@ -6,6 +6,10 @@ mod chain_walk;
 pub mod cold_start;
 mod compaction_report;
 mod config;
+/// The explicit crypto-shred erasure op (`Store::shred_scope`); opt-in
+/// `payload-encryption` only.
+#[cfg(feature = "payload-encryption")]
+mod crypto_shred_api;
 /// Push subscriptions (lossy) and pull cursors (ordered, with optional durable
 /// checkpoints) for event delivery.
 pub mod delivery;
@@ -31,6 +35,13 @@ mod import;
 mod import_api;
 /// In-memory 2D event index, rebuilt from segments on startup.
 pub mod index;
+/// Per-scope payload key material for opt-in crypto-shred encryption.
+#[cfg(feature = "payload-encryption")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "payload-encryption"))
+)]
+pub mod keyscope;
 mod lifecycle;
 mod lifecycle_api;
 mod lifecycle_close;
@@ -41,6 +52,7 @@ pub mod projection;
 mod projection_run;
 /// Typed reactor output batch — accumulator handed to typed reactor handlers.
 pub mod reaction;
+mod reactor_delivery;
 /// Typed reactor public surface + shared internal canal runner.
 pub mod reactor_typed;
 mod read_api;
@@ -65,6 +77,7 @@ mod watch_api;
 pub(crate) mod write;
 mod write_api;
 
+pub use ancestry::{AncestorWalk, AncestryBoundary};
 pub use append::{
     AppendOptions, AppendPositionHint, AppendReceipt, BatchAppendItem, CausationRef,
     CompactionConfig, CompactionStrategy, DenialReceipt, DenialRequest, EncodedBytes, ExtensionKey,
@@ -82,8 +95,9 @@ pub use compaction_report::{
     CompactionStrategyShape, COMPACTION_REPORT_SCHEMA_VERSION,
 };
 pub use config::{
-    BatchConfig, IdempotencyRetention, IndexConfig, IndexTopology, OpenReportObserver,
-    OverflowPolicy, StoreConfig, SyncConfig, SyncMode, WriterConfig,
+    BatchConfig, ChainVerification, IdempotencyRetention, IndexConfig, IndexTopology,
+    OpenReportObserver, OverflowPolicy, SigningPolicy, StoreConfig, SyncConfig, SyncMode,
+    WriterConfig,
 };
 pub use delivery::canal::{Canal, CanalBatch, CanalClosed, CanalHandle, CanalItem, ReactorCanal};
 pub use delivery::cursor::{
@@ -118,6 +132,14 @@ pub use import::{
     ImportSelector, SourceNamespace, IMPORT_PROVENANCE_SCHEMA_VERSION,
 };
 pub use index::IndexEntry;
+#[cfg(feature = "payload-encryption")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "payload-encryption"))
+)]
+pub use keyscope::{
+    scope_for, KeyScope, KeyScopeGranularity, KeyStore, KeyStoreError, PayloadKey, ShredScope,
+};
 /// Test-only global-allocator shims. Re-exported so dedicated single-test
 /// binaries can install one as `#[global_allocator]`. Compiled out unless the
 /// `alloc-count` or `fault-alloc` feature is enabled.
@@ -142,6 +164,9 @@ pub use projection_run::{
 };
 pub use reaction::ReactionBatch;
 pub use reactor_typed::{ReactorConfig, ReactorError, TypedReactorHandle};
+pub use read_api::ChainVerificationReport;
+#[cfg(feature = "payload-encryption")]
+pub use read_api::{DeliveryPayload, ReadDisposition};
 pub use read_walk::{
     ReadWalkDroppedCount, ReadWalkEvidenceReport, ReadWalkFinding, ReadWalkFreshnessIntent,
     ReadWalkFrontierKind, ReadWalkHash, ReadWalkInputFrontier, ReadWalkProofRef, ReadWalkProofRefs,
@@ -336,6 +361,14 @@ pub struct Store<State: StoreState = Open> {
     pub(crate) should_shutdown_on_drop: bool,
     pub(crate) open_report: Option<cold_start::rebuild::OpenIndexReport>,
     pub(crate) cumulative_reserved_kind_fallbacks: segment::sidx::ReservedKindFallbackStats,
+    /// Loaded crypto-shred keyset, present only when `payload_encryption` is
+    /// configured (`None` disables encryption). Rehydrated from disk at open
+    /// (Stage B); Stage C reads/mints/destroys through it on the append/read
+    /// paths. An [`Arc`]`<`[`Mutex`]`>` — the SAME handle the background writer
+    /// holds through the runtime — so an append that mints a key on the writer
+    /// thread is immediately visible to a decrypt-on-read under `&self`.
+    #[cfg(feature = "payload-encryption")]
+    pub(crate) key_store: Option<Arc<Mutex<keyscope::KeyStore>>>,
     /// Typestate payload: carries the writer handle when (and only when) the
     /// store is [`Open`]; a ZST for the other states.
     pub(crate) state: State,

@@ -9,6 +9,17 @@ use std::path::Path;
 pub(crate) const COMPACT_SOURCE_EXTENSION: &str = "compact-src";
 pub(crate) const CURSOR_DIRECTORY: &str = "cursors";
 
+/// Filename of the durable crypto-shred keyset (opt-in `payload-encryption`).
+///
+/// Defined UNGATED (not behind `payload-encryption`) on purpose: a default build
+/// that opens a store previously written with encryption must still RECOGNISE the
+/// keyset file so scans never mistake it for a segment and so snapshot/fork copy
+/// paths carry it forward instead of dropping it — dropping the keyset would
+/// crypto-shred every encrypted payload. The gated persistence layer
+/// (`keyscope::persist`) references this same constant so the on-disk name has a
+/// single source of truth.
+pub(crate) const KEYSET_FILENAME: &str = "keyset.fbatk";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum StoreFileKind {
     Segment(SegmentId),
@@ -20,6 +31,12 @@ pub(crate) enum StoreFileKind {
     PendingCompactionMarker,
     CompactSource,
     CursorDirectory,
+    /// The durable crypto-shred keyset (`keyset.fbatk`). Recognised so scans and
+    /// cleanup never mistake it for a segment. Stage B classifies it (and reads
+    /// it at open); making it a first-class snapshot/fork authority — which
+    /// touches the public snapshot/fork report wire formats — is Stage C work,
+    /// landed with the encryption wiring and its schema bump.
+    Keyset,
     Other,
 }
 
@@ -56,6 +73,7 @@ impl StoreFileKind {
                 Self::PendingCompactionMarker
             }
             Some(CURSOR_DIRECTORY) => Self::CursorDirectory,
+            Some(KEYSET_FILENAME) => Self::Keyset,
             _ => Self::Other,
         }
     }
@@ -71,6 +89,7 @@ impl StoreFileKind {
             | Self::PendingCompactionMarker
             | Self::CompactSource
             | Self::CursorDirectory
+            | Self::Keyset
             | Self::Other => None,
         }
     }
@@ -80,6 +99,15 @@ impl StoreFileKind {
         // snapshot must carry it forward — otherwise restoring from the
         // snapshot would silently lose cross-compaction dedup memory.
         // justifies: INV-IDEMPOTENCY-DURABLE-WINDOW
+        //
+        // NOTE (Stage B): the crypto-shred keyset is deliberately NOT listed
+        // here. Carrying it into a snapshot means mapping it to a public,
+        // schema-versioned `SnapshotFileKind` variant — a snapshot-report wire +
+        // default public-API change that belongs with Stage C's encryption
+        // wiring, not this durability-only stage. In Stage B no payload is
+        // encrypted and nothing mints keys through the store, so a snapshot has
+        // no keyset to lose. Stage C makes the keyset a first-class snapshot/fork
+        // authority (with the accompanying schema bump).
         matches!(
             self,
             Self::Segment(_)
@@ -115,10 +143,14 @@ impl StoreFileKind {
                 ForkStrategy::DeepCopyAlways
             }
             Self::Checkpoint | Self::MmapIndex => ForkStrategy::CacheRegenerable,
+            // Stage B: excluded from fork for the same reason it is excluded from
+            // snapshot — first-class fork copy of the keyset (with its fork-report
+            // wire fields) is Stage C work. See `should_copy_into_snapshot`.
             Self::Segment(_)
             | Self::MalformedSegment(_)
             | Self::CompactSource
             | Self::CursorDirectory
+            | Self::Keyset
             | Self::Other => ForkStrategy::Exclude,
         }
     }

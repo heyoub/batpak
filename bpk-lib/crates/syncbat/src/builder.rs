@@ -1,6 +1,6 @@
 //! Builder for the synchronous runtime composition root.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::admission::AdmissionGuard;
@@ -29,9 +29,18 @@ pub struct CoreBuilder {
     handlers: BTreeMap<String, BoxedHandler>,
     admission_guard: Option<BoxedAdmissionGuard>,
     receipt_sink: Option<BoxedReceiptSink>,
+    /// When true, the caller explicitly accepted a sinkless build: no receipt
+    /// sink is required and the built core records no receipts. Without this
+    /// opt-out, [`Self::build`] fails closed rather than silently dropping
+    /// receipts.
+    receipts_opted_out: bool,
     status_sink: Option<BoxedStatusSink>,
     receipt_hash_policy: ReceiptHashPolicy,
     effect_backend: Option<BoxedEffectBackend>,
+    /// Capability tokens this Core is granted. At checkout the runtime fails
+    /// closed when a dispatched operation declares a required capability token
+    /// that is not in this set (effect-axis tokens are ambient and excluded).
+    granted_capabilities: BTreeSet<String>,
 }
 
 impl CoreBuilder {
@@ -218,6 +227,18 @@ impl CoreBuilder {
         self
     }
 
+    /// Explicitly build a core that records no receipts.
+    ///
+    /// [`Self::build`] fails closed with [`BuildError::MissingReceiptSink`] when
+    /// no receipt sink is configured, because a sinkless core silently drops
+    /// every runtime receipt. Call this to state on purpose that this core
+    /// persists no receipts. A receipt sink configured with
+    /// [`Self::receipt_sink`] takes precedence and still persists receipts.
+    pub fn without_receipts(&mut self) -> &mut Self {
+        self.receipts_opted_out = true;
+        self
+    }
+
     /// Configure the optional operation-status sink used during checkout.
     pub fn status_sink<S>(&mut self, sink: S) -> &mut Self
     where
@@ -242,6 +263,35 @@ impl CoreBuilder {
     /// Configure runtime receipt hash population.
     pub fn receipt_hash_policy(&mut self, policy: ReceiptHashPolicy) -> &mut Self {
         self.receipt_hash_policy = policy;
+        self
+    }
+
+    /// Grant one runtime capability token to the built [`Core`].
+    ///
+    /// At checkout the runtime fails closed when a dispatched operation declares
+    /// a required capability token it was not granted. Tokens are declared with
+    /// `OperationEffectRow::requires_capability` or the `#[operation]` macro's
+    /// `requires_capabilities`. Effect-axis tokens auto-declared by the effect
+    /// builders (event read/append, projection query, receipt emit, host
+    /// control) are ambient — they are mediated by the observed-effect subset
+    /// check and never need an explicit grant. A Core granted nothing therefore
+    /// runs only operations that declare no extra capability tokens.
+    pub fn grant_capability(&mut self, capability: impl Into<String>) -> &mut Self {
+        self.granted_capabilities.insert(capability.into());
+        self
+    }
+
+    /// Grant several runtime capability tokens to the built [`Core`].
+    ///
+    /// Convenience over repeated [`Self::grant_capability`] calls; see it for
+    /// the gate semantics.
+    pub fn grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.granted_capabilities
+            .extend(capabilities.into_iter().map(Into::into));
         self
     }
 
@@ -272,7 +322,10 @@ impl CoreBuilder {
     ///
     /// # Errors
     /// Returns a missing-descriptor or missing-handler error when the mounted
-    /// operation table and handler table do not line up by name.
+    /// operation table and handler table do not line up by name, or
+    /// [`BuildError::MissingReceiptSink`] when no receipt sink is configured and
+    /// the caller did not opt out with [`Self::without_receipts`] (a sinkless
+    /// core silently drops every runtime receipt, so the build fails closed).
     pub fn build(self) -> Result<Core, BuildError> {
         for name in self.descriptors.keys() {
             if !self.handlers.contains_key(name) {
@@ -284,6 +337,9 @@ impl CoreBuilder {
                 return Err(BuildError::missing_descriptor(name.clone()));
             }
         }
+        if self.receipt_sink.is_none() && !self.receipts_opted_out {
+            return Err(BuildError::MissingReceiptSink);
+        }
 
         Ok(Core {
             descriptors: self.descriptors,
@@ -293,6 +349,7 @@ impl CoreBuilder {
             status_sink: self.status_sink,
             receipt_hash_policy: self.receipt_hash_policy,
             effect_backend: self.effect_backend,
+            granted_capabilities: self.granted_capabilities,
         })
     }
 }
@@ -398,6 +455,7 @@ mod builder_mutation_tests {
             duplicate.is_err(),
             "registering the same name twice must be a duplicate error"
         );
+        builder.without_receipts();
         let core = builder.build().expect("build should succeed");
         assert!(
             core.contains_operation("ping"),
@@ -419,6 +477,7 @@ mod builder_mutation_tests {
             .register_boxed(PING, boxed_handler())
             .expect("register");
         with_guard.admission_guard(DenyGuard);
+        with_guard.without_receipts();
         let core = with_guard.build().expect("build");
         assert!(
             core.admission_guard.is_some(),
@@ -431,6 +490,7 @@ mod builder_mutation_tests {
             .expect("register");
         cleared.admission_guard(DenyGuard);
         cleared.clear_admission_guard();
+        cleared.without_receipts();
         let core = cleared.build().expect("build");
         assert!(
             core.admission_guard.is_none(),
@@ -459,6 +519,7 @@ mod builder_mutation_tests {
             .register_boxed(PING, boxed_handler())
             .expect("register");
         builder.status_sink_boxed(Arc::new(NoopStatusSink));
+        builder.without_receipts();
         let core = builder.build().expect("build");
         assert!(
             core.status_sink.is_some(),
@@ -471,6 +532,7 @@ mod builder_mutation_tests {
             .expect("register");
         cleared.status_sink_boxed(Arc::new(NoopStatusSink));
         cleared.clear_status_sink();
+        cleared.without_receipts();
         let core = cleared.build().expect("build");
         assert!(
             core.status_sink.is_none(),
@@ -485,6 +547,7 @@ mod builder_mutation_tests {
             .register_boxed(PING, boxed_handler())
             .expect("register");
         builder.effect_backend_boxed(Box::new(NoopBackend));
+        builder.without_receipts();
         let core = builder.build().expect("build");
         assert!(
             core.effect_backend.is_some(),

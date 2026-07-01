@@ -56,15 +56,36 @@ pub trait EventPayload: Serialize + DeserializeOwned {
 }
 
 /// How `Store::open` handles linked `EventPayload` kind collisions.
+///
+/// The default is [`EventPayloadValidation::FailFast`]: two registered payload
+/// types that claim the same `(category, type_id)` give the binary ambiguous
+/// wire identity, so `Store::open` REFUSES to open when the linked registry
+/// contains a collision. The weaker log-and-proceed and skip-the-check modes
+/// stay reachable only as explicit opt-outs ([`EventPayloadValidation::Warn`]
+/// and [`EventPayloadValidation::Silent`]). This mirrors the store's
+/// signing-policy and receipt-hashing idiom: the safe behavior is the default
+/// and the looser behavior is an explicit escape hatch.
+///
+/// This policy only runs at `Store::open`. A binary that registers colliding
+/// payloads but **never opens a store** is not covered here; call
+/// [`verify_registry`] once at startup (or enable the non-default
+/// `startup-registry-check` feature) to catch that case in a release build.
+///
+/// Set via
+/// [`StoreConfig::with_event_payload_validation`](crate::store::StoreConfig::with_event_payload_validation).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum EventPayloadValidation {
-    /// Log a single process-wide warning if duplicate payload kinds are linked.
-    #[default]
+    /// Log a single process-wide warning if duplicate payload kinds are linked,
+    /// then open anyway. Explicit opt-out for callers that knowingly tolerate a
+    /// duplicate registration (it is no longer the default).
     Warn,
-    /// Return an error from `Store::open` when duplicate payload kinds are linked.
+    /// Return an error from `Store::open` when duplicate payload kinds are
+    /// linked. This is the safe default: a collision is refused at open.
+    #[default]
     FailFast,
-    /// Do not check the payload registry during `Store::open`.
+    /// Do not check the payload registry during `Store::open`. Explicit opt-out
+    /// that skips the registry scan entirely.
     Silent,
 }
 
@@ -156,6 +177,60 @@ pub fn validate_event_payload_registry() -> Result<(), EventPayloadRegistryError
         Ok(())
     } else {
         Err(EventPayloadRegistryError::new(collisions))
+    }
+}
+
+/// Release-startup entry point: verify the linked `EventPayload` registry has no
+/// duplicate-kind collisions.
+///
+/// Call this once at process startup **if your binary registers `EventPayload`
+/// types (directly or through a dependency crate) but may never open a
+/// [`Store`](crate::store::Store)**. `Store::open` already runs this same check
+/// under the default [`EventPayloadValidation::FailFast`] policy, so a binary
+/// that opens a store is covered. A binary that registers colliding payloads and
+/// never opens a store would otherwise get **no** collision check in a release
+/// build: the `#[derive(EventPayload)]` macro's own collision test is
+/// `#[cfg(test)]`-only and is absent from a non-test binary. This entry point
+/// closes that gap and catches the linked-kind collision a release build would
+/// not see.
+///
+/// For automatic enforcement without a manual call, enable the non-default
+/// `startup-registry-check` feature: it installs one process-wide startup
+/// constructor that runs this check and aborts on a collision before `main`.
+///
+/// This is a thin, clearly-named alias for
+/// [`validate_event_payload_registry`]; the two are interchangeable.
+///
+/// # Errors
+/// Returns [`EventPayloadRegistryError`] if two or more linked payload types
+/// register the same `(category, type_id)` pair.
+pub fn verify_registry() -> Result<(), EventPayloadRegistryError> {
+    validate_event_payload_registry()
+}
+
+/// Process-wide startup constructor installed by the non-default
+/// `startup-registry-check` feature.
+///
+/// Runs before `main`, so a release binary that registers colliding
+/// `EventPayload` kinds and never opens a `Store` still fails fast: it writes a
+/// diagnostic to `stderr` and aborts the process. One central constructor covers
+/// the whole binary (the derive emits no per-type startup hook), so this is
+/// idempotent by construction. The diagnostic is written with `write_all` on
+/// `std::io::stderr()` rather than `eprintln!` to honor the crate's
+/// no-`print_stderr` discipline, and the write result is deliberately ignored:
+/// if `stderr` itself is unwritable the process must still abort so the collision
+/// can never be silently accepted at startup.
+#[cfg(feature = "startup-registry-check")]
+#[ctor::ctor]
+fn __batpak_verify_registry_at_startup() {
+    use std::io::Write;
+
+    if let Err(error) = verify_registry() {
+        let message = format!("batpak startup-registry-check: aborting before main: {error}\n");
+        let mut stderr = std::io::stderr();
+        let _ = stderr.write_all(message.as_bytes());
+        let _ = stderr.flush();
+        std::process::abort();
     }
 }
 

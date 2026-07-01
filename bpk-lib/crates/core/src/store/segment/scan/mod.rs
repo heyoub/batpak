@@ -6,6 +6,7 @@ mod validate;
 use crate::event::{Event, EventHeader, EventKind, HashChain};
 use crate::store::cold_start::ColdStartIndexRow;
 use crate::store::index::DiskPos;
+use crate::store::platform::fs::StoreFs;
 use crate::store::segment::{self, FramePayload};
 use crate::store::{Clock, EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
@@ -89,6 +90,11 @@ pub struct Reader {
     /// `None` means mmap is not admitted; sealed reads then fall back to the
     /// FD/pread path, which produces byte-identical results.
     sealed_mmap_admission: Option<crate::store::platform::mmap::SealedSegmentMmapAdmission>,
+    /// Filesystem seam for the active-segment positioned frame read. Production
+    /// installs [`crate::store::platform::fs::RealFs`]; a deterministic
+    /// simulation installs a `SimFs` so the FD/pread read is fault-injectable.
+    /// Sealed reads go through mmap and do not consult this seam.
+    fs: Arc<dyn StoreFs>,
 }
 
 struct FdCache {
@@ -103,6 +109,17 @@ pub(crate) struct ScannedEntry {
     pub entity: String,
     pub scope: String,
     pub receipt_extensions: BTreeMap<ExtensionKey, EncodedBytes>,
+    /// The ORIGINAL canonical `event.payload` bytes, exactly as written to disk,
+    /// captured BEFORE they were decoded into the `serde_json::Value` above.
+    ///
+    /// Retention/Tombstone compaction MUST re-emit these verbatim. The decoded
+    /// `Value` drives the keep/drop predicate, but serializing it back would
+    /// write a msgpack MAP where the reader's `FramePayload<Vec<u8>>` decode
+    /// expects raw BYTES — corrupting every survivor into an unreadable
+    /// "invalid type: map, expected a sequence". Carrying the bytes also keeps a
+    /// survivor's `event_hash` (blake3 over `event.payload`) byte-stable across
+    /// compaction, so the hash chain and receipt identity do not drift.
+    pub payload_bytes: Vec<u8>,
 }
 
 pub(crate) struct ScannedIndexEntry {
@@ -150,25 +167,115 @@ impl Reader {
     fn decode_frame_payload_value(
         msgpack: &[u8],
     ) -> Result<FramePayload<serde_json::Value>, StoreError> {
-        let payload = Self::decode_frame_payload_raw(msgpack)?;
-        let event = payload.event;
-        let decoded_payload = match event.header.event_kind {
+        Self::decode_frame_payload_value_with_raw_payload(msgpack).map(|(payload, _raw)| payload)
+    }
+
+    /// Decode a PLAINTEXT payload's raw bytes into a `serde_json::Value`, applying
+    /// the in-band batch-marker carve-out (`SYSTEM_BATCH_BEGIN`/`COMMIT` carry no
+    /// user payload → `Null`). Shared by every Value-decode seam so a plaintext
+    /// event decodes byte-identically wherever it is read.
+    fn plaintext_value_from_bytes(
+        event_kind: EventKind,
+        raw_payload_bytes: &[u8],
+    ) -> Result<serde_json::Value, StoreError> {
+        match event_kind {
             EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT => {
-                serde_json::Value::Null
+                Ok(serde_json::Value::Null)
             }
-            _ => crate::encoding::from_bytes(&event.payload)
-                .map_err(|e| StoreError::Serialization(Box::new(e)))?,
-        };
-        Ok(FramePayload {
-            event: Event {
-                header: event.header,
-                payload: decoded_payload,
-                hash_chain: event.hash_chain,
+            _ => crate::encoding::from_bytes(raw_payload_bytes)
+                .map_err(|e| StoreError::Serialization(Box::new(e))),
+        }
+    }
+
+    /// Reassemble a raw `FramePayload<Vec<u8>>` into a `FramePayload<Value>`
+    /// carrying `decoded_payload` as the event payload, returning the ORIGINAL raw
+    /// `event.payload` bytes alongside — the byte-stable re-emit source compaction
+    /// writes verbatim so a survivor's `event_hash` (blake3 over `event.payload`)
+    /// does not drift.
+    fn value_framepayload_from_raw(
+        payload: FramePayload<Vec<u8>>,
+        decoded_payload: serde_json::Value,
+    ) -> (FramePayload<serde_json::Value>, Vec<u8>) {
+        let FramePayload {
+            event,
+            entity,
+            scope,
+            receipt_extensions,
+        } = payload;
+        let Event {
+            header,
+            payload: raw_payload_bytes,
+            hash_chain,
+        } = event;
+        (
+            FramePayload {
+                event: Event {
+                    header,
+                    payload: decoded_payload,
+                    hash_chain,
+                },
+                entity,
+                scope,
+                receipt_extensions,
             },
-            entity: payload.entity,
-            scope: payload.scope,
-            receipt_extensions: payload.receipt_extensions,
-        })
+            raw_payload_bytes,
+        )
+    }
+
+    /// Like [`Self::decode_frame_payload_value`] but ALSO returns the ORIGINAL
+    /// raw `event.payload` bytes alongside the decoded `serde_json::Value` view.
+    ///
+    /// FAILS CLOSED on an ENCRYPTED payload: this Value-decode seam (plain point
+    /// reads / projection's byte-identical no-keyset path) carries no key, so
+    /// rather than misdecoding ciphertext into garbage it errors — the key-aware
+    /// read surface (`Store::get` / `get_shreddable`) reads the raw ciphertext and
+    /// decrypts under the keyset instead.
+    fn decode_frame_payload_value_with_raw_payload(
+        msgpack: &[u8],
+    ) -> Result<(FramePayload<serde_json::Value>, Vec<u8>), StoreError> {
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        #[cfg(feature = "payload-encryption")]
+        if payload.event.header.payload_encryption.is_some() {
+            return Err(StoreError::ser_msg(
+                "encrypted payload cannot be decoded on this read path without its key; use the \
+                 key-aware read surface (Store::get / Store::get_shreddable)",
+            ));
+        }
+        let decoded_payload = Self::plaintext_value_from_bytes(
+            payload.event.header.event_kind,
+            &payload.event.payload,
+        )?;
+        Ok(Self::value_framepayload_from_raw(payload, decoded_payload))
+    }
+
+    /// Compaction-tolerant Value decode: like
+    /// [`Self::decode_frame_payload_value_with_raw_payload`] but does NOT fail
+    /// closed on an ENCRYPTED payload.
+    ///
+    /// Compaction (which holds the keyset) needs the raw CIPHERTEXT so it can
+    /// decrypt for the retention/tombstone predicate and re-emit those exact bytes
+    /// verbatim. It cannot Value-decode ciphertext at the reader (no key here), so
+    /// an encrypted event gets a `Null` PLACEHOLDER in `event.payload` while the
+    /// raw ciphertext rides out in the returned bytes; the compaction seam
+    /// replaces the placeholder with the decrypted predicate view (or handles a
+    /// shred) and never inspects the placeholder. Plaintext events decode exactly
+    /// as the strict seam.
+    fn decode_frame_payload_value_for_compaction(
+        msgpack: &[u8],
+    ) -> Result<(FramePayload<serde_json::Value>, Vec<u8>), StoreError> {
+        let payload = Self::decode_frame_payload_raw(msgpack)?;
+        #[cfg(feature = "payload-encryption")]
+        if payload.event.header.payload_encryption.is_some() {
+            return Ok(Self::value_framepayload_from_raw(
+                payload,
+                serde_json::Value::Null,
+            ));
+        }
+        let decoded_payload = Self::plaintext_value_from_bytes(
+            payload.event.header.event_kind,
+            &payload.event.payload,
+        )?;
+        Ok(Self::value_framepayload_from_raw(payload, decoded_payload))
     }
 
     fn frame_decode_error(
@@ -194,7 +301,12 @@ impl Reader {
         Self::frame_decode_error(pos.segment_id, pos.offset, error)
     }
 
-    pub(crate) fn new(data_dir: PathBuf, fd_budget: usize, clock: &Arc<dyn Clock>) -> Self {
+    pub(crate) fn new(
+        data_dir: PathBuf,
+        fd_budget: usize,
+        clock: &Arc<dyn Clock>,
+        fs: Arc<dyn StoreFs>,
+    ) -> Self {
         // Probe mmap admission ONCE here. This is the only temp-file probe over
         // the Reader's lifetime; sealed reads never re-probe. A probe failure
         // (e.g. a read-only data dir, where the probe's temp file cannot be
@@ -217,6 +329,7 @@ impl Reader {
             sealed_maps: DashMap::new(),
             active_segment_id: AtomicU64::new(0),
             sealed_mmap_admission,
+            fs,
         }
     }
 

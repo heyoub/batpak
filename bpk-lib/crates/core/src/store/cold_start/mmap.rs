@@ -14,6 +14,7 @@ use crate::store::cold_start::{FileLoad, ReservedKindFallbackStats, WatermarkInf
 use crate::store::index::{
     recommended_restore_chunk_count, restore_chunk_ranges, IndexEntry, RoutingSummary, StoreIndex,
 };
+use crate::store::platform::fs::StoreFs;
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use load::{invalid_load, load_mmap_index};
 
@@ -120,7 +121,36 @@ pub(crate) fn write_mmap_index(
         watermark_segment_id,
         watermark_offset,
         &ReservedKindFallbackStats::default(),
+        &crate::store::platform::fs::RealFs,
     )
+}
+
+/// Build the fixed-width mmap entries and the concatenated receipt-extension
+/// blob for the entry section. Each entry records its slice's offset/length/hash
+/// into the shared blob so a reader can validate and decode it. Split out of
+/// [`write_mmap_index_with_reserved_kind_fallbacks`] to keep that function within
+/// its complexity ratchet.
+fn build_mmap_index_entries(
+    entries: &[IndexEntry],
+) -> Result<(Vec<format::MmapIndexEntry>, Vec<u8>), StoreError> {
+    let mut mmap_entries = Vec::with_capacity(entries.len());
+    let mut extension_blob = Vec::new();
+    for entry in entries {
+        let extension_bytes = encode_receipt_extensions(&entry.receipt_extensions)?;
+        let mut mmap_entry = format::MmapIndexEntry::from_index_entry(entry);
+        if !extension_bytes.is_empty() {
+            mmap_entry.extension_offset = u64::try_from(extension_blob.len()).map_err(|_| {
+                StoreError::ser_msg("receipt-extension blob offset too large for mmap index")
+            })?;
+            mmap_entry.extension_len = u64::try_from(extension_bytes.len()).map_err(|_| {
+                StoreError::ser_msg("receipt-extension blob length too large for mmap index")
+            })?;
+            mmap_entry.extension_hash = extension_blob_digest(&extension_bytes);
+            extension_blob.extend_from_slice(&extension_bytes);
+        }
+        mmap_entries.push(mmap_entry);
+    }
+    Ok((mmap_entries, extension_blob))
 }
 
 pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
@@ -129,6 +159,7 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     watermark_segment_id: u64,
     watermark_offset: u64,
     reserved_kind_fallbacks: &ReservedKindFallbackStats,
+    fs: &dyn StoreFs,
 ) -> Result<(), StoreError> {
     let mut entries = index.all_entries();
     entries.sort_by_key(|entry| entry.global_sequence);
@@ -156,23 +187,7 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     let summary_bytes_len = u64::try_from(summary_bytes.len())
         .map_err(|_| StoreError::ser_msg("summary payload too large for mmap index"))?;
 
-    let mut mmap_entries = Vec::with_capacity(entries.len());
-    let mut extension_blob = Vec::new();
-    for entry in &entries {
-        let extension_bytes = encode_receipt_extensions(&entry.receipt_extensions)?;
-        let mut mmap_entry = format::MmapIndexEntry::from_index_entry(entry);
-        if !extension_bytes.is_empty() {
-            mmap_entry.extension_offset = u64::try_from(extension_blob.len()).map_err(|_| {
-                StoreError::ser_msg("receipt-extension blob offset too large for mmap index")
-            })?;
-            mmap_entry.extension_len = u64::try_from(extension_bytes.len()).map_err(|_| {
-                StoreError::ser_msg("receipt-extension blob length too large for mmap index")
-            })?;
-            mmap_entry.extension_hash = extension_blob_digest(&extension_bytes);
-            extension_blob.extend_from_slice(&extension_bytes);
-        }
-        mmap_entries.push(mmap_entry);
-    }
+    let (mmap_entries, extension_blob) = build_mmap_index_entries(&entries)?;
     let extension_blob_len = u64::try_from(extension_blob.len())
         .map_err(|_| StoreError::ser_msg("receipt-extension blob too large for mmap index"))?;
 
@@ -193,7 +208,7 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
     hasher.update(&extension_blob);
 
     let final_path = data_dir.join(MMAP_INDEX_FILENAME);
-    crate::store::platform::fs::write_file_atomically(
+    crate::store::platform::fs::write_file_atomically_with_fs(
         data_dir,
         &final_path,
         "mmap index",
@@ -228,6 +243,7 @@ pub(crate) fn write_mmap_index_with_reserved_kind_fallbacks(
             file.write_all(&crc.to_le_bytes()).map_err(StoreError::Io)?;
             Ok(())
         },
+        fs,
     )?;
 
     tracing::debug!(

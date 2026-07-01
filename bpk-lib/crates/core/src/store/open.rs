@@ -12,7 +12,19 @@ struct OpenComponents {
     store_lock: dir_lock::StoreDirLock,
 }
 
+/// Open-time health checks over the link-time `EventPayload` registries, both
+/// gated by the single [`EventPayloadValidation`] policy (default `FailFast`):
+///   1. kind collisions — two payload types claiming the same wire identity;
+///   2. incomplete upcast chains — a `version > 1` kind whose registered
+///      `Upcast` steps don't cover every `1 -> ... -> N` hop, which would let
+///      its older events silently become undecodable at read time.
 fn validate_payload_registry_for_open(config: &StoreConfig) -> Result<(), StoreError> {
+    validate_payload_collisions_for_open(config)?;
+    validate_upcast_chains_for_open(config)?;
+    Ok(())
+}
+
+fn validate_payload_collisions_for_open(config: &StoreConfig) -> Result<(), StoreError> {
     let Err(error) = event::payload::cached_event_payload_registry_validation() else {
         return Ok(());
     };
@@ -22,12 +34,32 @@ fn validate_payload_registry_for_open(config: &StoreConfig) -> Result<(), StoreE
                 tracing::warn!(
                     target: "batpak::event_registry",
                     collisions = ?error.collisions(),
-                    "duplicate EventPayload kind registrations detected; call validate_event_payload_registry() or set EventPayloadValidation::FailFast to make this an open error"
+                    "duplicate EventPayload kind registrations detected; EventPayloadValidation::Warn is set, so the store opened despite ambiguous wire identity. The default EventPayloadValidation::FailFast refuses to open on collision"
                 );
             }
             Ok(())
         }
         EventPayloadValidation::FailFast => Err(StoreError::EventPayloadRegistry(error)),
+        EventPayloadValidation::Silent => Ok(()),
+    }
+}
+
+fn validate_upcast_chains_for_open(config: &StoreConfig) -> Result<(), StoreError> {
+    let Err(error) = event::upcast::cached_upcast_chain_registry_validation() else {
+        return Ok(());
+    };
+    match config.event_payload_validation {
+        EventPayloadValidation::Warn => {
+            if event::upcast::mark_upcast_chain_registry_warning_emitted() {
+                tracing::warn!(
+                    target: "batpak::event_registry",
+                    incomplete_chains = ?error.incomplete_chains(),
+                    "EventPayload kind(s) declare version > 1 without a complete upcast chain; EventPayloadValidation::Warn is set, so the store opened despite events at older versions being undecodable at read time. The default EventPayloadValidation::FailFast refuses to open on an incomplete chain"
+                );
+            }
+            Ok(())
+        }
+        EventPayloadValidation::FailFast => Err(StoreError::UpcastChainIncomplete(error)),
         EventPayloadValidation::Silent => Ok(()),
     }
 }
@@ -44,8 +76,24 @@ fn open_components(
         configured_signing_keys,
         "opening store with configured signing registry"
     );
-    let runtime = Arc::new(config.validated()?);
     let store_lock = dir_lock::StoreDirLock::acquire(&config.data_dir, lock_mode)?;
+    // Rehydrate the durable crypto-shred keyset UNDER the store lock (fail closed
+    // on corrupt) and share it through the runtime, so the writer's mint/seal/
+    // flush path and the store's decrypt-on-read path operate on ONE live keyset.
+    // Both the read-write and read-only open paths flow through here, so neither
+    // can drift into loading the keyset differently.
+    let runtime = {
+        #[cfg(feature = "payload-encryption")]
+        {
+            let mut validated = config.validated()?;
+            validated.key_store = load_key_store(&config)?;
+            Arc::new(validated)
+        }
+        #[cfg(not(feature = "payload-encryption"))]
+        {
+            Arc::new(config.validated()?)
+        }
+    };
     if let Some(profile_path) = config.platform_profile_path.as_ref() {
         let _verified_platform_evidence =
             platform::profile::PlatformProfile::verify_current_store_path(
@@ -60,6 +108,7 @@ fn open_components(
         config.data_dir.clone(),
         config.fd_budget,
         &runtime.clock_arc(),
+        Arc::clone(config.fs()),
     ));
 
     // Cold start: checkpoint/mmap fast paths or full segment scan.
@@ -99,6 +148,50 @@ fn next_active_segment_id(data_dir: &std::path::Path) -> Result<u64, StoreError>
     Ok(write::writer::find_latest_segment_id(data_dir)?.unwrap_or(0) + 1)
 }
 
+/// Cold-start hook for the opt-in crypto-shred keyset (Stage B).
+///
+/// When `payload_encryption` is `Some(granularity)`, rehydrate the durable
+/// keyset from the store directory into an in-memory [`keyscope::KeyStore`]; when
+/// `None`, do nothing (no encryption configured). A corrupt/unreadable keyset
+/// fails the open closed via [`keyscope::KeyStore::load`] — it must NOT degrade
+/// to an empty store, which would silently crypto-shred live payloads. Shared by
+/// the read-write and read-only open paths so neither can drift into loading the
+/// keyset differently. Stage C reads/mints into the held store from the
+/// append/read paths; Stage B only loads and holds it.
+#[cfg(feature = "payload-encryption")]
+fn load_key_store(
+    config: &StoreConfig,
+) -> Result<Option<Arc<Mutex<keyscope::KeyStore>>>, StoreError> {
+    let Some(granularity) = config.payload_encryption else {
+        return Ok(None);
+    };
+    let key_store =
+        keyscope::KeyStore::load_with_fs(&config.data_dir, config.fs().as_ref(), granularity)?;
+    Ok(Some(Arc::new(Mutex::new(key_store))))
+}
+
+#[cfg(feature = "payload-encryption")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "payload-encryption"))
+)]
+impl<State: StoreState> Store<State> {
+    /// Number of crypto-shred payload keys the store loaded from disk at open,
+    /// or `None` when `payload_encryption` is not configured.
+    ///
+    /// Observability only — never exposes key material. This is the public window
+    /// onto the Stage B cold-start rehydration: after opening an encrypted store
+    /// whose keyset was flushed, this reports the recovered key count. Stage C
+    /// mints and destroys through the same held store as it wires the payload
+    /// paths, so this count tracks the live keyset thereafter.
+    #[must_use]
+    pub fn payload_key_count(&self) -> Option<usize> {
+        self.key_store
+            .as_ref()
+            .map(|key_store| key_store.lock().key_count())
+    }
+}
+
 fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport) {
     tracing::info!(
         target: "batpak::open",
@@ -135,6 +228,38 @@ fn emit_open_report_observability(config: &StoreConfig, report: &OpenIndexReport
             "open report observer panicked; continuing with successful open"
         );
     }
+}
+
+/// Run the opt-in at-open hash-chain recompute.
+///
+/// Default [`ChainVerification::Crc`] pays nothing — the per-frame CRC already
+/// guarded every frame at read time, so this skips the `O(events)` rehash.
+/// Under [`ChainVerification::Recompute`] the store recomputes blake3 over every
+/// committed event at open and FAILS CLOSED with
+/// [`StoreError::ChainVerificationFailed`] on any content-hash mismatch or
+/// dangling chain link — the regulated tamper-evidence-at-open posture. Shared
+/// by both the read-write and read-only open paths so neither drifts.
+fn run_open_chain_verification<State: StoreState>(store: &Store<State>) -> Result<(), StoreError> {
+    if store.config.chain_verification() != ChainVerification::Recompute {
+        return Ok(());
+    }
+    if let Some(error) = chain_verification_failure(&store.verify_chain()?) {
+        return Err(error);
+    }
+    Ok(())
+}
+
+/// Map an at-open recompute report to its fail-closed error, or `None` when the
+/// store verifies intact. Pure so the Recompute-vs-intact decision is unit
+/// testable without forging on-disk tampering.
+fn chain_verification_failure(report: &ChainVerificationReport) -> Option<StoreError> {
+    if report.is_intact() {
+        return None;
+    }
+    Some(StoreError::ChainVerificationFailed {
+        content_hash_mismatches: report.content_hash_mismatches.len(),
+        dangling_links: report.dangling_links.len(),
+    })
 }
 
 fn highest_index_hlc(index: &StoreIndex) -> HlcPoint {
@@ -423,6 +548,12 @@ impl Store<Open> {
         let watermark_handle = writer.watermark_handle();
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
 
+        // Share the ONE keyset the runtime rehydrated at open (see
+        // `open_components`) with the store's read path — the writer already
+        // holds the identical `Arc` through the runtime.
+        #[cfg(feature = "payload-encryption")]
+        let key_store = runtime.key_store.clone();
+
         let store = Self {
             index,
             reader,
@@ -435,6 +566,8 @@ impl Store<Open> {
             should_shutdown_on_drop: true,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
+            #[cfg(feature = "payload-encryption")]
+            key_store,
             state: Open(writer),
             _store_lock: store_lock,
         };
@@ -449,6 +582,9 @@ impl Store<Open> {
             highest_visible_index_hlc_by_lane(&store.index),
         );
 
+        // Opt-in tamper-evidence at open: with the store fully built, recompute
+        // the hash chain and fail closed if it is not intact (no-op under Crc).
+        run_open_chain_verification(&store)?;
         Ok(store)
     }
 }
@@ -506,6 +642,12 @@ impl Store<ReadOnly> {
             highest_visible_index_hlc_by_lane(&index),
         );
         let projection_registry = ProjectionRegistry::new(watermark_handle.clone());
+
+        // Read-only opens decrypt on the read path too: reuse the ONE keyset the
+        // runtime rehydrated at open (see `open_components`).
+        #[cfg(feature = "payload-encryption")]
+        let key_store = runtime.key_store.clone();
+
         let store = Self {
             index,
             reader,
@@ -518,12 +660,17 @@ impl Store<ReadOnly> {
             should_shutdown_on_drop: false,
             open_report: Some(open_report.clone()),
             cumulative_reserved_kind_fallbacks,
+            #[cfg(feature = "payload-encryption")]
+            key_store,
             state: ReadOnly,
             _store_lock: store_lock,
         };
 
         emit_open_report_observability(&store.config, &open_report);
 
+        // Opt-in tamper-evidence at open: with the store fully built, recompute
+        // the hash chain and fail closed if it is not intact (no-op under Crc).
+        run_open_chain_verification(&store)?;
         Ok(store)
     }
 }

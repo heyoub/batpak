@@ -47,8 +47,8 @@ impl EffectBackend for ValidatingEffectBackend {
         self.inner.emit_receipt(receipt_kind)
     }
 
-    fn use_host_control(&mut self) -> Result<(), EffectError> {
-        self.inner.use_host_control()
+    fn use_host_control(&mut self, control: &str) -> Result<(), EffectError> {
+        self.inner.use_host_control(control)
     }
 
     fn append_event(&mut self, kind: EventKind, payload: &[u8]) -> Result<(), EffectError> {

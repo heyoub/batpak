@@ -1,6 +1,7 @@
 use super::Cursor;
 use crate::store::delivery::observation::CheckpointId;
 use crate::store::platform;
+use crate::store::platform::fs::{RealFs, StoreFs};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -100,13 +101,38 @@ impl Cursor {
         id: &CheckpointId,
         ckpt: &CursorCheckpoint,
     ) -> std::io::Result<()> {
+        // Public surface: the production default backend. The crash-sensitive
+        // durable-cursor write path (`persist_current`) drives the
+        // [`Cursor::save_checkpoint_with_fs`] variant with the store's configured
+        // filesystem so a `SimFs` can tear the checkpoint persist; this thin
+        // wrapper keeps the standalone public API behavior-identical via
+        // [`RealFs`].
+        Self::save_checkpoint_with_fs(data_dir, id, ckpt, &RealFs)
+    }
+
+    /// [`Cursor::save_checkpoint`], routed through the supplied [`StoreFs`]
+    /// backend so the temp-file create and the atomic publish
+    /// ([`StoreFs::persist_temp_with_parent_sync`]) are fault-injectable under
+    /// `SimFs`. The durable-cursor write path calls this with the store's
+    /// configured fs; `RealFs` makes it byte-for-byte the production behavior.
+    ///
+    /// # Errors
+    /// Returns any I/O error from temp-file creation, write, fsync, or the
+    /// atomic publish. Encoding errors are surfaced as `io::Error` with kind
+    /// `Other`.
+    pub(crate) fn save_checkpoint_with_fs(
+        data_dir: &Path,
+        id: &CheckpointId,
+        ckpt: &CursorCheckpoint,
+        fs: &dyn StoreFs,
+    ) -> std::io::Result<()> {
         let dir = cursor_checkpoint_dir(data_dir);
-        platform::fs::create_dir_all(&dir)?;
+        fs.create_dir_all(&dir)?;
         let bytes =
             crate::encoding::to_bytes(ckpt).map_err(|e| std::io::Error::other(e.to_string()))?;
         let final_path = cursor_checkpoint_path(data_dir, id);
 
-        let mut tmp = platform::fs::named_temp_in(&dir)?;
+        let mut tmp = fs.named_temp_in(&dir)?;
         {
             use std::io::Write;
             tmp.write_all(&bytes)?;
@@ -118,7 +144,7 @@ impl Cursor {
         crate::store::platform::sync::sync_file_all_io(tmp.as_file())?;
         let admission = crate::store::platform::sync::admit_current_parent_dir_sync()
             .map_err(|error| std::io::Error::other(error.to_string()))?;
-        crate::store::platform::sync::persist_temp_with_parent_sync(tmp, &final_path, admission)?;
+        fs.persist_temp_with_parent_sync(tmp, &final_path, admission)?;
         Ok(())
     }
 }

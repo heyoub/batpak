@@ -170,29 +170,13 @@ impl Reader {
 
             match segment::frame_decode(&frame_buf) {
                 Ok((msgpack, frame_size)) => {
-                    match Self::decode_frame_payload_value(msgpack) {
-                        Ok(payload) => {
-                            if matches!(
-                                payload.event.header.event_kind,
-                                EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT
-                            ) {
-                                cursor += frame_size as u64;
-                                continue;
-                            }
-                            entries.push(ScannedEntry {
-                                event: payload.event,
-                                entity: payload.entity,
-                                scope: payload.scope,
-                                receipt_extensions: payload.receipt_extensions,
-                            });
-                        }
-                        Err(error) => {
-                            return Err(StoreError::CorruptSegment {
-                                segment_id,
-                                detail: format!(
-                                    "frame at offset {frame_offset} has unreadable payload: {error}"
-                                ),
-                            });
+                    match Self::scanned_entry_from_frame(msgpack, segment_id, frame_offset)? {
+                        Some(entry) => entries.push(entry),
+                        None => {
+                            // In-band batch marker (BEGIN/COMMIT): skip it, leaving
+                            // the buffer to drop rather than recycle (mirrors prior).
+                            cursor += frame_size as u64;
+                            continue;
                         }
                     }
                     cursor += frame_size as u64;
@@ -205,6 +189,44 @@ impl Reader {
             self.release_buffer(frame_buf);
         }
         Ok(entries)
+    }
+
+    /// Decode one already-CRC-validated frame payload into a [`ScannedEntry`],
+    /// or `Ok(None)` for an in-band batch marker (`SYSTEM_BATCH_BEGIN` /
+    /// `SYSTEM_BATCH_COMMIT`) that the full event scan skips.
+    ///
+    /// Carries the survivor's ORIGINAL `event.payload` bytes onto the entry so
+    /// Retention/Tombstone compaction can re-emit them verbatim (byte-stable
+    /// frame + `event_hash`) instead of re-serializing the decoded `Value`.
+    ///
+    /// Uses the compaction-tolerant decode: an ENCRYPTED payload is not
+    /// Value-decoded here (the reader has no key), so it arrives with a `Null`
+    /// placeholder in `event.payload` and its raw CIPHERTEXT in `payload_bytes`.
+    /// The compaction seam decrypts `payload_bytes` under the keyset for the
+    /// predicate's view and re-emits the ciphertext verbatim.
+    fn scanned_entry_from_frame(
+        msgpack: &[u8],
+        segment_id: u64,
+        frame_offset: u64,
+    ) -> Result<Option<ScannedEntry>, StoreError> {
+        let (payload, payload_bytes) = Self::decode_frame_payload_value_for_compaction(msgpack)
+            .map_err(|error| StoreError::CorruptSegment {
+                segment_id,
+                detail: format!("frame at offset {frame_offset} has unreadable payload: {error}"),
+            })?;
+        if matches!(
+            payload.event.header.event_kind,
+            EventKind::SYSTEM_BATCH_BEGIN | EventKind::SYSTEM_BATCH_COMMIT
+        ) {
+            return Ok(None);
+        }
+        Ok(Some(ScannedEntry {
+            event: payload.event,
+            entity: payload.entity,
+            scope: payload.scope,
+            receipt_extensions: payload.receipt_extensions,
+            payload_bytes,
+        }))
     }
 }
 
@@ -237,7 +259,12 @@ mod tests {
 
         let clock: std::sync::Arc<dyn crate::store::Clock> =
             std::sync::Arc::new(crate::store::SystemClock::new());
-        let reader = Reader::new(dir.path().to_path_buf(), 4, &clock);
+        let reader = Reader::new(
+            dir.path().to_path_buf(),
+            4,
+            &clock,
+            std::sync::Arc::new(crate::store::platform::fs::RealFs),
+        );
         let entries = reader
             .scan_segment(&path)
             .expect("EOF after the segment header is the clean frame terminator");

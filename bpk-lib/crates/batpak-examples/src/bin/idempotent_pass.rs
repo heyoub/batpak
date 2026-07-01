@@ -19,28 +19,28 @@ use batpak::prelude::*;
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 0xF, type_id = 0x20)]
-struct AccountCredited {
-    account: String,
-    amount_cents: u64,
+struct Recorded {
+    tag: String,
+    value: u64,
 }
 
 /// One idempotent pass: derive the operation key, append under it, return the
 /// receipt. Calling this twice with the same arguments is a no-op the second
 /// time — that is the point.
-fn credit_once(
+fn record_once(
     store: &Store,
     coord: &Coordinate,
     request_id: &str,
-    account: &str,
-    amount_cents: u64,
+    tag: &str,
+    value: u64,
 ) -> Result<AppendReceipt, Box<dyn std::error::Error>> {
-    // Operation identity, NOT a content hash: "this specific credit request".
-    let key = IdempotencyKey::for_operation("account.credit", &[account, request_id]);
+    // Operation identity, NOT a content hash: "this specific record request".
+    let key = IdempotencyKey::for_operation("op.record", &[tag, request_id]);
     let receipt = store.append_typed_with_options(
         coord,
-        &AccountCredited {
-            account: account.to_owned(),
-            amount_cents,
+        &Recorded {
+            tag: tag.to_owned(),
+            value,
         },
         AppendOptions::new().with_idempotency(key),
     )?;
@@ -53,19 +53,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
-    let coord = Coordinate::new("account:alice", "ledger:main")?;
+    let coord = Coordinate::new("entity:a", "scope:main")?;
 
-    // First pass: the credit is committed.
-    let first = credit_once(&store, &coord, "req-2026-0001", "account:alice", 5_000)?;
+    // First pass: the record is committed.
+    let first = record_once(&store, &coord, "req-2026-0001", "entity:a", 5_000)?;
     let _ = writeln!(
         out,
-        "first pass committed credit at sequence {} (event {})",
+        "first pass committed record at sequence {} (event {})",
         first.global_sequence, first.event_id
     );
 
     // Re-run the SAME pass (e.g. a retry after a crash). It is a no-op: the
     // same key resolves to the original receipt — no duplicate is written.
-    let replay = credit_once(&store, &coord, "req-2026-0001", "account:alice", 5_000)?;
+    let replay = record_once(&store, &coord, "req-2026-0001", "entity:a", 5_000)?;
     let _ = writeln!(
         out,
         "re-run was a no-op: sequence {} (same as first: {})",

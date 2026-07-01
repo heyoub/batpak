@@ -152,6 +152,7 @@
 - id: ART-SYNCBAT-TESTS
   kind: tests
   paths:
+    - crates/syncbat/tests/capability_authz.rs
     - crates/syncbat/tests/descriptor_validation.rs
     - crates/syncbat/tests/effect_enforcement.rs
     - crates/syncbat/tests/operation_macro.rs
@@ -784,9 +785,9 @@
   kind: examples
   paths:
     - crates/batpak-examples/src/bin/batch_append.rs
-    - crates/batpak-examples/src/bin/chat_room.rs
+    - crates/batpak-examples/src/bin/subscription_fanout.rs
     - crates/batpak-examples/src/bin/cursor_worker.rs
-    - crates/batpak-examples/src/bin/dungeon_typestate.rs
+    - crates/batpak-examples/src/bin/typestate_transitions.rs
     - crates/batpak-examples/src/bin/eight_jobs.rs
     - crates/batpak-examples/src/bin/event_sourced_counter.rs
     - crates/batpak-examples/src/bin/fork_clone.rs
@@ -859,3 +860,16 @@
   kind: tests
   paths:
     - crates/core/tests/recovery_oracle.rs
+- id: ART-CRYPTO-SHRED-SOURCE
+  kind: source
+  paths:
+    - crates/core/src/store/keyscope.rs
+    - crates/core/src/store/write/writer/encrypt.rs
+    - crates/core/src/store/write_api.rs
+    - crates/core/src/store/read_api.rs
+    - crates/core/src/store/lifecycle_compact.rs
+- id: ART-CRYPTO-SHRED-TESTS
+  kind: tests
+  paths:
+    - crates/core/tests/crypto_shred_payload.rs
+    - crates/core/tests/keyscope_persist.rs

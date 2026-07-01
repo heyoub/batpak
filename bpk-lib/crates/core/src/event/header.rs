@@ -45,6 +45,56 @@ pub struct EventHeader {
     /// lets pre-versioning frames decode as `0`.
     #[serde(default)]
     pub payload_version: u16,
+    /// Optional crypto-shred payload-encryption metadata (opt-in
+    /// `payload-encryption`).
+    ///
+    /// `Some` only for events whose ON-DISK payload is ciphertext; `None` — and,
+    /// via `skip_serializing_if`, entirely ABSENT from the frame msgpack — for
+    /// every plaintext event, so a plaintext frame is byte-identical to a build
+    /// compiled without this field (the encoder is `to_vec_named`, a msgpack MAP,
+    /// so an omitted trailing key leaves the map key set unchanged). Like
+    /// [`payload_version`](Self::payload_version) this field rides INSIDE the
+    /// frame msgpack but OUTSIDE the hashed/signed region: `content_hash` /
+    /// `event_hash` cover the (cipher)payload bytes only and the signing cover is
+    /// `event_id + sequence + coord + kind + prev_hash + content_hash +
+    /// extensions` (see `store/signing.rs::cover_bytes`), so stamping it moves
+    /// neither any content hash nor any signature. `#[serde(default)]` lets a
+    /// frame without the field decode as `None`.
+    #[cfg(feature = "payload-encryption")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_encryption: Option<PayloadEncryption>,
+}
+
+/// On-disk encryption metadata for a crypto-shred payload (opt-in
+/// `payload-encryption`).
+///
+/// Present on the [`EventHeader`] of every event whose stored payload is
+/// ciphertext, absent for plaintext events. It carries only what the read path
+/// needs to find the key and open the ciphertext — never any key material:
+///
+/// * `keyscope_id` — the raw bytes of the
+///   [`KeyScope`](crate::store::KeyScope) the payload key is filed under; the
+///   read path rebuilds the scope from these bytes to look the key up (or
+///   observe its absence, i.e. a shred). Derived from non-secret
+///   coordinates/kinds/ids.
+/// * `nonce` — the 192-bit XChaCha20-Poly1305 nonce the payload was sealed with;
+///   public by construction.
+///
+/// Both fields are non-secret, so deriving [`Debug`] here exposes nothing
+/// sensitive (key bytes live only in [`PayloadKey`](crate::store::PayloadKey),
+/// which never renders its material).
+#[cfg(feature = "payload-encryption")]
+#[cfg_attr(
+    all(docsrs, not(batpak_stable_docs)),
+    doc(cfg(feature = "payload-encryption"))
+)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayloadEncryption {
+    /// Raw [`KeyScope`](crate::store::KeyScope) bytes the payload key is filed
+    /// under. Non-secret (derived from coordinates/kinds/ids).
+    pub keyscope_id: Vec<u8>,
+    /// The 192-bit XChaCha20-Poly1305 nonce the payload was sealed with. Public.
+    pub nonce: [u8; 24],
 }
 
 /// Flag bit constants for EventHeader.flags
@@ -84,6 +134,8 @@ impl EventHeader {
             flags: 0,
             content_hash: [0u8; 32],
             payload_version: 0,
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: None,
         }
     }
 
@@ -113,6 +165,8 @@ impl EventHeader {
             flags: 0,
             content_hash: [0u8; 32],
             payload_version: 0,
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: None,
         }
     }
 

@@ -16,17 +16,22 @@ pub mod upcast;
 pub use decode::{DecodeSource, DecodeTyped, TypedDecodeError};
 pub use hash::HashChain;
 pub use header::EventHeader;
+#[cfg(feature = "payload-encryption")]
+pub use header::PayloadEncryption;
 pub use kind::{EventKind, EventKindError};
 pub use payload::{
-    revalidate_event_payload_registry, validate_event_payload_registry, EventPayload,
-    EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation,
+    revalidate_event_payload_registry, validate_event_payload_registry, verify_registry,
+    EventPayload, EventPayloadKindCollision, EventPayloadRegistryError, EventPayloadValidation,
 };
 pub use sourcing::{
     EventSourced, JsonValueInput, MultiDispatchError, MultiReactive, ProjectionEvent,
     ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput, Reactive,
     ReplayLane, StateExtent, StateExtentCost, TypedReactive,
 };
-pub use upcast::{Upcast, UpcastError};
+pub use upcast::{
+    revalidate_upcast_chain_registry, validate_upcast_chain_registry, IncompleteUpcastChain,
+    Upcast, UpcastChainRegistryError, UpcastError,
+};
 
 use crate::coordinate::Coordinate;
 use serde::{Deserialize, Serialize};

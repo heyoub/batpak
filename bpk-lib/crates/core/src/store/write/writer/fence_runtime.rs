@@ -334,6 +334,7 @@ impl WriterCore {
         crate::store::hidden_ranges::write_cancelled_ranges(
             &self.config.data_dir,
             &self.index.cancelled_visibility_ranges(),
+            self.config.fs().as_ref(),
         )
     }
 }

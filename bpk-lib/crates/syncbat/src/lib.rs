@@ -35,11 +35,40 @@
 //!
 //! let mut builder = Core::builder();
 //! builder.register(ECHO.clone(), EchoHandler).expect("register");
+//! // `build()` fails closed without a receipt sink so receipts are never
+//! // silently dropped; this example records none, so opt out explicitly.
+//! builder.without_receipts();
 //! let mut core = builder.build().expect("build");
 //!
 //! let result = core.invoke("echo", b"hi".to_vec()).expect("invoke");
 //! assert_eq!(result.output(), b"hi");
 //! ```
+//!
+//! # Runtime safety defaults
+//!
+//! The runtime fails closed where silence would lose evidence:
+//!
+//! - [`CoreBuilder::build`] refuses to build without a receipt sink, because a
+//!   sinkless core silently drops every runtime receipt. State the sinkless
+//!   intent explicitly with [`CoreBuilder::without_receipts`] (used above), or
+//!   configure one with [`CoreBuilder::receipt_sink`].
+//! - Receipt input/output hashing defaults to [`ReceiptHashPolicy::Blake3`], so
+//!   every recorded receipt binds to the exact bytes that produced it;
+//!   [`ReceiptHashPolicy::Deferred`] is the explicit opt-out for a layer that
+//!   hashes the bytes itself.
+//! - Capability tokens are enforced at checkout: a dispatched operation that
+//!   declares a required token the [`Core`] was not granted fails closed. Grant
+//!   tokens with [`CoreBuilder::grant_capability`] /
+//!   [`CoreBuilder::grant_capabilities`]. (Effect-axis tokens auto-declared by
+//!   the effect builders are ambient and need no explicit grant.)
+//! - Every effect axis is an enforced boundary: an operation reaches an effect
+//!   only through the matching `Ctx` capability handle, which records it into the
+//!   observed row in the same step, and `checkout` fails closed when the observed
+//!   row is not a subset of the declared row. `use_host_control` is a declared +
+//!   subset-checked target axis like the read/append/query axes (observed host
+//!   controls must be a subset of the declared targets), and `emit_receipt`
+//!   stamps its opaque payload as observed evidence into the invocation's single
+//!   banked receipt only after the backend mediates the emission.
 //!
 //! # Operation names
 //!

@@ -238,6 +238,7 @@ fn scan_segment_index_into_uses_sidx_fast_path_for_sealed_segments() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let segment_id = 7;
     let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
@@ -271,6 +272,7 @@ fn scan_segment_index_into_uses_sidx_fast_path_when_batch_state_is_idle() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let segment_id = 7;
     let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
@@ -305,6 +307,7 @@ fn scan_segment_index_into_rejects_sidx_fast_path_when_batch_is_pending() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let segment_id = 7;
     let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);
@@ -347,6 +350,7 @@ fn scan_segment_index_into_filters_batch_markers_from_sidx_fast_path() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let segment_id = 7;
     let mut begin = sample_entry(0, 64);
@@ -433,6 +437,7 @@ fn scan_segment_index_into_ignores_sidx_footer_for_active_segments() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let segment_id = 7;
     let path = footer_segment_path(&dir, segment_id, 64, &[sample_entry(0, 64)]);

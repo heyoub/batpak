@@ -52,6 +52,15 @@ pub enum BuildError {
         /// Validation message.
         message: String,
     },
+    /// The builder was finalized without a receipt sink and without an explicit
+    /// receipts opt-out.
+    ///
+    /// A sinkless core silently drops every runtime receipt, so the build fails
+    /// closed. Wire a sink with
+    /// [`crate::builder::CoreBuilder::receipt_sink`], or state on purpose that
+    /// this core records no receipts with
+    /// [`crate::builder::CoreBuilder::without_receipts`].
+    MissingReceiptSink,
 }
 
 impl BuildError {
@@ -131,6 +140,11 @@ impl fmt::Display for BuildError {
             Self::InvalidHandler { name, message } => {
                 write!(f, "handler `{name}` is invalid: {message}")
             }
+            Self::MissingReceiptSink => f.write_str(
+                "core has no receipt sink: a sinkless core silently drops every runtime \
+                 receipt. Wire one with CoreBuilder::receipt_sink, or opt out explicitly \
+                 with CoreBuilder::without_receipts",
+            ),
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "batpak"
-version = "0.8.3"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -38,6 +38,22 @@ dangerous-test-hooks = ["dep:fastrand", "batpak-testkit/dangerous-test-hooks"]
 # OOM-handling paths deterministically. Neither alters production behavior.
 alloc-count = []
 fault-alloc = []
+# Opt-in automation for the register-but-never-open collision check (item #133).
+# When enabled, ONE process-wide `#[ctor::ctor]` constructor runs
+# `verify_registry()` before `main` and aborts on a linked `EventKind`
+# collision, so a release binary that registers colliding `EventPayload` types
+# and never opens a `Store` still fails fast. NOT a default feature: the
+# always-on, portable path is the explicit `verify_registry()` call, which needs
+# no constructor and no extra dependency. `dep:ctor` keeps `ctor` out of a
+# default build entirely.
+startup-registry-check = ["dep:ctor"]
+# Opt-in crypto-shred payload encryption (KeyScope / KeyStore foundation).
+# Pulls a pure-Rust XChaCha20-Poly1305 AEAD (`chacha20poly1305`, no AES-NI/C
+# assembly) and an OS CSPRNG (`getrandom`) for key/nonce material. NOT a default
+# feature: a default build pulls neither dependency and behaves identically. Key
+# material zeroizes on drop (via `zeroize`, already a mandatory dep) and never
+# appears in any Debug/Display output.
+payload-encryption = ["dep:chacha20poly1305", "dep:getrandom"]
 # Gauntlet Phase 0B sentinel RED fixtures are gated behind the
 # `--cfg gauntlet_red_fixture` compile flag, NOT a Cargo feature. A red fixture
 # is designed to FAIL (it asserts the illegal/old behavior), so it must never be
@@ -51,8 +67,8 @@ fault-alloc = []
 uuid = { version = ">=1.20, <1.24", default-features = false, features = ["std", "v7"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
-batpak-macros-support = { path = "../macros-support", version = "0.8.3" }
-batpak-macros = { path = "../macros", version = "0.8.3" }
+batpak-macros-support = { path = "../macros-support", version = "0.9.0" }
+batpak-macros = { path = "../macros", version = "0.9.0" }
 blake3 = "1"
 flume = "0.12"
 crc32fast = "1"
@@ -76,10 +92,27 @@ tempfile = ">=3.24, <3.25"
 libc = "0.2"
 ed25519-compact = { version = "2.2.0", default-features = false, features = ["std"] }
 zeroize = "1"
+# Optional: only pulled in by the non-default `startup-registry-check` feature,
+# which installs a before-`main` constructor that runs the payload-registry
+# collision check (item #133). MIT OR Apache-2.0, clears deny.toml.
+ctor = { version = "0.2", optional = true }
+# Optional: only pulled in by the non-default `payload-encryption` feature.
+# Pure-Rust XChaCha20-Poly1305 AEAD (24-byte nonce, 256-bit key); no AES-NI or C
+# assembly. default-features = false drops `std`/`getrandom`; `alloc` re-enables
+# the Vec-returning `Aead::{encrypt,decrypt}` surface. MIT OR Apache-2.0. Its
+# `subtle` transitive dep is already present in the workspace graph, so this adds
+# no new license family.
+chacha20poly1305 = { version = "0.10", optional = true, default-features = false, features = [
+    "alloc",
+] }
+# Optional: only pulled in by `payload-encryption`. OS CSPRNG for symmetric key
+# material; version 0.3 reuses the exact `getrandom` already in the production
+# graph (via tempfile), so the feature adds no new crate version. MIT OR Apache-2.0.
+getrandom = { version = "0.3", optional = true }
 # NO TOKIO. Invariant 1.
 
 [dev-dependencies]
-batpak-bench-support = { path = "../bench-support", version = "0.8.3" }
+batpak-bench-support = { path = "../bench-support", version = "0.9.0" }
 batpak-testkit = { path = "../testkit" }
 proptest = "1"
 arbitrary = { version = "1", features = ["derive"] }

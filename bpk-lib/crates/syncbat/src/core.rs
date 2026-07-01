@@ -1,12 +1,12 @@
 //! Synchronous runtime composition root.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::admission::{AdmissionDecision, AdmissionGuard};
 use crate::effect::{
-    EventAppendHandle, EventReadHandle, HostControlHandle, OperationEffectRow,
-    ProjectionReadHandle, ReceiptEmitHandle,
+    is_reserved_effect_capability, EventAppendHandle, EventReadHandle, HostControlHandle,
+    OperationEffectRow, ProjectionReadHandle, ReceiptEmitHandle,
 };
 use crate::effect_backend::EffectBackend;
 use crate::error::{ReceiptSinkHandlerCause, RuntimeError};
@@ -39,6 +39,10 @@ pub struct Core {
     /// Runtime-owned capability backend that performs declared effects (event
     /// appends) so observation through `Ctx` is authoritative.
     pub(crate) effect_backend: Option<BoxedEffectBackend>,
+    /// Capability tokens this Core is granted. Checkout fails closed when a
+    /// dispatched operation declares a required capability token (other than the
+    /// ambient effect-axis tokens) that is not in this set.
+    pub(crate) granted_capabilities: BTreeSet<String>,
 }
 
 impl Core {
@@ -124,6 +128,17 @@ impl Core {
         let status_sink = self.status_sink.clone();
         let receipt_hash_policy = self.receipt_hash_policy.clone();
 
+        // Capability authz: an operation may declare required capability tokens
+        // the Core must have been granted. This is a declared-row gate, so it
+        // fails closed BEFORE the handler runs (and before any admission guard),
+        // emitting the same denial outcome shape the observed-effect check uses.
+        self.enforce_granted_capabilities(
+            &descriptor,
+            &input,
+            status_sink.as_deref(),
+            &receipt_hash_policy,
+        )?;
+
         // One borrowed context spans the optional guard and the handler, so a
         // guard may stamp receipt metadata (e.g. correlation identity) that
         // survives into the handler's eventual receipt.
@@ -202,6 +217,67 @@ impl Core {
             status_sink: &status_sink,
             receipt_hash_policy: &receipt_hash_policy,
         })
+    }
+
+    /// Fail closed when the descriptor declares a required capability token the
+    /// Core was not granted.
+    ///
+    /// Effect-axis tokens auto-declared by the effect builders are ambient
+    /// (mediated by the observed-effect subset check) and skipped here; only the
+    /// remaining declared capability tokens are gated against the granted set. On
+    /// a missing capability this records a `Denied` status and runtime receipt
+    /// and returns [`RuntimeError::denied`], mirroring the observed-effect denial.
+    fn enforce_granted_capabilities(
+        &self,
+        descriptor: &operation::OperationDescriptor,
+        input: &[u8],
+        status_sink: Option<&(dyn OperationStatusSink + Send + Sync)>,
+        receipt_hash_policy: &ReceiptHashPolicy,
+    ) -> Result<(), RuntimeError> {
+        let missing = descriptor
+            .effect_row()
+            .requires_capabilities()
+            .iter()
+            .map(String::as_str)
+            .find(|token| {
+                !is_reserved_effect_capability(token) && !self.granted_capabilities.contains(*token)
+            });
+        let Some(missing) = missing else {
+            return Ok(());
+        };
+
+        let name = descriptor.name();
+        let code = "capability.denied";
+        let message = format!("operation requires ungranted capability {missing:?}");
+        tracing::warn!(
+            operation = %name,
+            code = %code,
+            capability = %missing,
+            outcome = "capability_denied",
+            "checkout denied by ungranted capability",
+        );
+        let outcome = ReceiptOutcome::denied(code, message.clone());
+        record_runtime_status(RuntimeStatusRecord {
+            status_sink,
+            receipt_hash_policy,
+            descriptor,
+            lifecycle: OperationStatusLifecycle::Denied,
+            input,
+            output: None,
+            code: Some(code.to_owned()),
+            message: Some(message.clone()),
+            handler_cause: None,
+        })?;
+        self.record_runtime_receipt(
+            descriptor,
+            input,
+            None,
+            outcome,
+            None,
+            ReceiptMetadata::default(),
+        )?;
+        tracing::Span::current().record("outcome", "capability_denied");
+        Err(RuntimeError::denied(name, code, message))
     }
 
     fn finish_handler_phase(
@@ -565,10 +641,17 @@ impl<'a> Ctx<'a> {
     }
 
     /// Borrow a receipt-emission capability handle for this invocation.
+    ///
+    /// The three arguments are DIRECT disjoint borrows of three distinct `Ctx`
+    /// fields (`observed_effects`, `effect_backend`, `metadata`); borrowing them
+    /// as separate field paths in one expression lets the borrow checker split
+    /// the borrow, whereas routing any of them through a `&mut self` accessor
+    /// would take a whole-`self` borrow and conflict.
     pub fn receipt_emit_handle(&mut self) -> ReceiptEmitHandle<'_> {
         ReceiptEmitHandle::new(
             &mut self.observed_effects,
             self.effect_backend.as_deref_mut(),
+            &mut self.metadata,
         )
     }
 

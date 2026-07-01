@@ -37,20 +37,19 @@
 //!
 //! #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 //! #[batpak(category = 0xF, type_id = 1)]
-//! struct PlayerMoved {
-//!     x: i32,
-//!     y: i32,
+//! struct ThingHappened {
+//!     value: i64,
 //! }
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
 //! let store = Store::open(StoreConfig::new(dir.path()))?;
-//! let coord = Coordinate::new("player:alice", "room:dungeon")?;
+//! let coord = Coordinate::new("entity:a", "scope:1")?;
 //!
-//! let receipt = store.append_typed(&coord, &PlayerMoved { x: 10, y: 20 })?;
+//! let receipt = store.append_typed(&coord, &ThingHappened { value: 42 })?;
 //! let stored = store.get(receipt.event_id)?;
 //!
-//! assert_eq!(stored.coordinate.entity(), "player:alice");
+//! assert_eq!(stored.coordinate.entity(), "entity:a");
 //! assert_eq!(stored.event.header.event_id, receipt.event_id);
 //! # Ok(())
 //! # }
@@ -64,6 +63,130 @@
 //! 5. [`artifact`], [`registry`], [`transition`], [`reservation`], and
 //!    [`schema`]: Advanced substrate batteries for envelopes, ledgers,
 //!    transition evidence, reservation mechanics, and drift reports.
+//!
+//! **Fail-closed defaults (verifiability).** A store refuses to open on an
+//! ambiguous or undecodable payload registry:
+//! [`EventPayloadValidation`](crate::event::EventPayloadValidation) defaults to
+//! `FailFast`, so a duplicate-kind collision or an incomplete upcast chain is
+//! rejected at [`Store::open`](crate::store::Store::open) (opt out explicitly
+//! with `Warn`/`Silent`). A binary that registers `EventPayload` types but may
+//! never open a store should call
+//! [`verify_registry`](crate::event::verify_registry) once at startup (or enable
+//! the non-default `startup-registry-check` feature for automatic enforcement),
+//! since the derive's own collision test is `#[cfg(test)]`-only and a release
+//! binary would otherwise see no check. Receipt signing is governed by
+//! [`SigningPolicy`](crate::store::SigningPolicy): the default `Optional`
+//! permits a keyless store, while `Required` refuses to open without a signing
+//! key so an unsigned receipt is never accepted. A configured signer fails the
+//! append closed rather than silently emitting an unsigned receipt unless
+//! [`StoreConfig::with_signing_downgrade_allowed`](crate::store::StoreConfig::with_signing_downgrade_allowed)
+//! opts in.
+//!
+//! **On-demand integrity.** [`Store::verify_chain`](crate::store::Store::verify_chain)
+//! recomputes the full blake3 hash chain over every committed event and returns
+//! a [`ChainVerificationReport`](crate::store::ChainVerificationReport); opt into
+//! [`ChainVerification::Recompute`](crate::store::ChainVerification::Recompute)
+//! to run that pass automatically at open and fail closed on tamper. For
+//! ancestry, [`Store::walk_ancestors_outcome`](crate::store::Store::walk_ancestors_outcome)
+//! returns an [`AncestorWalk`](crate::store::AncestorWalk) whose
+//! [`AncestryBoundary`](crate::store::AncestryBoundary) makes a truncated lineage
+//! (for example, a retention-dropped mid-chain parent) observable instead of
+//! indistinguishable from a complete walk to genesis.
+//!
+//! **Payload encryption & crypto-shred (opt-in).** Off by default: a default
+//! build writes plaintext payloads and pulls no crypto dependency. Enabling the
+//! non-default `payload-encryption` cargo feature and calling
+//! [`StoreConfig::with_payload_encryption`](crate::store::StoreConfig::with_payload_encryption)
+//! seals every payload at rest under a per-scope 256-bit XChaCha20-Poly1305 key
+//! (a pure-Rust AEAD; key and nonce bytes come from the OS CSPRNG, and key
+//! material zeroizes on drop and never appears in `Debug`/`Display` output).
+//! [`KeyScopeGranularity`](crate::store::KeyScopeGranularity) chooses which
+//! events share a key — and therefore what a single erasure destroys:
+//! `PerEntity` (default, one key per entity, across all kinds), `PerCategory`
+//! (one key per event-kind category), `PerTypeId` (one key per full kind), or
+//! `PerEvent` (one key per individual event, the finest).
+//! [`Store::shred_scope`](crate::store::Store::shred_scope) then crypto-shreds a
+//! scope: it destroys that scope's KEY and flushes the keyset durable, making
+//! every payload sealed under it permanently unrecoverable. A later read of a
+//! shredded payload reports
+//! [`StoreError::PayloadShredded`](crate::store::StoreError::PayloadShredded) (or
+//! a [`ReadDisposition::Shredded`](crate::store::ReadDisposition) value via
+//! [`Store::get_shreddable`](crate::store::Store::get_shreddable)) — never
+//! corruption and never the raw ciphertext.
+//!
+//! Shredding destroys only the key, never any event frame: the ciphertext and
+//! its Blake3 chain identity survive on disk, so
+//! [`verify_chain`](crate::store::Store::verify_chain), receipts, and signatures
+//! stay intact — identity is taken over the STORED CIPHERTEXT, not the plaintext.
+//! Erasure is EXACTLY this explicit op; tombstone/retention compaction never
+//! auto-destroys a key, so a coarse scope (the default `PerEntity`) is erased
+//! only when the caller names that entity by selector.
+//!
+//! *Threat model — keys at rest.* The keyset lives inside the store's own data
+//! directory, next to the ciphertext it protects. What crypto-shred DOES buy:
+//! once a scope's key is destroyed AND that destruction is flushed, the scope's
+//! payloads are unrecoverable even to an operator with full disk access —
+//! deletion becomes cryptographically effective rather than a best-effort
+//! overwrite. What it does NOT buy: it does not protect a disk image captured
+//! *before* the shred (the key was still present then), and a stolen live data
+//! directory yields both key and ciphertext. Holding the keyset OUT of the data
+//! directory — a separate volume, an OS keyring, or an external KMS — is a
+//! deployment concern, outside the core mechanism. batpak only ever observes
+//! "the key for scope X was destroyed"; the layer above maps that erasure to its
+//! own policy.
+//!
+//! ```
+//! # #[cfg(feature = "payload-encryption")] {
+//! use batpak::prelude::*;
+//! use batpak::store::{KeyScopeGranularity, ShredScope};
+//!
+//! #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
+//! #[batpak(category = 0xF, type_id = 1)]
+//! struct ThingHappened {
+//!     value: i64,
+//! }
+//!
+//! # fn run() -> Result<(), Box<dyn std::error::Error>> {
+//! let dir = tempfile::tempdir()?;
+//! // PerEntity (the default): one key covers every payload of an entity, so a
+//! // single shred erases all of that entity's payloads at once.
+//! let store = Store::open(
+//!     StoreConfig::new(dir.path())
+//!         .with_payload_encryption(KeyScopeGranularity::PerEntity),
+//! )?;
+//! let coord = Coordinate::new("entity:a", "scope:1")?;
+//! let receipt = store.append_typed(&coord, &ThingHappened { value: 42 })?;
+//!
+//! // While the key is live the payload reads back transparently.
+//! assert_eq!(
+//!     store.get(receipt.event_id)?.event.header.event_id,
+//!     receipt.event_id,
+//! );
+//!
+//! // Destroy this entity's key: its plaintext is now permanently gone...
+//! store.shred_scope(ShredScope::Entity(&coord))?;
+//! assert!(matches!(
+//!     store.get(receipt.event_id),
+//!     Err(StoreError::PayloadShredded { .. })
+//! ));
+//!
+//! // ...yet identity survives: the chain still verifies over the ciphertext.
+//! assert!(store.verify_chain()?.is_intact());
+//! # Ok(())
+//! # }
+//! # run().unwrap();
+//! # }
+//! ```
+//!
+//! **Cargo features (all non-default).** A default build enables none of these
+//! and pulls none of their dependencies. `payload-encryption` adds the
+//! crypto-shred surface above (`with_payload_encryption` / `shred_scope`,
+//! `XChaCha20-Poly1305` + an OS CSPRNG). `startup-registry-check` runs
+//! [`verify_registry`](crate::event::verify_registry) automatically before
+//! `main` via one process-wide constructor, so a release binary that registers
+//! `EventPayload` types but never opens a store still aborts on a kind collision;
+//! the always-on, portable path is the explicit `verify_registry()` call
+//! described above, which needs no constructor.
 
 // Width invariant: batpak stores ids/offsets/lengths compactly as `u32`/`u64` and
 // converts to `usize` only transiently for slicing. `u32 -> usize` is lossless only

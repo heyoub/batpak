@@ -53,6 +53,48 @@ fn cache_now_us_preserves_zero_custom_clock_value() {
 }
 
 #[test]
+fn signing_policy_required_refuses_keyless_store() {
+    use crate::store::signing::SigningKey;
+
+    // RED: SigningPolicy::Required with no signing key must FAIL validation — a
+    // store that cannot sign must never silently accept unsigned receipts as valid.
+    assert!(
+        StoreConfig::new("target/test-signing-required-keyless")
+            .with_signing_policy(SigningPolicy::Required)
+            .validated()
+            .is_err(),
+        "Required + no key must fail closed at validation"
+    );
+
+    // GREEN: the default (Optional) policy permits a keyless store.
+    assert!(
+        StoreConfig::new("target/test-signing-optional-keyless")
+            .validated()
+            .is_ok(),
+        "default Optional must permit a keyless store"
+    );
+
+    // GREEN: explicitly choosing Optional also permits a keyless store.
+    assert!(
+        StoreConfig::new("target/test-signing-optional-explicit")
+            .with_signing_policy(SigningPolicy::Optional)
+            .validated()
+            .is_ok(),
+        "explicit Optional must permit a keyless store"
+    );
+
+    // GREEN: Required validates once a signing key is configured.
+    assert!(
+        StoreConfig::new("target/test-signing-required-keyed")
+            .with_signing_policy(SigningPolicy::Required)
+            .with_signing_key(SigningKey::from_bytes([7u8; 32]))
+            .validated()
+            .is_ok(),
+        "Required + a signing key must validate"
+    );
+}
+
+#[test]
 fn validated_accepts_documented_inclusive_upper_bounds() {
     let mut config = StoreConfig::new("target/test-config-upper-bounds");
     config.writer.pressure_retry_threshold_pct = 100;
@@ -323,6 +365,32 @@ fn with_fs_installs_custom_filesystem_backend() {
         }
         fn metadata(&self, path: &Path) -> std::io::Result<std::fs::Metadata> {
             self.inner.metadata(path)
+        }
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            self.inner.rename(from, to)
+        }
+        fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+            self.inner.remove_file(path)
+        }
+        fn named_temp_in(&self, dir: &Path) -> std::io::Result<tempfile::NamedTempFile> {
+            self.inner.named_temp_in(dir)
+        }
+        fn persist_temp_with_parent_sync(
+            &self,
+            named_temp: tempfile::NamedTempFile,
+            final_path: &Path,
+            admission: crate::store::platform::sync::ParentDirSyncAdmission,
+        ) -> std::io::Result<()> {
+            self.inner
+                .persist_temp_with_parent_sync(named_temp, final_path, admission)
+        }
+        fn read_exact_at(
+            &self,
+            file: &mut std::fs::File,
+            offset: u64,
+            buf: &mut [u8],
+        ) -> Result<(), crate::store::platform::fs::PositionedReadError> {
+            self.inner.read_exact_at(file, offset, buf)
         }
     }
 

@@ -33,7 +33,7 @@
 //! sidecar + window-priority hybrid that makes a within-window keyed retry an
 //! unconditional no-op regardless of compaction, cold-start, or load.
 
-use crate::store::platform::fs::{read as fs_read, write_file_atomically};
+use crate::store::platform::fs::{read as fs_read, write_file_atomically_with_fs, StoreFs};
 use crate::store::{EncodedBytes, ExtensionKey, StoreError};
 use dashmap::DashMap;
 use std::collections::BTreeMap;
@@ -499,21 +499,27 @@ impl IdempotencyStore {
     /// paths (close, compaction tail). Format:
     /// `magic(6) | version(2 le) | crc(4 le) | body(msgpack Vec<IdempEntry>)`.
     /// CRC covers the body only (same layout as the checkpoint footer).
-    pub(crate) fn flush(&self, data_dir: &Path) -> Result<(), StoreError> {
+    pub(crate) fn flush(&self, data_dir: &Path, fs: &dyn StoreFs) -> Result<(), StoreError> {
         let entries = self.snapshot();
         let body = crate::encoding::to_bytes(&entries)
             .map_err(|error| StoreError::ser_msg(&format!("encode idemp store: {error}")))?;
         let crc = crc32fast::hash(&body);
         let final_path = data_dir.join(IDEMP_FILENAME);
-        write_file_atomically(data_dir, &final_path, "idempotency-store", |file| {
-            use std::io::Write;
-            file.write_all(IDEMP_MAGIC).map_err(StoreError::Io)?;
-            file.write_all(&IDEMP_VERSION.to_le_bytes())
-                .map_err(StoreError::Io)?;
-            file.write_all(&crc.to_le_bytes()).map_err(StoreError::Io)?;
-            file.write_all(&body).map_err(StoreError::Io)?;
-            Ok(())
-        })?;
+        write_file_atomically_with_fs(
+            data_dir,
+            &final_path,
+            "idempotency-store",
+            |file| {
+                use std::io::Write;
+                file.write_all(IDEMP_MAGIC).map_err(StoreError::Io)?;
+                file.write_all(&IDEMP_VERSION.to_le_bytes())
+                    .map_err(StoreError::Io)?;
+                file.write_all(&crc.to_le_bytes()).map_err(StoreError::Io)?;
+                file.write_all(&body).map_err(StoreError::Io)?;
+                Ok(())
+            },
+            fs,
+        )?;
         tracing::debug!(
             target: "batpak::idemp",
             count = entries.len(),
@@ -842,7 +848,7 @@ mod tests {
         store.record(entry(7, 7));
         store.record(entry(8, 8));
         store
-            .flush(dir.path())
+            .flush(dir.path(), &crate::store::platform::fs::RealFs)
             .expect("flush idempotency store to disk");
         let loaded = read_idemp_file(dir.path()).expect("read back the flushed idempotency file");
         assert!(matches!(&loaded, IdempLoad::Loaded(e) if e.len() == 2));

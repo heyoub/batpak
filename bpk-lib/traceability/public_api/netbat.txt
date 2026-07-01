@@ -1,6 +1,12 @@
 pub mod netbat
 pub use netbat::OperationName
 pub use netbat::OperationNameError
+pub enum netbat::ConnectionLimit
+pub netbat::ConnectionLimit::Concurrent(core::num::nonzero::NonZeroUsize)
+pub netbat::ConnectionLimit::Lifetime(core::num::nonzero::NonZeroUsize)
+pub netbat::ConnectionLimit::Unlimited
+impl core::default::Default for netbat::ConnectionLimit
+pub fn netbat::ConnectionLimit::default() -> Self
 pub enum netbat::MaybeCursor
 pub netbat::MaybeCursor::Absent
 pub netbat::MaybeCursor::Present(netbat::CursorBytes)
@@ -67,6 +73,11 @@ pub netbat::StreamFrame::SubErr(netbat::SubErrFrame)
 pub netbat::StreamFrame::SubEvent(netbat::SubEventFrame)
 pub netbat::StreamFrame::SubWatermark(netbat::SubWatermarkFrame)
 pub netbat::StreamFrame::Subscribe(netbat::SubscribeFrame)
+pub enum netbat::SubscriptionDispatch
+pub netbat::SubscriptionDispatch::Concurrent
+pub netbat::SubscriptionDispatch::Sequential
+#[non_exhaustive] pub enum netbat::TransportSecurity
+pub netbat::TransportSecurity::Plaintext
 pub struct netbat::ClientWindow(_)
 impl netbat::ClientWindow
 pub fn netbat::ClientWindow::get(self) -> u32
@@ -214,17 +225,18 @@ pub netbat::TcpServeStats::malformed_requests: usize
 pub netbat::TcpServeStats::runtime_failures: usize
 pub netbat::TcpServeStats::served_requests: usize
 pub netbat::TcpServeStats::shutdown_requested: bool
+pub netbat::TcpServeStats::worker_panics: usize
 #[non_exhaustive] pub struct netbat::TcpServerConfig
+pub netbat::TcpServerConfig::connection_limit: netbat::ConnectionLimit
 pub netbat::TcpServerConfig::idle_sleep: core::time::Duration
 pub netbat::TcpServerConfig::limits: netbat::Limits
-pub netbat::TcpServerConfig::max_connections: usize
 pub netbat::TcpServerConfig::max_requests_per_connection: usize
 pub netbat::TcpServerConfig::timeouts: netbat::IoTimeouts
 impl netbat::TcpServerConfig
 pub fn netbat::TcpServerConfig::new() -> Self
+pub const fn netbat::TcpServerConfig::with_connection_limit(self, value: netbat::ConnectionLimit) -> Self
 pub const fn netbat::TcpServerConfig::with_idle_sleep(self, value: core::time::Duration) -> Self
 pub const fn netbat::TcpServerConfig::with_limits(self, limits: netbat::Limits) -> Self
-pub const fn netbat::TcpServerConfig::with_max_connections(self, value: usize) -> Self
 pub const fn netbat::TcpServerConfig::with_max_requests_per_connection(self, value: usize) -> Self
 pub const fn netbat::TcpServerConfig::with_timeouts(self, timeouts: netbat::IoTimeouts) -> Self
 impl core::default::Default for netbat::TcpServerConfig
@@ -237,10 +249,12 @@ pub netbat::TcpSubscriptionServeStats::malformed_pre_subscribe: usize
 pub netbat::TcpSubscriptionServeStats::runtime_failures: usize
 pub netbat::TcpSubscriptionServeStats::served_subscriptions: usize
 pub netbat::TcpSubscriptionServeStats::shutdown_requested: bool
+pub netbat::TcpSubscriptionServeStats::worker_panics: usize
 #[non_exhaustive] pub struct netbat::TcpSubscriptionServerConfig
+pub netbat::TcpSubscriptionServerConfig::connection_limit: netbat::ConnectionLimit
+pub netbat::TcpSubscriptionServerConfig::dispatch: netbat::SubscriptionDispatch
 pub netbat::TcpSubscriptionServerConfig::idle_sleep: core::time::Duration
 pub netbat::TcpSubscriptionServerConfig::limits: netbat::Limits
-pub netbat::TcpSubscriptionServerConfig::max_connections: usize
 pub netbat::TcpSubscriptionServerConfig::timeouts: netbat::IoTimeouts
 impl core::default::Default for netbat::TcpSubscriptionServerConfig
 pub fn netbat::TcpSubscriptionServerConfig::default() -> Self
@@ -283,4 +297,6 @@ pub fn netbat::introspect_modules(modules: &[netbat::ServerModule]) -> netbat::I
 pub fn netbat::serve_stream<S>(stream: &mut S, core: &mut syncbat::core::Core, limits: &netbat::Limits) -> core::result::Result<netbat::ResponseFrame, netbat::NetbatError> where S: std::io::Read + std::io::Write
 pub fn netbat::serve_subscription_stream(reader: impl std::io::Read + core::marker::Send + 'static, writer: impl std::io::Write + core::marker::Send + 'static, runtime: &impl syncbat::subscription_runtime::session::SubscriptionSessionFactory + ?core::marker::Sized, limits: &netbat::Limits) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError>
 pub fn netbat::serve_tcp_listener<F>(listener: std::net::TcpListener, core_factory: F, config: &netbat::TcpServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError> where F: syncbat::core::CoreFactory + core::marker::Send + 'static
-pub fn netbat::serve_tcp_subscription_listener(listener: std::net::TcpListener, runtime: &impl syncbat::subscription_runtime::session::SubscriptionSessionFactory + ?core::marker::Sized, config: &netbat::TcpSubscriptionServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError>
+pub fn netbat::serve_tcp_listener_secured<F>(listener: std::net::TcpListener, core_factory: F, config: &netbat::TcpServerConfig, security: &netbat::TransportSecurity, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpServeStats, netbat::NetbatError> where F: syncbat::core::CoreFactory + core::marker::Send + 'static
+pub fn netbat::serve_tcp_subscription_listener<R>(listener: std::net::TcpListener, runtime: R, config: &netbat::TcpSubscriptionServerConfig, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError> where R: syncbat::subscription_runtime::session::SubscriptionSessionFactory + core::marker::Send + core::marker::Sync + 'static
+pub fn netbat::serve_tcp_subscription_listener_secured<R>(listener: std::net::TcpListener, runtime: R, config: &netbat::TcpSubscriptionServerConfig, security: &netbat::TransportSecurity, shutdown: &netbat::ShutdownHandle) -> core::result::Result<netbat::TcpSubscriptionServeStats, netbat::NetbatError> where R: syncbat::subscription_runtime::session::SubscriptionSessionFactory + core::marker::Send + core::marker::Sync + 'static

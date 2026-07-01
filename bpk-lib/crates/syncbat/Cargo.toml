@@ -1,6 +1,6 @@
 [package]
 name = "syncbat"
-version = "0.8.3"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -14,13 +14,18 @@ categories = ["database-implementations"]
 
 [features]
 default = []
+# Opt-in crypto-shred payload encryption, forwarded to batpak. Enables key-aware
+# subscription delivery: encrypted events cross the core boundary decrypted, and a
+# crypto-shredded event is skipped loudly rather than shipped as ciphertext. NOT a
+# default feature — a default build behaves identically (plaintext delivery).
+payload-encryption = ["batpak/payload-encryption"]
 
 [dependencies]
-batpak = { path = "../core", version = "0.8.3", default-features = false }
+batpak = { path = "../core", version = "0.9.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 # The `#[operation]` attribute macro lives in the one family proc-macro crate
 # (`batpak-macros`); re-exported below as `syncbat::operation`.
-batpak-macros = { path = "../macros", version = "0.8.3" }
+batpak-macros = { path = "../macros", version = "0.9.0" }
 blake3 = "1"
 flume = "0.12"
 # `tracing` provides structured spans + events around dispatch.
@@ -30,6 +35,9 @@ tracing = "0.1"
 
 [dev-dependencies]
 batpak-testkit = { path = "../testkit" }
+# Used by integration tests to recompute the expected default-policy digest and
+# pin that the safe default is specifically Blake3 over the raw receipt bytes.
+blake3 = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
 tempfile = ">=3.24, <3.25"
 trybuild = "1"

@@ -60,12 +60,14 @@ pub trait EffectBackend {
         ))
     }
 
-    /// Mediate one declared host-control use for this invocation.
+    /// Mediate one declared host-control use, identified by `control`, for this
+    /// invocation.
     ///
     /// # Errors
     /// Returns [`EffectError`] when this backend does not support host controls
     /// or rejects the use.
-    fn use_host_control(&mut self) -> Result<(), EffectError> {
+    fn use_host_control(&mut self, control: &str) -> Result<(), EffectError> {
+        let _ = control;
         Err(EffectError::new(
             "host controls are not supported by this effect backend",
         ))

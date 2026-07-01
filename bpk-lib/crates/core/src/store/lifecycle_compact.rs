@@ -2,15 +2,13 @@
 
 use super::sync;
 use crate::coordinate::Coordinate;
-use crate::event::{EventKind, StoredEvent};
+use crate::event::{Event, EventKind, StoredEvent};
 use crate::store::file_classification::StoreFileKind;
 use crate::store::lifecycle_close::write_cold_start_artifacts_on_close;
-use crate::store::platform::fs as platform_fs;
+use crate::store::platform::fs::StoreFs;
 use crate::store::segment::scan as reader;
 use crate::store::segment::{self, Active, FramePayload};
 use crate::store::{CompactionConfig, CompactionStrategy, Open, Store, StoreError};
-
-use super::lifecycle_fs::remove_file_if_present;
 
 pub(crate) fn compact(
     store: &Store<Open>,
@@ -51,6 +49,7 @@ pub(crate) fn compact(
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory
+            | StoreFileKind::Keyset
             | StoreFileKind::Other => continue,
         };
         all_segments.push((seg_id, path));
@@ -86,6 +85,7 @@ pub(crate) fn compact(
         &store.config.data_dir,
         merged_id,
         &source_segment_ids,
+        fs.as_ref(),
     )?;
 
     let fresh_index = match materialize_compacted_segment(
@@ -110,6 +110,7 @@ pub(crate) fn compact(
                 compact_source_path: compact_source_path.as_deref(),
                 error: &error,
                 context: "compaction pre-swap phase failed",
+                fs: fs.as_ref(),
             });
         }
     };
@@ -122,14 +123,18 @@ pub(crate) fn compact(
         if let Ok(meta) = fs.metadata(path) {
             bytes_reclaimed += meta.len();
         }
-        platform_fs::remove_file(path).map_err(StoreError::Io)?;
+        fs.remove_file(path).map_err(StoreError::Io)?;
         segments_removed += 1;
     }
 
     if let Some(temp_source_path) = compact_source_path {
-        remove_file_if_present(&temp_source_path)?;
+        fs.remove_file_if_present(&temp_source_path)
+            .map_err(StoreError::Io)?;
     }
-    crate::store::cold_start::rebuild::clear_pending_compaction(&store.config.data_dir)?;
+    crate::store::cold_start::rebuild::clear_pending_compaction(
+        &store.config.data_dir,
+        fs.as_ref(),
+    )?;
 
     let frontier = store.index.global_sequence();
     store.index.mark_idemp_evicted_against_live();
@@ -145,7 +150,10 @@ pub(crate) fn compact(
         "applied window-priority idempotency eviction after compaction"
     );
 
-    store.index.idemp.flush(&store.config.data_dir)?;
+    store
+        .index
+        .idemp
+        .flush(&store.config.data_dir, fs.as_ref())?;
 
     if let Err(e) = write_cold_start_artifacts_on_close(store) {
         tracing::warn!("post-compaction cold-start artifact write failed: {e}");
@@ -171,12 +179,15 @@ fn rollback_compaction_disk_state(
     data_dir: &std::path::Path,
     merged_path: &std::path::Path,
     compact_source_path: Option<&std::path::Path>,
+    fs: &dyn StoreFs,
 ) -> Result<(), StoreError> {
-    platform_fs::remove_file_if_present(merged_path).map_err(StoreError::Io)?;
+    fs.remove_file_if_present(merged_path)
+        .map_err(StoreError::Io)?;
     if let Some(temp_source_path) = compact_source_path {
-        platform_fs::rename(temp_source_path, merged_path).map_err(StoreError::Io)?;
+        fs.rename(temp_source_path, merged_path)
+            .map_err(StoreError::Io)?;
     }
-    crate::store::cold_start::rebuild::clear_pending_compaction(data_dir)?;
+    crate::store::cold_start::rebuild::clear_pending_compaction(data_dir, fs)?;
     Ok(())
 }
 
@@ -190,6 +201,7 @@ struct FailedCompactionCtx<'a> {
     compact_source_path: Option<&'a std::path::Path>,
     error: &'a StoreError,
     context: &'a str,
+    fs: &'a dyn StoreFs,
 }
 
 fn failed_compaction_with_rollback(
@@ -201,7 +213,12 @@ fn failed_compaction_with_rollback(
     ),
     StoreError,
 > {
-    rollback_compaction_disk_state(ctx.data_dir, ctx.merged_path, ctx.compact_source_path)?;
+    rollback_compaction_disk_state(
+        ctx.data_dir,
+        ctx.merged_path,
+        ctx.compact_source_path,
+        ctx.fs,
+    )?;
     let reason = format!("{}; disk layout rolled back: {}", ctx.context, ctx.error);
     tracing::error!(target: "batpak::flow", flow = "compact", error = %ctx.error, "{reason}");
     let result = segment::CompactionResult {
@@ -242,12 +259,92 @@ fn scanned_entry_as_stored_event(
     })
 }
 
+/// Evaluate a Retention/Tombstone predicate against an event's payload, giving
+/// the predicate the DECRYPTED plaintext view of an encrypted event (Stage E1).
+///
+/// Returns whether the predicate KEEPS the event (Retention: survives the drop;
+/// Tombstone: `true` ⇒ NOT rewritten to a tombstone). A crypto-shredded event
+/// cannot be predicate-evaluated — its plaintext is permanently destroyed — so
+/// the conservative default is to KEEP it: you cannot decide to DROP what you
+/// cannot read, and keeping never silently loses data the operator did not ask
+/// to erase. Either way the write side re-emits the original CIPHERTEXT bytes
+/// verbatim, so a survivor's `event_hash` stays byte-stable.
+fn compaction_predicate_keeps(
+    store: &Store<Open>,
+    entry: &reader::ScannedEntry,
+    predicate: &crate::store::RetentionPredicate,
+) -> Result<bool, StoreError> {
+    #[cfg(feature = "payload-encryption")]
+    if entry.event.header.payload_encryption.is_some() {
+        return Ok(match decrypt_compaction_payload(store, entry)? {
+            Some(stored) => predicate(&stored),
+            None => true, // Shredded → conservative KEEP.
+        });
+    }
+    #[cfg(not(feature = "payload-encryption"))]
+    let _ = store;
+    Ok(predicate(&scanned_entry_as_stored_event(entry)?))
+}
+
+/// Decrypt an encrypted scanned entry's ciphertext into the predicate's
+/// `StoredEvent<Value>` view via the shared Stage C primitive, or `None` when the
+/// scope key has been destroyed (a crypto-shred — the plaintext is gone).
+#[cfg(feature = "payload-encryption")]
+fn decrypt_compaction_payload(
+    store: &Store<Open>,
+    entry: &reader::ScannedEntry,
+) -> Result<Option<StoredEvent<serde_json::Value>>, StoreError> {
+    let coordinate = Coordinate::new(&entry.entity, &entry.scope)?;
+    let header = &entry.event.header;
+    let Some(meta) = header.payload_encryption.as_ref() else {
+        // Caller routes only encrypted entries here; a plaintext entry decodes
+        // straight from its already-decoded scanned value.
+        return Ok(Some(scanned_entry_as_stored_event(entry)?));
+    };
+    match store.open_encrypted_payload_bytes(
+        &coordinate,
+        header.event_kind,
+        header.event_id,
+        meta,
+        &entry.payload_bytes,
+    )? {
+        crate::store::read_api::PayloadPlaintext::Shredded => Ok(None),
+        crate::store::read_api::PayloadPlaintext::Plaintext(plaintext) => {
+            let value = crate::encoding::from_bytes::<serde_json::Value>(&plaintext)
+                .map_err(|e| StoreError::Serialization(Box::new(e)))?;
+            Ok(Some(StoredEvent {
+                coordinate,
+                event: Event {
+                    header: entry.event.header.clone(),
+                    payload: value,
+                    hash_chain: entry.event.hash_chain.clone(),
+                },
+            }))
+        }
+    }
+}
+
 fn write_scanned_entry(
     merged_segment: &mut segment::Segment<Active>,
     entry: reader::ScannedEntry,
 ) -> Result<(), StoreError> {
+    // Re-emit the survivor's ORIGINAL payload BYTES, never the decoded Value.
+    // `entry.event.payload` is the `serde_json::Value` view kept only for the
+    // keep/drop predicate; serializing THAT writes a msgpack MAP where the
+    // reader's `FramePayload<Vec<u8>>` decode expects raw bytes, making every
+    // survivor unreadable ("invalid type: map, expected a sequence"). Rebuilding
+    // the frame from `entry.payload_bytes` re-encodes only the outer frame
+    // envelope — the user payload is carried verbatim — so a kept frame is
+    // byte-identical to the original and its `event_hash` (blake3 over
+    // `event.payload`) is byte-stable across compaction. The Tombstone path's
+    // in-place `event_kind` mutation rides through `entry.event.header` here.
+    let event = Event {
+        header: entry.event.header,
+        payload: entry.payload_bytes,
+        hash_chain: entry.event.hash_chain,
+    };
     let frame_payload = FramePayload {
-        event: entry.event,
+        event,
         entity: entry.entity,
         scope: entry.scope,
         receipt_extensions: entry.receipt_extensions,
@@ -264,12 +361,15 @@ fn relocate_merged_source_if_present(
     compact_source_path: &mut Option<std::path::PathBuf>,
 ) -> Result<(), StoreError> {
     if let Some((_, source_path)) = sealed.iter_mut().find(|(seg_id, _)| *seg_id == merged_id) {
+        let fs = store.config.fs();
         let temp_source_path = store.config.data_dir.join(format!(
             "{merged_id:06}.{}.compact-src",
             segment::SEGMENT_EXTENSION
         ));
-        remove_file_if_present(&temp_source_path)?;
-        platform_fs::rename(&*source_path, &temp_source_path).map_err(StoreError::Io)?;
+        fs.remove_file_if_present(&temp_source_path)
+            .map_err(StoreError::Io)?;
+        fs.rename(&*source_path, &temp_source_path)
+            .map_err(StoreError::Io)?;
         *source_path = temp_source_path.clone();
         *compact_source_path = Some(temp_source_path);
     }
@@ -290,13 +390,29 @@ fn materialize_compacted_segment(
 
     relocate_merged_source_if_present(store, sealed, merged_id, compact_source_path)?;
 
-    remove_file_if_present(merged_path)?;
+    store
+        .config
+        .fs()
+        .remove_file_if_present(merged_path)
+        .map_err(StoreError::Io)?;
     let mut merged_segment = segment::Segment::<Active>::create_with_created_ns_on(
         &store.config.data_dir,
         merged_id,
         store.runtime.now_wall_ns(),
         store.config.fs(),
     )?;
+    // Crypto-shred coupling — DELIBERATELY NONE (the safe semantics). Retention
+    // (drop) and Tombstone (mark) compaction operate per EVENT, but a crypto-shred
+    // key is per SCOPE, and under a coarse granularity (the default PerEntity) one
+    // key covers every event of an entity. A predicate that drops/tombstones SOME
+    // of a scope's events must NOT shred the WHOLE scope's key — that would
+    // silently destroy the still-live siblings' plaintext (over-shred). Rather than
+    // track "was this the scope's LAST event" here (fragile, and still an implicit
+    // shred the operator never asked for), compaction destroys NO payload keys:
+    // erasure stays the single explicit `Store::shred_scope` op, which is
+    // granularity-agnostic and never over-shreds. Compaction therefore leaves the
+    // keyset untouched; a surviving event of a partially-compacted scope still
+    // decrypts under its (undestroyed) key.
     match strategy {
         CompactionStrategy::Merge => {
             for (_, path) in sealed.iter() {
@@ -305,7 +421,7 @@ fn materialize_compacted_segment(
         }
         CompactionStrategy::Retention(predicate) => {
             for entry in scan_sealed_entries(store, sealed)? {
-                if predicate(&scanned_entry_as_stored_event(&entry)?) {
+                if compaction_predicate_keeps(store, &entry, predicate)? {
                     write_scanned_entry(&mut merged_segment, entry)?;
                 }
             }
@@ -313,7 +429,7 @@ fn materialize_compacted_segment(
         CompactionStrategy::Tombstone(predicate) => {
             let tombstone_kind = EventKind::TOMBSTONE;
             for mut entry in scan_sealed_entries(store, sealed)? {
-                if !predicate(&scanned_entry_as_stored_event(&entry)?) {
+                if !compaction_predicate_keeps(store, &entry, predicate)? {
                     entry.event.header.event_kind = tombstone_kind;
                 }
                 write_scanned_entry(&mut merged_segment, entry)?;

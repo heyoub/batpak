@@ -1,3 +1,4 @@
+use crate::store::platform::fs::StoreFs;
 use crate::store::{platform, HiddenRangesCorruption, StoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -72,14 +73,18 @@ fn normalize_lane_ranges(
 pub(crate) fn write_cancelled_ranges(
     data_dir: &Path,
     ranges: &CancelledVisibilityRanges,
+    fs: &dyn StoreFs,
 ) -> Result<(), StoreError> {
     let final_path = data_dir.join(VISIBILITY_RANGES_FILENAME);
-    crate::store::platform::fs::reject_symlink_leaf(&final_path, "visibility-ranges metadata")?;
+    fs.reject_symlink_leaf(&final_path, "visibility-ranges metadata")?;
 
     let normalized_global = normalize_ranges(&ranges.global)?;
     let normalized_lanes = normalize_lane_ranges(&ranges.lanes)?;
     if normalized_global.is_empty() && normalized_lanes.is_empty() {
-        if platform::fs::remove_file_if_present(&final_path).map_err(StoreError::Io)? {
+        if fs
+            .remove_file_if_present(&final_path)
+            .map_err(StoreError::Io)?
+        {
             crate::store::platform::sync::sync_parent_dir(&final_path)?;
         }
         return Ok(());
@@ -104,7 +109,7 @@ pub(crate) fn write_cancelled_ranges(
     .map_err(|error| StoreError::Serialization(Box::new(error)))?;
     let crc = crc32fast::hash(&body);
 
-    let tmp = platform::fs::named_temp_in(data_dir).map_err(StoreError::Io)?;
+    let tmp = fs.named_temp_in(data_dir).map_err(StoreError::Io)?;
     {
         let file = tmp.as_file();
         let mut writer = BufWriter::new(file);
@@ -116,7 +121,7 @@ pub(crate) fn write_cancelled_ranges(
     }
     crate::store::platform::sync::sync_file_all_io(tmp.as_file()).map_err(StoreError::Io)?;
     let admission = crate::store::platform::sync::admit_current_parent_dir_sync()?;
-    crate::store::platform::sync::persist_temp_with_parent_sync(tmp, &final_path, admission)
+    fs.persist_temp_with_parent_sync(tmp, &final_path, admission)
         .map_err(StoreError::Io)?;
     Ok(())
 }

@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-01
+
 ### Removed
 - Retired the in-repo `bpk-ts` workspace and TypeScript client gates (`just
   verify-ts`, `just verify-all`, `cargo xtask verify-ts`). The 0.9/1.0 line is
@@ -13,6 +15,17 @@ All notable changes to this project will be documented in this file.
 - TypeScript/npm consumers must use an external archive of the retired `bpk-ts`
   workspace or wait for the post-1.0 client line. In-repo host proof is
   `cargo test -p hostbat`, `cargo test -p netbat`, and `just verify`.
+- `netbat`: replace `TcpServerConfig::with_max_connections(n)` with
+  `with_connection_limit(ConnectionLimit::Concurrent(n))` (or `ConnectionLimit::Lifetime(n)`
+  to keep the old accept-budget semantics). Update `EffectBackend`/`HostControlHandle`
+  `use_host_control()` call sites to pass a control-id (`use_host_control(control)`); an
+  `EffectClass::Control` operation must now declare a non-empty `uses_host_control(...)` set.
+  Update `ReceiptEmitHandle::emit_receipt` call sites to pass a payload
+  (`emit_receipt(kind, payload)`).
+- Stores that relied on `EventPayloadValidation` defaulting to `Warn` (opening despite a
+  linked kind collision or incomplete upcast chain) must set `EventPayloadValidation::Warn`
+  explicitly — the default now refuses to open. syncbat `Core`s now require a receipt sink
+  or an explicit `without_receipts()`.
 
 ### Added
 - Added PR1 surfaces for the 0.9.0 line: `Store::fork_with_evidence` /
@@ -28,6 +41,91 @@ All notable changes to this project will be documented in this file.
 - Added property-law coverage for `DagPosition`, SIDX rows, lane-neutral
   payload upcast, and raw import payload hashing, plus the `fork_cost`
   Criterion bench with CoW and deep-copy baseline arms.
+- **Payload encryption & crypto-shred** (opt-in `payload-encryption` cargo feature):
+  user event payloads are encrypted at rest under a per-scope symmetric key
+  (pure-Rust XChaCha20-Poly1305), so destroying a scope's key makes its plaintext
+  permanently unrecoverable while the on-disk ciphertext and its blake3 hash-chain
+  identity survive — `verify_chain`, receipts, and signatures stay byte-for-byte
+  intact (identity is over the stored ciphertext, not the plaintext). Enable with
+  `StoreConfig::with_payload_encryption(granularity)`; `KeyScopeGranularity` selects
+  what one key/erasure covers (`PerEntity` default / `PerCategory` / `PerTypeId` /
+  `PerEvent`). `Store::shred_scope(selector)` destroys a scope's key and durably
+  flushes the shrunken keyset; a shredded read surfaces `ReadDisposition::Shredded` /
+  `StoreError::PayloadShredded` (never the ciphertext, never a corruption error). The
+  keyset is a crash-safe single file (`keyset.fbatk`, atomic rewrite) that fails closed
+  on corruption or granularity mismatch, and a newly-minted key is flushed durable
+  before the data it encrypts is acknowledged. Key-aware across every read consumer
+  (append/read, projection, compaction, delivery, ancestry). Neutral mechanism: batpak
+  only ever observes "the key for scope X was destroyed"; the layer above maps erasure
+  to its own policy. Threat model: keys live in the store dir, so crypto-shred makes
+  *deletion* cryptographically effective but does not protect a disk image captured
+  before the shred; keyset-location hardening (separate volume / KMS) is a deployment
+  concern. The default build pulls no AEAD dependency. See `crates/core/README.md`.
+- **Opt-in server-only TLS for netbat** (`tls` cargo feature): the request and
+  subscription listeners speak TLS via `rustls` (`TransportSecurity::Tls`,
+  `TlsServerConfig::from_pem`/`from_pem_files`); the handshake runs per-connection
+  post-permit and a failure is counted (`tls_handshake_failures`), never listener-fatal.
+  No auth by design — identity/authorization is a downstream concern (terminate/auth at a
+  fronting proxy). The default build pulls no TLS dependency.
+- `Store::verify_chain()` — an on-demand tamper-evidence pass returning a
+  `ChainVerificationReport` (content-hash mismatches + dangling links), plus
+  `ChainVerification::Recompute` to run it automatically at open.
+- `netbat::ConnectionLimit::{Concurrent (default), Lifetime, Unlimited}` — a concurrent
+  connection cap (flume permit pool) replacing the lifetime-only `max_connections`; and
+  `SubscriptionDispatch::{Concurrent (default), Sequential}` so subscriptions are served
+  concurrently (previously one long-lived subscriber blocked all other accepts).
+- `verify_registry()` — a release-startup entry point that catches linked `EventKind`
+  collisions in a binary that registers payloads but never opens a `Store`; plus the
+  non-default `startup-registry-check` feature for an automatic native (ctor) check.
+- syncbat `CoreBuilder::grant_capability`/`grant_capabilities`; the crypto-shred read
+  surface (`ReadDisposition`, `DeliveryPayload`, `StoreError::{PayloadShredded,
+  PayloadDecryptFailed, KeysetCorrupt, ShredSelectorMismatch}`); the `AncestorWalk.shredded`
+  annotation; and `INV-SYNCBAT-CAPABILITY-GRANT-ENFORCEMENT` / the crypto-shred invariant.
+
+### Security
+- Receipt signing is now policy-driven and fail-closed: `SigningPolicy::{Optional
+  (default), Required}` on `StoreConfig`; a cover-build failure fails the append CLOSED
+  unless `with_signing_downgrade_allowed(true)`. `Store::verify_chain()` + the
+  ChainVerification-at-open option add on-demand tamper evidence.
+- Capability tokens declared on an operation are now ENFORCED at checkout (declared ⊆
+  granted), failing closed with a denial receipt; `use_host_control` became a declared +
+  observed⊆declared subset-checked target axis (both were previously decorative).
+- `EventPayloadValidation` now defaults to `FailFast`: a linked `EventKind` collision OR an
+  incomplete `Upcast` chain refuses `Store::open` (a wire-identity / authoring bug should
+  fail closed, not log-and-proceed). `Warn`/`Silent` remain explicit opt-outs.
+- netbat: a panicking connection/subscription worker is contained and counted, never
+  poisoning the listener; a documented trusted-transport model + opt-in server-only TLS.
+
+### Fixed
+- **CRITICAL — data corruption.** `CompactionStrategy::Retention` and `Tombstone` silently
+  corrupted every SURVIVING event: a survivor's payload was re-encoded from its decoded
+  `serde_json::Value` (a msgpack map) where every reader expects raw bytes, so after any
+  such compaction the kept events were present in the index but UNREADABLE — `get`,
+  `walk_ancestors`, and `project` all failed to decode them. Survivors now re-emit their
+  ORIGINAL payload bytes verbatim, so `event_hash` is byte-stable across compaction.
+  `Merge` was unaffected (it byte-copies frames). It shipped silently because no test read
+  a survivor's payload after a Retention/Tombstone compaction — a coherence test now does.
+- A retention-dropped mid-chain event no longer makes `walk_ancestors` silently return a
+  truncated prefix; the truncation is observable via `AncestryBoundary::MissingParent`.
+- netbat: a single panicking handler no longer takes down the whole listener (the panic was
+  turned into a listener-wide `Err` that abandoned every later worker's join).
+
+### Changed
+- **Breaking (pre-1.0):** `netbat` `max_connections` (a lifetime accept budget) is replaced
+  by `ConnectionLimit` (default `Concurrent`); `use_host_control` widened from a zero-arg
+  bool axis to `use_host_control(control: &str)` with `uses_host_controls: Vec<String>`
+  (declared + subset-checked); syncbat's `ReceiptEmitHandle::emit_receipt` gained an opaque
+  payload argument (its evidence is stamped into the single invocation receipt).
+- Receipt-safety defaults flipped to fail-closed: `ReceiptHashPolicy::Blake3` is the default
+  (was Deferred), and a syncbat `Core` refuses to build without a receipt sink unless
+  `without_receipts()`.
+- The crash-sensitive filesystem ops (rename/remove/atomic-persist, positioned reads, the
+  cold-start `write_file_atomically` seam) now route through the `StoreFs` seam so the
+  deterministic crash harness can fault them; a torn cold-start-artifact publish never loses
+  an acknowledged-durable commit (falls back to full segment scan — the artifact is an
+  optimization, not a correctness dependency).
+- netbat is reframed from "thin" to "lean, sync-first" (it now owns a connection permit pool
+  + per-connection / per-subscription worker threads + opt-in TLS).
 
 ## [0.8.3] - 2026-06-17
 

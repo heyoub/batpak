@@ -23,6 +23,7 @@ use crate::descriptor::HookPhase;
 use crate::error::HostError;
 use crate::event_payload_binding::EventPayloadBinding;
 use crate::host::{Host, HostHook, HostParts};
+use crate::host_control_backend::{HostControlEffectBackend, HostController};
 use crate::identity::{canonical_digest, HostFingerprint};
 use crate::interface::compute_interface_fingerprint;
 use crate::module::{BoxedJob, HostModule, HostModuleParts};
@@ -34,6 +35,7 @@ type BoxedGuard = Box<dyn AdmissionGuard + 'static>;
 type BoxedHandler = Box<dyn Handler + 'static>;
 type BoxedReceiptSink = Box<dyn ReceiptSink + 'static>;
 type BoxedEffectBackend = Box<dyn EffectBackend + 'static>;
+type BoxedHostController = Box<dyn HostController + 'static>;
 
 /// Domain separator for the host-composition fingerprint.
 const HOST_FINGERPRINT_DOMAIN: &str = "hostbat.host.v1";
@@ -52,6 +54,7 @@ pub struct HostBuilder {
     spawn: Arc<dyn Spawn>,
     receipt_sink: Option<BoxedReceiptSink>,
     effect_backend: Option<BoxedEffectBackend>,
+    host_control: Option<BoxedHostController>,
 }
 
 impl Default for HostBuilder {
@@ -69,6 +72,7 @@ impl Default for HostBuilder {
             spawn: Arc::new(ThreadSpawn),
             receipt_sink: None,
             effect_backend: None,
+            host_control: None,
         }
     }
 }
@@ -109,6 +113,25 @@ impl HostBuilder {
         B: EffectBackend + 'static,
     {
         self.effect_backend = Some(Box::new(backend));
+        self
+    }
+
+    /// Attach the controller that performs a `Control` operation's declared host
+    /// controls.
+    ///
+    /// `Control` operations reach host authority only via `Ctx`, which performs
+    /// the identified control through this controller; without it bound, a
+    /// `use_host_control` call fails closed instead of touching the host. The
+    /// composed host-control backend layers OUTER over any [`effect_backend`],
+    /// so the store axes still flow through that inner backend.
+    ///
+    /// [`effect_backend`]: Self::effect_backend
+    #[must_use]
+    pub fn host_control<C>(mut self, controller: C) -> Self
+    where
+        C: HostController + 'static,
+    {
+        self.host_control = Some(Box::new(controller));
         self
     }
 
@@ -249,14 +272,26 @@ impl HostBuilder {
         }
         if let Some(sink) = self.receipt_sink {
             core_builder.receipt_sink_boxed(sink);
+        } else {
+            // The core builder fails closed without a receipt sink. A host that
+            // was assembled without one explicitly records no receipts; opt out
+            // here so the absence is a stated choice rather than a silent drop.
+            core_builder.without_receipts();
         }
-        if let Some(backend) = self.effect_backend {
-            let validating = ValidatingEffectBackend::new(
+        // The store-effect backend, schema-validated at the append boundary. The
+        // host-control layer wraps this OUTER so store axes still flow through it.
+        let inner_backend: Option<BoxedEffectBackend> = self.effect_backend.map(|backend| {
+            Box::new(ValidatingEffectBackend::new(
                 backend,
                 collect_event_payload_binding_map(&lowered.event_payload_bindings),
                 schema_registry.clone(),
-            );
-            core_builder.effect_backend_boxed(Box::new(validating));
+            )) as BoxedEffectBackend
+        });
+        if let Some(controller) = self.host_control {
+            let host_control_backend = HostControlEffectBackend::new(inner_backend, controller);
+            core_builder.effect_backend_boxed(Box::new(host_control_backend));
+        } else if let Some(inner) = inner_backend {
+            core_builder.effect_backend_boxed(inner);
         }
 
         let mut startup = lowered.startup;

@@ -19,11 +19,13 @@ pub use batpak::coordinate::{
 };
 pub use batpak::event::sourcing::{MultiDispatchError, MultiReactive, Reactive, TypedReactive};
 pub use batpak::event::{
-    revalidate_event_payload_registry, validate_event_payload_registry, DecodeSource, DecodeTyped,
+    revalidate_event_payload_registry, revalidate_upcast_chain_registry,
+    validate_event_payload_registry, validate_upcast_chain_registry, DecodeSource, DecodeTyped,
     Event, EventHeader, EventKind, EventKindError, EventPayload, EventPayloadKindCollision,
-    EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain, JsonValueInput,
-    ProjectionEvent, ProjectionInput, ProjectionPayload, ProjectionStateContract, RawMsgpackInput,
-    ReplayLane, StateExtent, StateExtentCost, StoredEvent, TypedDecodeError,
+    EventPayloadRegistryError, EventPayloadValidation, EventSourced, HashChain,
+    IncompleteUpcastChain, JsonValueInput, ProjectionEvent, ProjectionInput, ProjectionPayload,
+    ProjectionStateContract, RawMsgpackInput, ReplayLane, StateExtent, StateExtentCost,
+    StoredEvent, TypedDecodeError, UpcastChainRegistryError,
 };
 pub use batpak::guard::{Denial, Gate, GateSet, Receipt};
 pub use batpak::id::{CausationId, CorrelationId, EventId};

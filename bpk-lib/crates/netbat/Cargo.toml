@@ -1,6 +1,6 @@
 [package]
 name = "netbat"
-version = "0.8.3"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -11,17 +11,40 @@ documentation = "https://docs.rs/netbat"
 readme = "README.md"
 keywords = ["event-sourcing", "network", "sync", "server"]
 categories = ["network-programming"]
+# Keep dev-only test material OUT of the published crate. netbat's self-signed TLS
+# test fixtures include a PEM private key (`tests/fixtures/tls_test_key.pem`), and a
+# published crate must never carry key material — exactly what
+# `cargo xtask package-leak-scan` refuses. That scanner greps the packaged tarball
+# INCLUDING `Cargo.toml.orig` (cargo's verbatim copy of this manifest) with a naive
+# substring match, so this note deliberately avoids the literal PEM header text.
+# Consumers never run netbat's own tests, so excluding the whole `tests/` tree loses
+# nothing and keeps the thin crate's published surface to lib + docs.
+exclude = ["tests/"]
 
 [features]
 default = []
+# Opt-in server-only TLS transport. The default build pulls rustls in only under
+# this feature, preserving netbat's thin-crate identity; every TLS type, dep, and
+# code path is gated behind it. PEM parsing uses rustls' own `pki_types` (the
+# maintained rustls-pki-types), so no separate PEM crate is needed.
+tls = ["dep:rustls"]
 
 [dependencies]
-syncbat = { path = "../syncbat", version = "0.8.3" }
+syncbat = { path = "../syncbat", version = "0.9.0" }
 flume = "0.12"
 # Tracing spans around the accept loop, per-connection serve, and
 # dispatch are emitted from the wire layer. Subscribers come from
 # the binary.
 tracing = "0.1"
+# Server-only TLS (feature = "tls"). Optional, so absent from the default build
+# graph. Pinned to the ring crypto provider (default-features off) to keep the
+# build off the aws-lc-rs C/cmake toolchain.
+rustls = { version = "0.23", optional = true, default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

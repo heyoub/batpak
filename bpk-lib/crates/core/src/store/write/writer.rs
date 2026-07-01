@@ -27,6 +27,8 @@ use flume::{Receiver, Sender};
 use std::sync::Arc;
 mod append;
 mod batch;
+#[cfg(feature = "payload-encryption")]
+mod encrypt;
 mod fence_runtime;
 mod publish;
 mod runtime;
@@ -34,25 +36,12 @@ mod watermark;
 
 pub(crate) use self::append::AppendGuards;
 use self::fence_runtime::{CommandResult, DeferredReply, FenceLedger};
+pub(super) use self::runtime::checked_next_clock;
 pub(crate) use self::runtime::find_latest_segment_id;
 #[cfg(feature = "dangerous-test-hooks")]
 use self::runtime::DriveStep;
 use self::runtime::{writer_thread_main, writer_thread_name, WriterRuntime};
 pub(crate) use self::watermark::{WatermarkAdvanceHandle, WatermarkState};
-
-pub(super) fn checked_next_clock(
-    latest_clock: Option<u32>,
-    entity: &str,
-) -> Result<u32, StoreError> {
-    match latest_clock {
-        Some(clock) => clock
-            .checked_add(1)
-            .ok_or_else(|| StoreError::EntityClockOverflow {
-                entity: entity.to_string(),
-            }),
-        None => Ok(0),
-    }
-}
 
 pub(super) fn ignore_closed_response_channel<T>(result: Result<(), flume::SendError<T>>) {
     drop(result);

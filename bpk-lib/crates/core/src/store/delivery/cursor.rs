@@ -2,6 +2,7 @@ use crate::coordinate::Region;
 use crate::store::delivery::canal::{Canal, CanalBatch, CanalClosed};
 use crate::store::delivery::observation::CheckpointId;
 use crate::store::index::{IndexEntry, StoreIndex};
+use crate::store::platform::fs::StoreFs;
 use crate::store::StoreError;
 use std::path::Path;
 use std::sync::Arc;
@@ -202,7 +203,11 @@ impl Cursor {
 
     /// Persist the cursor's current position to its bound durable
     /// checkpoint. No-op if the cursor was constructed without an id.
-    pub(crate) fn persist_current(&self) -> std::io::Result<()> {
+    ///
+    /// Routes the atomic checkpoint publish through `fs` (the store's configured
+    /// [`StoreFs`]) so the crash-sensitive persist is fault-injectable under a
+    /// `SimFs`; in production `fs` is [`crate::store::platform::fs::RealFs`].
+    pub(crate) fn persist_current(&self, fs: &dyn StoreFs) -> std::io::Result<()> {
         let Some(binding) = &self.durable else {
             return Ok(());
         };
@@ -211,7 +216,7 @@ impl Cursor {
             self.started,
             self.region.checkpoint_identity(),
         );
-        Self::save_checkpoint(&binding.data_dir, &binding.id, &ckpt)
+        Self::save_checkpoint_with_fs(&binding.data_dir, &binding.id, &ckpt, fs)
     }
 
     fn record_gaps_for_hits(&mut self, hits: &[crate::store::index::QueryHit]) {

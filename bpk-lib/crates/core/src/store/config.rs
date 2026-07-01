@@ -1,4 +1,6 @@
 use crate::event::EventPayloadValidation;
+#[cfg(feature = "payload-encryption")]
+use crate::store::keyscope::KeyScopeGranularity;
 pub(crate) use crate::store::platform::clock::{
     clock_from_fn, wall_ms_from_timestamp_us, Clock, MonotonicClock, SystemClock,
 };
@@ -18,7 +20,8 @@ mod validation;
 pub use crate::store::index::idemp::{IdempotencyRetention, OverflowPolicy};
 pub(crate) use types::WriterMode;
 pub use types::{
-    BatchConfig, IndexConfig, IndexTopology, OpenReportObserver, SyncConfig, SyncMode, WriterConfig,
+    BatchConfig, ChainVerification, IndexConfig, IndexTopology, OpenReportObserver, SigningPolicy,
+    SyncConfig, SyncMode, WriterConfig,
 };
 pub(crate) use validation::ValidatedStoreConfig;
 
@@ -66,8 +69,29 @@ pub struct StoreConfig {
     /// Signing keys known to this store. The last configured key signs new
     /// receipts; earlier keys remain available for verification.
     pub(crate) signing_keys: Vec<SigningKey>,
+    /// Whether a keyless store is permitted (`Optional`, default) or open is
+    /// refused without a signing key (`Required`). See [`SigningPolicy`].
+    pub(crate) signing_policy: SigningPolicy,
+    /// When a signer is configured but its signature cover cannot be built,
+    /// permit a best-effort downgrade to an unsigned receipt instead of failing
+    /// the append. Default `false` (fail closed).
+    pub(crate) signing_downgrade_allowed: bool,
+    /// Whether the full hash chain is recomputed at open (`Recompute`) or the
+    /// per-frame CRC alone is trusted (`Crc`, default). See [`ChainVerification`].
+    pub(crate) chain_verification: ChainVerification,
     /// Payload-registry collision policy applied during `Store::open`.
     pub(crate) event_payload_validation: EventPayloadValidation,
+    /// Opt-in crypto-shred payload encryption. `None` (default) disables it and
+    /// preserves today's plaintext-payload behavior; `Some(granularity)` selects
+    /// the [`KeyScopeGranularity`] keys are partitioned by. Holds only the
+    /// granularity — never any key material. Stage A stores this setting but does
+    /// not yet wire it into the append/read paths.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    pub(crate) payload_encryption: Option<KeyScopeGranularity>,
     /// Fault injector for testing failure scenarios.
     /// Only available with the `dangerous-test-hooks` feature.
     #[cfg(feature = "dangerous-test-hooks")]
@@ -100,7 +124,25 @@ impl StoreConfig {
             open_report_observer: None,
             platform_profile_path: None,
             signing_keys: Vec::new(),
+            // Optional: a keyless store is a valid "regular store"; its receipts
+            // verify structurally but are never `is_signed()`. Regulated callers
+            // opt into `SigningPolicy::Required`, which refuses to open without a
+            // signing key. Signing is a deliberate per-deployment choice.
+            signing_policy: SigningPolicy::Optional,
+            signing_downgrade_allowed: false,
+            // Crc: a regular store pays nothing extra at open; the per-frame CRC
+            // already guarded every frame at read time. Regulated callers opt
+            // into ChainVerification::Recompute for tamper-evidence at open.
+            chain_verification: ChainVerification::Crc,
+            // FailFast (the default): refuse to open when two linked payload
+            // types claim the same (category, type_id) and would otherwise get
+            // ambiguous wire identity. Callers who knowingly tolerate a
+            // collision opt out via EventPayloadValidation::Warn / Silent.
             event_payload_validation: EventPayloadValidation::default(),
+            // Opt-in: a default store keeps writing plaintext payloads. Callers
+            // enable crypto-shred explicitly via `with_payload_encryption`.
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: None,
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: None,
         }
@@ -236,10 +278,64 @@ impl StoreConfig {
         self
     }
 
+    /// Set the receipt signing policy.
+    ///
+    /// `Optional` (default) permits a keyless store; `Required` refuses to open
+    /// without a signing key, so unsigned receipts can never be accepted.
+    pub fn with_signing_policy(mut self, signing_policy: SigningPolicy) -> Self {
+        self.signing_policy = signing_policy;
+        self
+    }
+
+    /// Permit best-effort downgrade to an unsigned receipt when a configured
+    /// signer cannot build its signature cover. Default `false` (the append
+    /// fails closed rather than silently emitting an unsigned receipt).
+    pub fn with_signing_downgrade_allowed(mut self, allow: bool) -> Self {
+        self.signing_downgrade_allowed = allow;
+        self
+    }
+
+    /// Set whether the full hash chain is recomputed at open.
+    ///
+    /// `Crc` (default) trusts the per-frame CRC and rehashes nothing at open;
+    /// `Recompute` runs [`Store::verify_chain`](crate::store::Store::verify_chain)
+    /// at open and refuses to open on any content-hash mismatch or dangling
+    /// chain link. See [`ChainVerification`].
+    pub fn with_chain_verification(mut self, chain_verification: ChainVerification) -> Self {
+        self.chain_verification = chain_verification;
+        self
+    }
+
     /// Set the open-time payload-registry collision policy.
     pub fn with_event_payload_validation(mut self, validation: EventPayloadValidation) -> Self {
         self.event_payload_validation = validation;
         self
+    }
+
+    /// Enable opt-in crypto-shred payload encryption at the given
+    /// [`KeyScopeGranularity`].
+    ///
+    /// Stores only the granularity; no key material is held on the config. This
+    /// is opt-in — a store left at the default `None` keeps writing plaintext
+    /// payloads. Stage A records the setting but does not yet encrypt writes.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    pub fn with_payload_encryption(mut self, granularity: KeyScopeGranularity) -> Self {
+        self.payload_encryption = Some(granularity);
+        self
+    }
+
+    /// The configured payload-encryption granularity, or `None` when disabled.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    pub fn payload_encryption(&self) -> Option<KeyScopeGranularity> {
+        self.payload_encryption
     }
 
     /// Set the fsync strategy used after writes.
@@ -392,6 +488,11 @@ impl StoreConfig {
         self.writer_mode
     }
 
+    /// Whether the full hash chain is recomputed at open.
+    pub(crate) fn chain_verification(&self) -> ChainVerification {
+        self.chain_verification
+    }
+
     /// Install a custom filesystem backend for store data-path operations.
     ///
     /// Production uses the default [`RealFs`] (every op delegates to `std::fs`).
@@ -448,7 +549,12 @@ impl Clone for StoreConfig {
             open_report_observer: self.open_report_observer.clone(),
             platform_profile_path: self.platform_profile_path.clone(),
             signing_keys: self.signing_keys.clone(),
+            signing_policy: self.signing_policy,
+            signing_downgrade_allowed: self.signing_downgrade_allowed,
+            chain_verification: self.chain_verification,
             event_payload_validation: self.event_payload_validation,
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: self.payload_encryption,
             #[cfg(feature = "dangerous-test-hooks")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -457,7 +563,8 @@ impl Clone for StoreConfig {
 
 impl std::fmt::Debug for StoreConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StoreConfig")
+        let mut debug = f.debug_struct("StoreConfig");
+        debug
             .field("data_dir", &self.data_dir)
             .field("segment_max_bytes", &self.segment_max_bytes)
             .field("fd_budget", &self.fd_budget)
@@ -477,8 +584,14 @@ impl std::fmt::Debug for StoreConfig {
             )
             .field("platform_profile_path", &self.platform_profile_path)
             .field("signing_keys", &self.signing_keys.len())
-            .field("event_payload_validation", &self.event_payload_validation)
-            .finish()
+            .field("signing_policy", &self.signing_policy)
+            .field("signing_downgrade_allowed", &self.signing_downgrade_allowed)
+            .field("chain_verification", &self.chain_verification)
+            .field("event_payload_validation", &self.event_payload_validation);
+        // Only the granularity is ever shown — the config holds no key material.
+        #[cfg(feature = "payload-encryption")]
+        debug.field("payload_encryption", &self.payload_encryption);
+        debug.finish()
     }
 }
 

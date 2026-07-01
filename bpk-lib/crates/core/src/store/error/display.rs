@@ -81,6 +81,7 @@ impl StoreError {
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::EventPayloadRegistry(_)
+            | Self::UpcastChainIncomplete(_)
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
             | Self::VisibilityFenceNotActive
@@ -110,7 +111,14 @@ impl StoreError {
             | Self::CheckpointWriteFailed { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => Ok(()),
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => Ok(()),
+            #[cfg(feature = "payload-encryption")]
+            Self::KeysetCorrupt { .. }
+            | Self::PayloadSealFailed { .. }
+            | Self::PayloadShredded { .. }
+            | Self::PayloadDecryptFailed { .. }
+            | Self::ShredSelectorMismatch { .. } => Ok(()),
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => Ok(()),
         }
@@ -183,6 +191,7 @@ impl StoreError {
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. }
             | Self::EventPayloadRegistry(_)
+            | Self::UpcastChainIncomplete(_)
             | Self::IdempotencyRequired
             | Self::VisibilityFenceActive
             | Self::VisibilityFenceNotActive
@@ -211,7 +220,14 @@ impl StoreError {
             | Self::CheckpointWriteFailed { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => Ok(()),
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => Ok(()),
+            #[cfg(feature = "payload-encryption")]
+            Self::KeysetCorrupt { .. }
+            | Self::PayloadSealFailed { .. }
+            | Self::PayloadShredded { .. }
+            | Self::PayloadDecryptFailed { .. }
+            | Self::ShredSelectorMismatch { .. } => Ok(()),
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => Ok(()),
         }
@@ -249,6 +265,94 @@ impl StoreError {
         Ok(())
     }
 
+    /// `Display` body for the at-open hash-chain verification refusal. Kept off
+    /// the main `Display::fmt` match so the integrity-refusal surface can grow
+    /// without pushing `fmt` past its complexity ratchet.
+    fn fmt_chain_verification_failed(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::ChainVerificationFailed {
+            content_hash_mismatches,
+            dangling_links,
+        } = self
+        {
+            return write!(
+                f,
+                "at-open hash-chain verification failed: {content_hash_mismatches} content-hash \
+                 mismatch(es) and {dangling_links} dangling chain link(s); refusing to open the \
+                 store (ChainVerification::Recompute fail-closed)"
+            );
+        }
+        Ok(())
+    }
+
+    /// `Display` body for the ancestry-cycle and malformed-range refusals.
+    /// Grouped off the main `Display::fmt` match (mirroring the other
+    /// `fmt_*_violation` helpers) so the render surface can grow without pushing
+    /// `fmt` past its complexity ratchet.
+    fn fmt_walk_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::AncestryCorrupt { cycle_at } = self {
+            return write!(
+                f,
+                "ancestry walk detected a cycle at event {:032x}",
+                cycle_at.as_u128()
+            );
+        }
+        if let Self::RangeMalformed { start, end } = self {
+            return write!(
+                f,
+                "malformed range: start={start} end={end} (start must be < end)"
+            );
+        }
+        Ok(())
+    }
+
+    /// `Display` body for the crypto-shred keyset fail-closed refusal. Kept off
+    /// the main `Display::fmt` match so the opt-in encryption surface does not
+    /// push `fmt` past its complexity ratchet.
+    #[cfg(feature = "payload-encryption")]
+    fn fmt_payload_encryption(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::KeysetCorrupt { reason } = self {
+            return write!(
+                f,
+                "crypto-shred keyset is corrupt or unreadable: {reason}; refusing to open (a lost \
+                 or misread keyset silently shreds every payload sealed under it); restore the \
+                 keyset from backup"
+            );
+        }
+        if let Self::PayloadSealFailed { detail } = self {
+            return write!(
+                f,
+                "failed to seal payload for encrypted append: {detail}; append failed closed \
+                 (nothing written)"
+            );
+        }
+        if let Self::PayloadShredded { event_id } = self {
+            return write!(
+                f,
+                "event {event_id} is present in the chain but its payload key has been destroyed \
+                 (crypto-shred): plaintext is permanently unrecoverable"
+            );
+        }
+        if let Self::PayloadDecryptFailed { event_id } = self {
+            return write!(
+                f,
+                "event {event_id} ciphertext failed authenticated decryption (tamper or relocated \
+                 frame); the payload key is present but authentication did not verify"
+            );
+        }
+        if let Self::ShredSelectorMismatch {
+            granularity,
+            selector,
+        } = self
+        {
+            return write!(
+                f,
+                "crypto-shred selector `{selector}` does not address the store's configured \
+                 key-scope granularity {granularity:?}; erasure refused (nothing shredded)"
+            );
+        }
+        Ok(())
+    }
+
     fn fmt_platform_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Self::PlatformProfileInvalid { path, kind } = self {
             return write!(
@@ -266,6 +370,20 @@ impl StoreError {
         }
         if let Self::PlatformAdmissionFailed { capability, reason } = self {
             return write!(f, "platform admission failed for {capability}: {reason}");
+        }
+        Ok(())
+    }
+
+    /// Render the link-time `EventPayload` registry violations, both of which
+    /// delegate to their inner error's own `Display`. Grouped behind one
+    /// `Display::fmt` arm (mirroring `fmt_platform_violation`) so the two
+    /// registry variants do not each add a branch to the already-pinned `fmt`.
+    fn fmt_registry_violation(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Self::EventPayloadRegistry(error) = self {
+            return write!(f, "{error}");
+        }
+        if let Self::UpcastChainIncomplete(error) = self {
+            return write!(f, "{error}");
         }
         Ok(())
     }
@@ -331,7 +449,9 @@ impl std::fmt::Display for StoreError {
             Self::PlatformProfileInvalid { .. }
             | Self::PlatformProfileMismatch { .. }
             | Self::PlatformAdmissionFailed { .. } => self.fmt_platform_violation(f),
-            Self::EventPayloadRegistry(error) => write!(f, "{error}"),
+            Self::EventPayloadRegistry(_) | Self::UpcastChainIncomplete(_) => {
+                self.fmt_registry_violation(f)
+            }
             Self::IdempotencyRequired => write!(
                 f,
                 "group commit (batch > 1) requires an idempotency key on every append"
@@ -400,14 +520,10 @@ impl std::fmt::Display for StoreError {
                     path.display()
                 )
             }
-            Self::AncestryCorrupt { cycle_at } => {
-                write!(f, "ancestry walk detected a cycle at event {:032x}", cycle_at.as_u128())
-            }
-            Self::RangeMalformed { start, end } => {
-                write!(
-                    f,
-                    "malformed range: start={start} end={end} (start must be < end)"
-                )
+            // Ancestry-cycle and malformed-range refusals share one render group,
+            // delegated so this match stays within its complexity ratchet.
+            Self::AncestryCorrupt { .. } | Self::RangeMalformed { .. } => {
+                self.fmt_walk_violation(f)
             }
             // Coordinate / causation / commit-metadata validation refusals share
             // one cohesive render group; delegate so this match stays within its
@@ -459,6 +575,15 @@ impl std::fmt::Display for StoreError {
                 expected
             ),
             Self::InvariantViolation { kind } => write!(f, "invariant violation: {kind}"),
+            // Delegated so this match stays within its complexity ratchet rather
+            // than growing the integrity-refusal render inline.
+            Self::ChainVerificationFailed { .. } => self.fmt_chain_verification_failed(f),
+            #[cfg(feature = "payload-encryption")]
+            Self::KeysetCorrupt { .. }
+            | Self::PayloadSealFailed { .. }
+            | Self::PayloadShredded { .. }
+            | Self::PayloadDecryptFailed { .. }
+            | Self::ShredSelectorMismatch { .. } => self.fmt_payload_encryption(f),
         }
     }
 }

@@ -1,6 +1,6 @@
 //! BVISOR platform qualification matrix — terminal status per `(backend, kind)` cell.
 //!
-//! Mirrors [`LINUX_QUALIFICATION_LEDGER`] for linux rows and requires every
+//! Mirrors [`LINUX_LEDGER`] for linux rows and requires every
 //! `(backend, kind)` pair across the four platform backends to carry a terminal
 //! qualification status (`proven`, `fail-closed`, `waived`, `fault-injected`).
 //! `incomplete` is rejected.

@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &coord,
         &Incremented {
             amount: 1,
-            reason: "page view".into(),
+            reason: "manual".into(),
         },
     )?;
     let _ = store.append_typed(

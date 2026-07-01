@@ -17,6 +17,18 @@ impl ReceiptVerification {
         matches!(self, Self::Signed | Self::UnsignedAccepted)
     }
 
+    /// Return true only when the receipt carried a signature that verified
+    /// against a configured signing key.
+    ///
+    /// Unlike [`is_valid`](Self::is_valid), an unsigned receipt that was
+    /// accepted only because the store has no verifying keys returns `false`
+    /// here. Callers that require cryptographic proof of authenticity (rather
+    /// than "valid under this store's signing policy") must use this method.
+    #[must_use]
+    pub fn is_signed(&self) -> bool {
+        matches!(self, Self::Signed)
+    }
+
     /// Return the rejection reason, if verification failed.
     #[must_use]
     pub fn error(&self) -> Option<&ReceiptVerificationError> {
@@ -60,4 +72,27 @@ pub enum ReceiptVerificationError {
         /// Human-readable encoding failure returned while rebuilding the cover.
         reason: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReceiptVerification, ReceiptVerificationError};
+
+    #[test]
+    fn is_signed_distinguishes_cryptographic_proof_from_mere_validity() {
+        // A genuinely signed receipt is both signed and valid.
+        assert!(ReceiptVerification::Signed.is_signed());
+        assert!(ReceiptVerification::Signed.is_valid());
+
+        // An unsigned receipt accepted only because the store has no verifying
+        // keys is VALID for the store but carries NO cryptographic proof, so a
+        // caller demanding authenticity must not be fooled by `is_valid`.
+        assert!(!ReceiptVerification::UnsignedAccepted.is_signed());
+        assert!(ReceiptVerification::UnsignedAccepted.is_valid());
+
+        // A rejected receipt is neither signed nor valid.
+        let invalid = ReceiptVerification::Invalid(ReceiptVerificationError::MissingSignature);
+        assert!(!invalid.is_signed());
+        assert!(!invalid.is_valid());
+    }
 }

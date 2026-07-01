@@ -1,0 +1,32 @@
+[package]
+name = "batpak-store-open-collision"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Nested workspace: keeps this fixture out of the parent batpak workspace so its
+# deliberately-colliding registrations never leak into the crate's own build. In
+# particular, this stops `--all-features` on the parent from linking this binary's
+# link-time collision into a test binary the `startup-registry-check` constructor
+# would then abort before `main` (which would break nextest's `--list` phase).
+[workspace]
+
+# `open_default_failfast`: a NON-test binary that registers two colliding
+# EventPayload kinds and opens a `Store` with the DEFAULT config. The default
+# policy is `FailFast`, so the open MUST fail with the registry error naming the
+# collision; the process exits 0 iff that held (proving the default), non-zero
+# with a stderr diagnostic otherwise.
+[[bin]]
+name = "open_default_failfast"
+path = "src/open_default_failfast.rs"
+
+# `open_warn_opens`: same colliding registry, but opens with an explicit
+# `EventPayloadValidation::Warn` opt-out. The loose log-and-proceed policy must
+# still open; exits 0 iff the store opened.
+[[bin]]
+name = "open_warn_opens"
+path = "src/open_warn_opens.rs"
+
+[dependencies]
+batpak = { path = "../.." }
+tempfile = ">=3.24, <3.25"

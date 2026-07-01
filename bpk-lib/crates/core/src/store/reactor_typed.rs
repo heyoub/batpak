@@ -59,6 +59,9 @@ use crate::store::delivery::canal::{CanalHandle, ReactorCanal, SubscriptionWorke
 use crate::store::delivery::cursor::{CursorGapConfig, CursorWorkerAction, CursorWorkerConfig};
 use crate::store::delivery::observation::{AtLeastOnce, CheckpointId};
 use crate::store::reaction::ReactionBatch;
+use crate::store::reactor_delivery::fetch_raw_key_aware;
+#[cfg(feature = "payload-encryption")]
+use crate::store::reactor_delivery::warn_shredded_reactor_delivery;
 use crate::store::{Open, RestartPolicy, Store, StoreError};
 
 /// Configuration for [`Store::react_loop_typed`] and
@@ -376,6 +379,16 @@ where
         // Fetch the full event using the lane's specific reader.
         let stored = match fetch(inner_store, entry.event_id()) {
             Ok(s) => s,
+            // Crypto-shred delivery (opt-in `payload-encryption`): a shredded event
+            // has no recoverable plaintext, so the reactor cannot be invoked for it.
+            // SKIP it — the cursor was already advanced past it by the poll, so
+            // returning `Continue` at the end commits that advance (delivery stays
+            // coherent, never stalls or re-loops). Never silent: the skip warns.
+            #[cfg(feature = "payload-encryption")]
+            Err(StoreError::PayloadShredded { event_id }) => {
+                warn_shredded_reactor_delivery(entry.coord().entity(), event_id);
+                continue;
+            }
             Err(e) => {
                 *slot_for_handler.lock() = Some(ReactorError::Store(e));
                 return BatchOutcome::Rollback;
@@ -588,6 +601,14 @@ where
                     };
                     let stored = match fetch(&store_for_handler, notif.event_id) {
                         Ok(stored) => stored,
+                        // Crypto-shred: a shredded event has no plaintext to hand the
+                        // reactor. SKIP it (lossy delivery simply omits it) with an
+                        // observable warn — never a silent drop, never the ciphertext.
+                        #[cfg(feature = "payload-encryption")]
+                        Err(StoreError::PayloadShredded { event_id }) => {
+                            warn_shredded_reactor_delivery(notif.coord.entity(), event_id);
+                            continue;
+                        }
                         Err(error) => {
                             *slot_for_handler.lock() = Some(ReactorError::Store(error));
                             break;
@@ -851,7 +872,7 @@ impl Store<Open> {
         R: MultiReactive<crate::event::RawMsgpackInput>,
     {
         let dispatcher = MultiKindDispatcher::<crate::event::RawMsgpackInput, R>::new(reactor);
-        run_reactor(self, region, config, dispatcher, Store::read_raw)
+        run_reactor(self, region, config, dispatcher, fetch_raw_key_aware)
     }
 }
 

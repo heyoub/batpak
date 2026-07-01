@@ -32,20 +32,50 @@ pub(crate) fn reject_cache_symlink_leaf(path: &Path) -> Result<(), StoreError> {
     }
 }
 
+/// Atomic write via the production default backend ([`RealFs`]).
+///
+/// A thin wrapper over [`write_file_atomically_with_fs`] that preserves the
+/// standalone (fs-less) test forge (`checkpoint::tests`); every production
+/// cold-start artifact write path (checkpoint / mmap-index / idempotency-store /
+/// compaction marker) now drives the `_with_fs` variant with the store's
+/// configured filesystem so a `SimFs` can tear the atomic publish. Test-only
+/// because no production call site remains.
+#[cfg(test)]
 pub(crate) fn write_file_atomically(
     data_dir: &Path,
     final_path: &Path,
     purpose: &str,
     write: impl FnOnce(&mut File) -> Result<(), StoreError>,
 ) -> Result<(), StoreError> {
-    reject_symlink_leaf(final_path, purpose)?;
-    let tmp = named_temp_in(data_dir)?;
+    write_file_atomically_with_fs(data_dir, final_path, purpose, write, &RealFs)
+}
+
+/// [`write_file_atomically`], routed through the supplied [`StoreFs`] backend.
+///
+/// A composite of already-routed primitives — the symlink-leaf guard, the
+/// temp-file create ([`StoreFs::named_temp_in`]), and the atomic publish
+/// ([`StoreFs::persist_temp_with_parent_sync`]) — so a fault-injecting backend
+/// can tear the publish and a crash harness can observe a cold-start artifact
+/// the store believed durable. The temp-contents fsync stays on the direct
+/// `platform::sync` seam (the staging half), mirroring
+/// [`super::super::hidden_ranges::write_cancelled_ranges`] and
+/// [`super::super::delivery::cursor::Cursor::save_checkpoint_with_fs`]. `RealFs`
+/// makes it byte-for-byte the production behavior.
+pub(crate) fn write_file_atomically_with_fs(
+    data_dir: &Path,
+    final_path: &Path,
+    purpose: &str,
+    write: impl FnOnce(&mut File) -> Result<(), StoreError>,
+    fs: &dyn StoreFs,
+) -> Result<(), StoreError> {
+    fs.reject_symlink_leaf(final_path, purpose)?;
+    let tmp = fs.named_temp_in(data_dir)?;
     let mut file = tmp.reopen().map_err(StoreError::Io)?;
     write(&mut file)?;
-    file.sync_all().map_err(StoreError::Io)?;
+    crate::store::platform::sync::sync_file_all_io(&file).map_err(StoreError::Io)?;
     drop(file);
     let admission = crate::store::platform::sync::admit_current_parent_dir_sync()?;
-    crate::store::platform::sync::persist_temp_with_parent_sync(tmp, final_path, admission)
+    fs.persist_temp_with_parent_sync(tmp, final_path, admission)
         .map_err(StoreError::Io)?;
     Ok(())
 }
@@ -333,8 +363,16 @@ pub(crate) fn read_exact_at(
     }
 }
 
-// Platform free functions not yet routed through [`StoreFs`] (release row
-// `STORE-PLATFORM-FS-ROUTING`, terminal FAIL-CLOSED boundary). Listed in
+// Platform free-function routing status (release row `STORE-PLATFORM-FS-ROUTING`,
+// terminal FAIL-CLOSED boundary). The tail is now EMPTY: every store call site
+// that reaches the target filesystem does so through [`StoreFs`]. The
+// crash-sensitive atomic-rename / persist cluster (`rename`, `remove_file`,
+// `named_temp_in`, `persist_temp_with_parent_sync`) was routed by W3; the
+// positioned-read primitive (`read_exact_at`) is now routed too, so a `SimFs` can
+// fault the active-segment frame read that, as a free fn, was unfaultable. The
+// free fn itself STAYS here — it holds the `read_at` / `#[cfg(unix)]` /
+// `FileExt` contact the `platform_boundary` gate confines to `platform/` —
+// and `RealFs::read_exact_at` delegates straight to it. Asserted empty by
 // `store_fs_fail_closed_boundary_lists_unrouted_tail_ops`.
 
 /// Filesystem seam for production and (future) deterministic simulation.
@@ -354,10 +392,14 @@ pub(crate) fn read_exact_at(
 ///
 /// Scope note: routed subset of the platform fs/sync surface. The trait covers
 /// directory iteration, directory creation, segment file creation, the sync
-/// cluster, symlink/canonicalize guards, copy/metadata, and cow copy paths.
-/// Call sites still using direct `platform::fs::*` free functions (notably
-/// `persist_temp_with_parent_sync`) are tracked under release row
-/// `STORE-PLATFORM-FS-ROUTING`.
+/// cluster, symlink/canonicalize guards, copy/metadata, the cow copy paths, and
+/// (W3) the crash-sensitive atomic-rename / persist cluster — `rename`,
+/// `remove_file`, `named_temp_in`, `persist_temp_with_parent_sync` — so the
+/// compaction swap/rollback, visibility-range persist, and cursor-checkpoint
+/// persist sequences are fault-injectable under [`super::super::sim::fs::SimFs`],
+/// and the positioned read `read_exact_at`, so the active-segment frame read is
+/// fault-injectable too. The routing tail is now empty: no store call site
+/// reaches `platform::fs::*` directly (release row `STORE-PLATFORM-FS-ROUTING`).
 pub(crate) trait StoreFs: Send + Sync {
     /// Iterate a directory's entries. Mirrors [`std::fs::read_dir`].
     fn read_dir(&self, path: &Path) -> io::Result<ReadDir>;
@@ -419,6 +461,70 @@ pub(crate) trait StoreFs: Send + Sync {
 
     /// File metadata. Mirrors [`metadata`].
     fn metadata(&self, path: &Path) -> io::Result<Metadata>;
+
+    /// Rename `from` to `to`. Mirrors [`rename`].
+    ///
+    /// Crash-sensitive: the single atomic swap/rollback point of compaction
+    /// (relocate the merged source, then restore it on rollback). Routed so a
+    /// fault-injecting backend can tear the swap and a crash harness can observe
+    /// the half-applied rename.
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+
+    /// Remove the file at `path`. Mirrors [`remove_file`].
+    ///
+    /// Crash-sensitive: the post-swap reclaim of superseded segments after a
+    /// successful compaction. Routed so the reclaim becomes fault-injectable.
+    fn remove_file(&self, path: &Path) -> io::Result<()>;
+
+    /// Remove the file at `path`, reporting whether it existed (`Ok(false)` when
+    /// already absent). Mirrors [`remove_file_if_present`].
+    ///
+    /// Provided in terms of [`StoreFs::remove_file`] so a fault-injecting backend
+    /// only interposes the one primitive; the not-found tolerance is identical on
+    /// every backend.
+    fn remove_file_if_present(&self, path: &Path) -> io::Result<bool> {
+        match self.remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Create a uniquely-named temp file in `dir`. Mirrors [`named_temp_in`].
+    ///
+    /// The temp file is the staging half of an atomic publish: the caller writes
+    /// + fsyncs it, then hands it to [`StoreFs::persist_temp_with_parent_sync`].
+    fn named_temp_in(&self, dir: &Path) -> io::Result<NamedTempFile>;
+
+    /// Persist `named_temp` as `final_path` with a parent-directory fsync.
+    /// Mirrors [`super::sync::persist_temp_with_parent_sync`].
+    ///
+    /// Crash-sensitive: the atomic publish point for the visibility-range and
+    /// cursor-checkpoint metadata files. Routed so a fault-injecting backend can
+    /// drop the rename and a crash harness can observe a publish that the store
+    /// believed durable.
+    fn persist_temp_with_parent_sync(
+        &self,
+        named_temp: NamedTempFile,
+        final_path: &Path,
+        admission: super::sync::ParentDirSyncAdmission,
+    ) -> io::Result<()>;
+
+    /// Read exactly `buf.len()` bytes into `buf` starting at byte `offset` of
+    /// `file`. Mirrors the [`read_exact_at`] free fn.
+    ///
+    /// This is the active-segment frame read (the FD/pread path;
+    /// [`super::super::segment::scan::Reader`] holds the open handle). Routed so a
+    /// fault-injecting backend can inject a positioned-read error or a short read
+    /// where the free fn — which takes no fs handle — could not be intercepted.
+    /// The `read_at` / `#[cfg(unix)]` / `FileExt` contact stays in the free fn
+    /// under `platform/`; [`RealFs`] delegates straight to it.
+    fn read_exact_at(
+        &self,
+        file: &mut File,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<(), PositionedReadError>;
 }
 
 /// Production [`StoreFs`]: every method delegates to the existing
@@ -486,6 +592,38 @@ impl StoreFs for RealFs {
     fn metadata(&self, path: &Path) -> io::Result<Metadata> {
         metadata(path)
     }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        rename(from, to)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        remove_file(path)
+    }
+
+    fn named_temp_in(&self, dir: &Path) -> io::Result<NamedTempFile> {
+        named_temp_in(dir)
+    }
+
+    fn persist_temp_with_parent_sync(
+        &self,
+        named_temp: NamedTempFile,
+        final_path: &Path,
+        admission: super::sync::ParentDirSyncAdmission,
+    ) -> io::Result<()> {
+        crate::store::platform::sync::persist_temp_with_parent_sync(
+            named_temp, final_path, admission,
+        )
+    }
+
+    fn read_exact_at(
+        &self,
+        file: &mut File,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<(), PositionedReadError> {
+        read_exact_at(file, offset, buf)
+    }
 }
 
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
@@ -493,195 +631,5 @@ impl StoreFs for RealFs {
 mod fs_reflink_mutation_tests;
 
 #[cfg(test)]
-mod tests {
-    const UNROUTED_STORE_FS_TAIL_OPS: &[&str] = &[
-        "remove_file",
-        "rename",
-        "named_temp_in",
-        "read_exact_at",
-        "persist_temp_with_parent_sync",
-    ];
-
-    use super::{reject_copy_source, remove_dir_all};
-    use super::{RealFs, StoreFs};
-    use std::error::Error;
-
-    #[test]
-    fn remove_dir_all_removes_nested_directory_tree() -> Result<(), Box<dyn Error>> {
-        let dir = tempfile::tempdir()?;
-        let root = dir.path().join("tree");
-        let nested = root.join("nested");
-        std::fs::create_dir_all(&nested)?;
-        std::fs::write(nested.join("leaf.txt"), b"leaf")?;
-
-        remove_dir_all(&root)?;
-
-        assert!(
-            !root.exists(),
-            "PROPERTY: platform remove_dir_all must remove directories, not only files or leaves"
-        );
-        Ok(())
-    }
-
-    // Exercises every routed StoreFs method through a trait object so the
-    // production RealFs delegation is proven byte-for-byte against the platform
-    // free fns, and every method on the seam is a live vtable entry.
-    #[test]
-    fn real_fs_delegates_routed_ops_like_the_platform_free_fns() -> Result<(), Box<dyn Error>> {
-        let dir = tempfile::tempdir()?;
-        let fs: std::sync::Arc<dyn StoreFs> = std::sync::Arc::new(RealFs);
-
-        // create_dir_all builds the whole tree.
-        let sub = dir.path().join("a").join("b");
-        fs.create_dir_all(&sub)?;
-        assert!(
-            sub.is_dir(),
-            "PROPERTY: RealFs::create_dir_all must create the full nested tree"
-        );
-
-        // read_dir lists what create_dir_all produced (entry errors propagated).
-        std::fs::write(dir.path().join("leaf.bin"), b"leaf")?;
-        let mut names = Vec::new();
-        for entry in fs.read_dir(dir.path())? {
-            names.push(entry?.file_name());
-        }
-        assert!(
-            names.iter().any(|n| n == "leaf.bin") && names.iter().any(|n| n == "a"),
-            "PROPERTY: RealFs::read_dir must list directory entries like the platform free fn"
-        );
-
-        // create_new_file + the sync seam: create a real file, write to it,
-        // fsync via every routed mode, and fsync the parent dir — proving the
-        // RealFs durability methods delegate to the platform free fns and leave
-        // the real bytes durably on disk.
-        use std::io::Write;
-        let seg = dir.path().join("seg.bin");
-        let mut file = fs.create_new_file(&seg)?;
-        file.write_all(b"durable-bytes")?;
-        fs.sync_file_all(&file, &seg)?;
-        fs.sync_file_with_mode(&file, &seg, &crate::store::SyncMode::SyncAll)?;
-        fs.sync_file_with_mode(&file, &seg, &crate::store::SyncMode::SyncData)?;
-        fs.sync_parent_dir(&seg)?;
-        assert_eq!(
-            std::fs::metadata(&seg)?.len(),
-            b"durable-bytes".len() as u64,
-            "PROPERTY: RealFs durability methods persist the real bytes like the platform free fns"
-        );
-        Ok(())
-    }
-
-    // The success-path test above proves the sync wrappers return Ok and persist
-    // bytes; it cannot catch `-> Ok(())` mutants because the real method also
-    // returns Ok on success. These error-path tests pin that the wrappers
-    // actually surface a platform sync failure, so replacing any wrapper body
-    // with `Ok(())` is caught.
-    #[cfg(unix)]
-    #[test]
-    fn real_fs_sync_file_with_mode_surfaces_platform_errors() -> Result<(), Box<dyn Error>> {
-        // A read-only /dev/null fd cannot be fsynced; both sync modes must error.
-        let file = std::fs::File::open("/dev/null")?;
-        let fs = RealFs;
-        let mut failures: Vec<String> = Vec::new();
-        if fs
-            .sync_file_with_mode(
-                &file,
-                std::path::Path::new("/dev/null"),
-                &crate::store::SyncMode::SyncAll,
-            )
-            .is_ok()
-        {
-            failures.push("sync_file_with_mode(SyncAll) must surface the platform error".into());
-        }
-        if fs
-            .sync_file_with_mode(
-                &file,
-                std::path::Path::new("/dev/null"),
-                &crate::store::SyncMode::SyncData,
-            )
-            .is_ok()
-        {
-            failures.push("sync_file_with_mode(SyncData) must surface the platform error".into());
-        }
-        assert!(failures.is_empty(), "{failures:?}");
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn real_fs_sync_file_all_surfaces_platform_errors() -> Result<(), Box<dyn Error>> {
-        let file = std::fs::File::open("/dev/null")?;
-        let fs = RealFs;
-        assert!(
-            fs.sync_file_all(&file, std::path::Path::new("/dev/null"))
-                .is_err(),
-            "RealFs::sync_file_all must surface the platform sync error, not report success"
-        );
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn real_fs_sync_parent_dir_surfaces_missing_parent() -> Result<(), Box<dyn Error>> {
-        // A path whose parent directory does not exist cannot have its directory
-        // entry fsynced; the wrapper must error rather than report success.
-        let fs = RealFs;
-        let dir = tempfile::tempdir()?;
-        let missing_parent = dir.path().join("missing-parent");
-        let missing = missing_parent.join("leaf");
-        assert!(
-            fs.sync_parent_dir(&missing).is_err(),
-            "RealFs::sync_parent_dir must surface an error when the parent dir is absent"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn reject_copy_source_rejects_non_file_source() -> Result<(), Box<dyn Error>> {
-        // A directory is a non-file source: the cow_copy_file ladder must refuse
-        // it rather than silently succeed. Kills `reject_copy_source -> Ok(())`.
-        let dir = tempfile::tempdir()?;
-        let result = reject_copy_source(dir.path());
-        assert!(
-            result.is_err(),
-            "PROPERTY: reject_copy_source must reject a non-file (directory) source"
-        );
-        Ok(())
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reject_copy_source_rejects_symlink_source() -> Result<(), Box<dyn Error>> {
-        // A symlink source must be refused even when it targets a real file:
-        // copying through it would dereference an attacker-controlled link.
-        // Kills `reject_copy_source -> Ok(())` on the symlink branch.
-        let dir = tempfile::tempdir()?;
-        let target = dir.path().join("target.bin");
-        std::fs::write(&target, b"payload")?;
-        let link = dir.path().join("link.bin");
-        std::os::unix::fs::symlink(&target, &link)?;
-
-        let result = reject_copy_source(&link);
-        assert!(
-            result.is_err(),
-            "PROPERTY: reject_copy_source must reject a symlink source (no link dereference)"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn store_fs_fail_closed_boundary_lists_unrouted_tail_ops() {
-        assert_eq!(
-            UNROUTED_STORE_FS_TAIL_OPS.len(),
-            5,
-            "PROPERTY: fail-closed boundary — these platform ops are not on StoreFs yet"
-        );
-        assert!(
-            UNROUTED_STORE_FS_TAIL_OPS.contains(&"remove_file"),
-            "PROPERTY: remove_file remains a direct platform free fn"
-        );
-        assert!(
-            UNROUTED_STORE_FS_TAIL_OPS.contains(&"persist_temp_with_parent_sync"),
-            "PROPERTY: persist_temp_with_parent_sync remains a direct platform free fn"
-        );
-    }
-}
+#[path = "fs_tests.rs"]
+mod tests;

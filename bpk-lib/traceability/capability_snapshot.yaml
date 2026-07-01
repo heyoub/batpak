@@ -94,6 +94,7 @@ witnesses:
   - { id: INV-CONTEXT-VIEWS-DERIVED-FROM-HISTORY, witnessed: true }
   - { id: INV-COORDINATE-IS-LOGICAL-STREAM, witnessed: true }
   - { id: INV-CROSS-DIRECTORY-CONSISTENCY-PRODUCT-OWNED, witnessed: true }
+  - { id: INV-CRYPTO-SHRED-SCOPE-DESTROYS-PLAINTEXT, witnessed: true }
   - { id: INV-DANGEROUS-TEST-HOOKS-NONDEFAULT, witnessed: true }
   - { id: INV-DELIVERY-AT-LEAST-ONCE-WITNESS, witnessed: true }
   - { id: INV-DEPENDENCY-DIRECTION, witnessed: true }
@@ -168,6 +169,7 @@ witnesses:
   - { id: INV-STORE-SYNC-ONLY, witnessed: true }
   - { id: INV-SUBSCRIPTION-STATE-MACHINE, witnessed: true }
   - { id: INV-SUBSTRATE-TRAVERSAL-DOMAIN-NEUTRAL, witnessed: true }
+  - { id: INV-SYNCBAT-CAPABILITY-GRANT-ENFORCEMENT, witnessed: true }
   - { id: INV-SYNCBAT-DISPATCH-RECEIPTS, witnessed: true }
   - { id: INV-SYNCBAT-EFFECT-ROW-ENFORCEMENT, witnessed: true }
   - { id: INV-SYNCBAT-REGISTER-CATALOG-DETERMINISTIC, witnessed: true }

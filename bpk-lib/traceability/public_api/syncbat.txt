@@ -23,6 +23,8 @@ pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_status_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::effect_backend<B>(&mut self, backend: B) -> &mut Self where B: syncbat::effect_backend::EffectBackend + 'static
 pub fn syncbat::builder::CoreBuilder::effect_backend_boxed(&mut self, backend: alloc::boxed::Box<(dyn syncbat::effect_backend::EffectBackend + 'static)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self where I: core::iter::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
+pub fn syncbat::builder::CoreBuilder::grant_capability(&mut self, capability: impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
 pub fn syncbat::builder::CoreBuilder::receipt_hash_policy(&mut self, policy: syncbat::receipt::ReceiptHashPolicy) -> &mut Self
@@ -35,6 +37,7 @@ pub fn syncbat::builder::CoreBuilder::register_item(&mut self, item: syncbat::op
 pub fn syncbat::builder::CoreBuilder::register_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::status_sink<S>(&mut self, sink: S) -> &mut Self where S: syncbat::operation_status_sink::OperationStatusSink + core::marker::Send + core::marker::Sync + 'static
 pub fn syncbat::builder::CoreBuilder::status_sink_boxed(&mut self, sink: alloc::sync::Arc<(dyn syncbat::operation_status_sink::OperationStatusSink + core::marker::Send + core::marker::Sync)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::without_receipts(&mut self) -> &mut Self
 pub mod syncbat::core
 pub struct syncbat::core::Checkout
 impl syncbat::core::Checkout
@@ -93,7 +96,7 @@ impl<'a> syncbat::effect::EventReadHandle<'a>
 pub fn syncbat::effect::EventReadHandle<'a>::read_event(&mut self, event_category: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::effect::HostControlHandle<'a>
 impl<'a> syncbat::effect::HostControlHandle<'a>
-pub fn syncbat::effect::HostControlHandle<'a>::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::HostControlHandle<'a>::use_host_control(&mut self, control: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::effect::ObservedEffectViolation
 impl syncbat::effect::ObservedEffectViolation
 pub const fn syncbat::effect::ObservedEffectViolation::code(&self) -> &'static str
@@ -114,14 +117,14 @@ pub fn syncbat::effect::OperationEffectRow::reads_event(self, event_category: im
 pub fn syncbat::effect::OperationEffectRow::reads_events(&self) -> &[alloc::string::String]
 pub fn syncbat::effect::OperationEffectRow::requires_capabilities(&self) -> &[alloc::string::String]
 pub fn syncbat::effect::OperationEffectRow::requires_capability(self, capability: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn syncbat::effect::OperationEffectRow::uses_host_control(self) -> Self
-pub const fn syncbat::effect::OperationEffectRow::uses_host_controls(&self) -> bool
+pub fn syncbat::effect::OperationEffectRow::uses_host_control(self, control: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::effect::OperationEffectRow::uses_host_controls(&self) -> &[alloc::string::String]
 pub struct syncbat::effect::ProjectionReadHandle<'a>
 impl<'a> syncbat::effect::ProjectionReadHandle<'a>
 pub fn syncbat::effect::ProjectionReadHandle<'a>::query_projection(&mut self, projection_id: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::effect::ReceiptEmitHandle<'a>
 impl<'a> syncbat::effect::ReceiptEmitHandle<'a>
-pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>, payload: impl core::convert::Into<alloc::vec::Vec<u8>>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::effect::append_target(kind: batpak::event::kind::EventKind) -> alloc::string::String
 pub mod syncbat::effect_backend
 pub struct syncbat::effect_backend::EffectError
@@ -136,13 +139,13 @@ pub fn syncbat::effect_backend::EffectBackend::append_event(&mut self, kind: bat
 pub fn syncbat::effect_backend::EffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::effect_backend::EffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::effect_backend::EffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::effect_backend::EffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect_backend::EffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 impl syncbat::effect_backend::EffectBackend for syncbat::store_effect::StoreEffectBackend
 pub fn syncbat::store_effect::StoreEffectBackend::append_event(&mut self, kind: batpak::event::kind::EventKind, payload: &[u8]) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub mod syncbat::error
 #[non_exhaustive] pub enum syncbat::error::BuildError
 pub syncbat::error::BuildError::DuplicateHandler
@@ -162,6 +165,7 @@ pub syncbat::error::BuildError::MissingDescriptor
 pub syncbat::error::BuildError::MissingDescriptor::name: alloc::string::String
 pub syncbat::error::BuildError::MissingHandler
 pub syncbat::error::BuildError::MissingHandler::name: alloc::string::String
+pub syncbat::error::BuildError::MissingReceiptSink
 impl syncbat::error::BuildError
 pub fn syncbat::error::BuildError::duplicate_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::BuildError::duplicate_operation(name: impl core::convert::Into<alloc::string::String>) -> Self
@@ -381,6 +385,7 @@ pub fn syncbat::operation_status_sink::StoreOperationStatusSink::record_fact(&se
 pub fn syncbat::operation_status_sink::operation_status_entity(operation: &str) -> core::result::Result<alloc::string::String, batpak::coordinate::CoordinateError>
 pub mod syncbat::receipt
 #[non_exhaustive] pub enum syncbat::receipt::ReceiptHashPolicy
+pub syncbat::receipt::ReceiptHashPolicy::Blake3
 pub syncbat::receipt::ReceiptHashPolicy::Deferred
 pub syncbat::receipt::ReceiptHashPolicy::RawBytes(alloc::sync::Arc<dyn syncbat::receipt::ReceiptHasher>)
 impl syncbat::receipt::ReceiptHashPolicy
@@ -569,7 +574,7 @@ pub fn syncbat::store_effect::StoreEffectBackend::append_event(&mut self, kind: 
 pub fn syncbat::store_effect::StoreEffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub mod syncbat::store_sink
 #[non_exhaustive] pub enum syncbat::store_sink::StoreReceiptSinkError
 pub syncbat::store_sink::StoreReceiptSinkError::ExtensionKey(batpak::store::append::ExtensionKeyError)
@@ -722,7 +727,7 @@ pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::scope: alloc::string:
 pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::EntityStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EntityStreamEnvelopeV1
-pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::EntityStreamRouteBinding
 pub syncbat::subscription_runtime::EntityStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::subscription_runtime::EntityStreamRouteBinding::entity: alloc::string::String
@@ -769,7 +774,7 @@ pub syncbat::subscription_runtime::EventStreamEnvelopeV1::scope: alloc::string::
 pub syncbat::subscription_runtime::EventStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::EventStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EventStreamEnvelopeV1
-pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::EventStreamSession
 impl syncbat::EventStreamSession
 pub fn syncbat::EventStreamSession::drain_control(&mut self) -> core::result::Result<(), syncbat::SubscriptionRuntimeError>
@@ -894,7 +899,7 @@ pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::scope: alloc::string
 pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::subscription_runtime::ReceiptStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::ReceiptStreamEnvelopeV1
-pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<(Self, alloc::vec::Vec<u8>), syncbat::SubscriptionRuntimeError>
+pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<(Self, alloc::vec::Vec<u8>)>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::subscription_runtime::ReceiptStreamRouteBinding
 pub syncbat::subscription_runtime::ReceiptStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::subscription_runtime::ReceiptStreamRouteBinding::inner_receipt_schema_ref: core::option::Option<alloc::string::String>
@@ -1019,6 +1024,7 @@ pub syncbat::BuildError::MissingDescriptor
 pub syncbat::BuildError::MissingDescriptor::name: alloc::string::String
 pub syncbat::BuildError::MissingHandler
 pub syncbat::BuildError::MissingHandler::name: alloc::string::String
+pub syncbat::BuildError::MissingReceiptSink
 impl syncbat::error::BuildError
 pub fn syncbat::error::BuildError::duplicate_handler(name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn syncbat::error::BuildError::duplicate_operation(name: impl core::convert::Into<alloc::string::String>) -> Self
@@ -1068,6 +1074,7 @@ pub syncbat::OperationStatusLifecycle::Denied
 pub syncbat::OperationStatusLifecycle::Failed
 pub syncbat::OperationStatusLifecycle::Started
 #[non_exhaustive] pub enum syncbat::ReceiptHashPolicy
+pub syncbat::ReceiptHashPolicy::Blake3
 pub syncbat::ReceiptHashPolicy::Deferred
 pub syncbat::ReceiptHashPolicy::RawBytes(alloc::sync::Arc<dyn syncbat::receipt::ReceiptHasher>)
 impl syncbat::receipt::ReceiptHashPolicy
@@ -1324,6 +1331,8 @@ pub fn syncbat::builder::CoreBuilder::clear_receipt_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::clear_status_sink(&mut self) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::effect_backend<B>(&mut self, backend: B) -> &mut Self where B: syncbat::effect_backend::EffectBackend + 'static
 pub fn syncbat::builder::CoreBuilder::effect_backend_boxed(&mut self, backend: alloc::boxed::Box<(dyn syncbat::effect_backend::EffectBackend + 'static)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::grant_capabilities<I, S>(&mut self, capabilities: I) -> &mut Self where I: core::iter::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
+pub fn syncbat::builder::CoreBuilder::grant_capability(&mut self, capability: impl core::convert::Into<alloc::string::String>) -> &mut Self
 pub fn syncbat::builder::CoreBuilder::mount(&mut self, module: syncbat::module::Module) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::new() -> Self
 pub fn syncbat::builder::CoreBuilder::receipt_hash_policy(&mut self, policy: syncbat::receipt::ReceiptHashPolicy) -> &mut Self
@@ -1336,6 +1345,7 @@ pub fn syncbat::builder::CoreBuilder::register_item(&mut self, item: syncbat::op
 pub fn syncbat::builder::CoreBuilder::register_operation(&mut self, descriptor: syncbat::operation::OperationDescriptor) -> core::result::Result<&mut Self, syncbat::error::BuildError>
 pub fn syncbat::builder::CoreBuilder::status_sink<S>(&mut self, sink: S) -> &mut Self where S: syncbat::operation_status_sink::OperationStatusSink + core::marker::Send + core::marker::Sync + 'static
 pub fn syncbat::builder::CoreBuilder::status_sink_boxed(&mut self, sink: alloc::sync::Arc<(dyn syncbat::operation_status_sink::OperationStatusSink + core::marker::Send + core::marker::Sync)>) -> &mut Self
+pub fn syncbat::builder::CoreBuilder::without_receipts(&mut self) -> &mut Self
 pub struct syncbat::Ctx<'a>
 impl<'a> syncbat::core::Ctx<'a>
 pub fn syncbat::core::Ctx<'a>::attach_local_extension(&mut self, key: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::vec::Vec<u8>>)
@@ -1400,7 +1410,7 @@ pub syncbat::EntityStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::EntityStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::EntityStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EntityStreamEnvelopeV1
-pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EntityStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::EntityStreamRouteBinding
 pub syncbat::EntityStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::EntityStreamRouteBinding::entity: alloc::string::String
@@ -1453,7 +1463,7 @@ pub syncbat::EventStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::EventStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::EventStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::EventStreamEnvelopeV1
-pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<alloc::vec::Vec<u8>, syncbat::SubscriptionRuntimeError>
+pub fn syncbat::EventStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, entry: &batpak::store::index::entry::IndexEntry, inner_event_payload_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::EventStreamSession
 impl syncbat::EventStreamSession
 pub fn syncbat::EventStreamSession::drain_control(&mut self) -> core::result::Result<(), syncbat::SubscriptionRuntimeError>
@@ -1469,7 +1479,7 @@ impl syncbat::SubscriptionSessionFactory for syncbat::EventSubscriptionRuntime
 pub fn syncbat::EventSubscriptionRuntime::open_session(&self, subscription_id: &str, resume_cursor: core::option::Option<&[u8]>, client_window: u32, control_rx: flume::Receiver<syncbat::SessionControl>) -> core::result::Result<alloc::boxed::Box<dyn syncbat::SubscriptionSession>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::HostControlHandle<'a>
 impl<'a> syncbat::effect::HostControlHandle<'a>
-pub fn syncbat::effect::HostControlHandle<'a>::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::HostControlHandle<'a>::use_host_control(&mut self, control: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::Module
 impl syncbat::module::Module
 pub fn syncbat::module::Module::from_operations<I>(name: impl core::convert::Into<alloc::string::String>, operations: I) -> core::result::Result<Self, syncbat::register::RegisterValidationError> where I: core::iter::IntoIterator<Item = syncbat::operation::OperationDescriptor>
@@ -1517,8 +1527,8 @@ pub fn syncbat::effect::OperationEffectRow::reads_event(self, event_category: im
 pub fn syncbat::effect::OperationEffectRow::reads_events(&self) -> &[alloc::string::String]
 pub fn syncbat::effect::OperationEffectRow::requires_capabilities(&self) -> &[alloc::string::String]
 pub fn syncbat::effect::OperationEffectRow::requires_capability(self, capability: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn syncbat::effect::OperationEffectRow::uses_host_control(self) -> Self
-pub const fn syncbat::effect::OperationEffectRow::uses_host_controls(&self) -> bool
+pub fn syncbat::effect::OperationEffectRow::uses_host_control(self, control: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn syncbat::effect::OperationEffectRow::uses_host_controls(&self) -> &[alloc::string::String]
 pub struct syncbat::OperationName(_)
 impl syncbat::operation_name::OperationName
 pub const syncbat::operation_name::OperationName::MAX_BYTES: usize
@@ -1658,7 +1668,7 @@ impl<T> syncbat::SubscriptionSession for syncbat::ProjectionStreamSession<T> whe
 pub fn syncbat::ProjectionStreamSession<T>::poll(&mut self, timeout: core::time::Duration) -> core::result::Result<syncbat::SessionPoll, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::ReceiptEmitHandle<'a>
 impl<'a> syncbat::effect::ReceiptEmitHandle<'a>
-pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::effect::ReceiptEmitHandle<'a>::emit_receipt(&mut self, receipt_kind: impl core::convert::Into<alloc::string::String>, payload: impl core::convert::Into<alloc::vec::Vec<u8>>) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 #[non_exhaustive] pub struct syncbat::ReceiptEnvelope
 pub syncbat::ReceiptEnvelope::descriptor_name: alloc::string::String
 pub syncbat::ReceiptEnvelope::input_hash: core::option::Option<syncbat::receipt::ReceiptHash>
@@ -1731,7 +1741,7 @@ pub syncbat::ReceiptStreamEnvelopeV1::scope: alloc::string::String
 pub syncbat::ReceiptStreamEnvelopeV1::subscription_id: alloc::string::String
 pub syncbat::ReceiptStreamEnvelopeV1::timestamp_us: i64
 impl syncbat::ReceiptStreamEnvelopeV1
-pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<(Self, alloc::vec::Vec<u8>), syncbat::SubscriptionRuntimeError>
+pub fn syncbat::ReceiptStreamEnvelopeV1::encode_for_entry(store: &batpak::store::Store<batpak::store::Open>, subscription_id: &str, route_receipt_kind: &str, entry: &batpak::store::index::entry::IndexEntry, inner_receipt_schema_ref: core::option::Option<&str>) -> core::result::Result<core::option::Option<(Self, alloc::vec::Vec<u8>)>, syncbat::SubscriptionRuntimeError>
 pub struct syncbat::ReceiptStreamRouteBinding
 pub syncbat::ReceiptStreamRouteBinding::backpressure_capacity: core::option::Option<usize>
 pub syncbat::ReceiptStreamRouteBinding::inner_receipt_schema_ref: core::option::Option<alloc::string::String>
@@ -1819,7 +1829,7 @@ pub fn syncbat::store_effect::StoreEffectBackend::append_event(&mut self, kind: 
 pub fn syncbat::store_effect::StoreEffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub struct syncbat::StoreOperationStatusSink
 impl syncbat::operation_status_sink::StoreOperationStatusSink
 pub fn syncbat::operation_status_sink::StoreOperationStatusSink::new(store: alloc::sync::Arc<batpak::store::Store<batpak::store::Open>>) -> Self
@@ -1898,13 +1908,13 @@ pub fn syncbat::EffectBackend::append_event(&mut self, kind: batpak::event::kind
 pub fn syncbat::EffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::EffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::EffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::EffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::EffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 impl syncbat::effect_backend::EffectBackend for syncbat::store_effect::StoreEffectBackend
 pub fn syncbat::store_effect::StoreEffectBackend::append_event(&mut self, kind: batpak::event::kind::EventKind, payload: &[u8]) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::emit_receipt(&mut self, receipt_kind: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::query_projection(&mut self, projection_id: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub fn syncbat::store_effect::StoreEffectBackend::read_event(&mut self, event_category: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
-pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self) -> core::result::Result<(), syncbat::effect_backend::EffectError>
+pub fn syncbat::store_effect::StoreEffectBackend::use_host_control(&mut self, control: &str) -> core::result::Result<(), syncbat::effect_backend::EffectError>
 pub trait syncbat::Handler
 pub fn syncbat::Handler::handle(&mut self, input: &[u8], cx: &mut syncbat::core::Ctx<'_>) -> syncbat::handler::HandlerResult
 impl<F> syncbat::handler::Handler for F where F: for<'a> core::ops::function::FnMut(&[u8], &mut syncbat::core::Ctx<'a>) -> syncbat::handler::HandlerResult

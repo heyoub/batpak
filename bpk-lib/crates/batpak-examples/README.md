@@ -36,8 +36,8 @@ Build all demos: `cargo build -p batpak-examples --bins`.
 
 ## Advanced Typestate
 
-- `dungeon_typestate.rs` - typestate transition flow with compile-time shape. Run: `cargo run -p batpak-examples --bin dungeon_typestate`.
-- `chat_room.rs` - larger end-to-end example that combines multiple surfaces. Run: `cargo run -p batpak-examples --bin chat_room`.
+- `typestate_transitions.rs` - typestate transition flow with compile-time shape. Run: `cargo run -p batpak-examples --bin typestate_transitions`.
+- `subscription_fanout.rs` - larger end-to-end example that combines multiple surfaces. Run: `cargo run -p batpak-examples --bin subscription_fanout`.
 - `submit_pipeline.rs` - explicit submit pipeline and ticket handling. Run: `cargo run -p batpak-examples --bin submit_pipeline`.
 
 ## 0.9.0 Headline Features

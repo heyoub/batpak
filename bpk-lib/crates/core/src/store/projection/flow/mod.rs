@@ -1,4 +1,6 @@
 mod cache_identity;
+#[cfg(feature = "payload-encryption")]
+mod encrypted_replay;
 mod external_cache;
 mod fusion;
 mod outcome;
@@ -560,7 +562,7 @@ where
         .iter()
         .map(|item| &item.disk_pos)
         .collect();
-    let events = I::read_batch(&store.reader, &positions)?;
+    let events = read_events_for_replay::<I, State>(store, execution.entity, &positions)?;
     if let Some(t) = timings.as_deref_mut() {
         t.disk_read_us = elapsed_us(store.runtime.clock(), t_disk);
         // No separate extraction step -- replay lanes return Event directly.
@@ -634,10 +636,57 @@ where
         .iter()
         .filter(|item| item.global_sequence > cached_watermark)
     {
-        let event = I::read_one(&store.reader, &item.disk_pos)?;
-        cached_state.apply_event(&event);
+        // A crypto-shredded event yields `None` here (skip-with-awareness); the
+        // watermark still advanced past it, so this incremental fold and a full
+        // replay skip the SAME events and agree.
+        if let Some(event) =
+            read_one_for_replay::<I, State>(store, execution.entity, &item.disk_pos)?
+        {
+            cached_state.apply_event(&event);
+        }
     }
     Ok(())
+}
+
+/// Read the full replay batch, decrypting encrypted payloads under the store's
+/// keyset when encryption is configured (Stage E1). With no keyset (the default,
+/// and every non-`payload-encryption` build) this is the byte-identical
+/// pre-encryption batch read.
+fn read_events_for_replay<I, State: crate::store::StoreState>(
+    store: &Store<State>,
+    entity: &str,
+    positions: &[&crate::store::index::DiskPos],
+) -> Result<Vec<crate::event::Event<I::Payload>>, StoreError>
+where
+    I: ReplayInput,
+{
+    #[cfg(feature = "payload-encryption")]
+    if store.key_store.is_some() {
+        return encrypted_replay::read_batch_key_aware::<I, State>(store, entity, positions);
+    }
+    #[cfg(not(feature = "payload-encryption"))]
+    let _ = entity;
+    I::read_batch(&store.reader, positions)
+}
+
+/// Read one replay event, decrypting under the keyset when encryption is
+/// configured. Returns `Ok(None)` only for a crypto-shredded event
+/// (skip-with-awareness); the no-keyset path always returns `Ok(Some(_))`.
+fn read_one_for_replay<I, State: crate::store::StoreState>(
+    store: &Store<State>,
+    entity: &str,
+    pos: &crate::store::index::DiskPos,
+) -> Result<Option<crate::event::Event<I::Payload>>, StoreError>
+where
+    I: ReplayInput,
+{
+    #[cfg(feature = "payload-encryption")]
+    if store.key_store.is_some() {
+        return encrypted_replay::read_one_key_aware::<I, State>(store, entity, pos);
+    }
+    #[cfg(not(feature = "payload-encryption"))]
+    let _ = entity;
+    Ok(Some(I::read_one(&store.reader, pos)?))
 }
 
 fn store_projection_value<T, State: crate::store::StoreState>(

@@ -21,4 +21,4 @@ sha2 = "0.11"
 tempfile = ">=3.24, <3.25"
 toml = "1.1"
 # Substrate store for the opt-in factory command ledger (`factory-ledger`).
-batpak = { path = "../../crates/core", version = "0.8.3", default-features = false }
+batpak = { path = "../../crates/core", version = "0.9.0", default-features = false }

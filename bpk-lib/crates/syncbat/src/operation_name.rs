@@ -3,7 +3,7 @@
 //! [`OperationName`] is the substrate-wide newtype that owns the operation-name
 //! grammar. Every other validator at any layer (operation-descriptor catalog
 //! insertion, module/register checks, netbat route boundary, netbat wire-frame
-//! decode, TS client) MUST reach for this type instead of re-coding the
+//! decode) MUST reach for this type instead of re-coding the
 //! grammar.
 //!
 //! Grammar:

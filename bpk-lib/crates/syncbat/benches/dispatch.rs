@@ -23,6 +23,7 @@ impl Handler for EchoHandler {
 fn core() -> Core {
     let mut builder = Core::builder();
     builder.register(ECHO, EchoHandler).expect("register echo");
+    builder.without_receipts();
     builder.build().expect("build syncbat core")
 }
 

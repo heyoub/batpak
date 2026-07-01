@@ -33,11 +33,16 @@ slow-timeout = { period = "300s", terminate-after = 2 }
 filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reopen_paths_match)"
 slow-timeout = { period = "120s", terminate-after = 2 }
 
-# Compile-fail and downstream-fixture tests intentionally invoke nested Cargo
-# builds. Cold CI hosts can exceed the global 180s timeout while still making
-# progress, so keep the extra budget local to those compile-heavy surfaces.
+# Compile-fail, downstream-fixture, and the subprocess registry/collision fixtures
+# intentionally invoke nested Cargo builds (they `cargo build --release` a fixture
+# crate and run it). Cold / saturated CI hosts — notably the mutation runner, which
+# is CPU-bound — can blow past the 60s default on the first cold fixture compile
+# while still making progress, so keep the extra budget local to those compile-heavy
+# surfaces. (`event_payload_registry_startup` + `event_payload_collision_default_fail_fast`
+# are the subprocess-fixture drivers; timing out there is a build-speed artifact, not
+# a real failure.)
 [[profile.ci.overrides]]
-filter = "test(compile_fail) | test(downstream_fixture)"
+filter = "test(compile_fail) | test(downstream_fixture) | test(release_binary_) | test(startup_registry_check_feature_aborts) | test(refuses_open_on_kind_collision) | test(warn_opt_in_still_opens_on_kind_collision)"
 slow-timeout = { period = "300s", terminate-after = 2 }
 
 [profile.default.junit]
@@ -66,5 +71,5 @@ filter = "test(all_view_topologies) | test(reopened_view_topologies) | test(reop
 slow-timeout = { period = "120s", terminate-after = 2 }
 
 [[profile.mutants.overrides]]
-filter = "test(compile_fail) | test(downstream_fixture)"
+filter = "test(compile_fail) | test(downstream_fixture) | test(release_binary_) | test(startup_registry_check_feature_aborts) | test(refuses_open_on_kind_collision) | test(warn_opt_in_still_opens_on_kind_collision)"
 slow-timeout = { period = "300s", terminate-after = 2 }

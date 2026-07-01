@@ -7,7 +7,9 @@ use flume::{Receiver, RecvTimeoutError, TryRecvError};
 
 use super::config::SubscriptionRuntimeConfig;
 use super::cursor::EntityStreamCursorV1;
-use super::envelope::EntityStreamEnvelopeV1;
+use super::envelope::{
+    entity_stream_envelope_bytes_from_stored, read_delivery_stored, warn_shredded_delivery,
+};
 use super::error::SubscriptionRuntimeError;
 use super::registry::{EntityStreamRouteBinding, SubscriptionRegistry, SubscriptionRoute};
 use super::session::{
@@ -354,6 +356,22 @@ impl EntityStreamSession {
             if coord.entity() != self.route.entity.as_str() || coord.scope() != self.route.scope {
                 continue;
             }
+            let cursor_after = EntityStreamCursorV1::after_global_sequence(
+                &self.subscription_id,
+                &self.route.entity,
+                &self.route.scope,
+                global_sequence,
+                entry.wall_ms(),
+            );
+            // Key-aware delivery read: decrypt at the core boundary. A crypto-shredded
+            // event yields `None` — skip it LOUDLY and advance the cursor past it so
+            // ordering stays coherent (never stall, never ship the ciphertext).
+            let Some(stored) = read_delivery_stored(self.store.inner.as_ref(), entry.event_id())?
+            else {
+                warn_shredded_delivery("entity_stream", &self.subscription_id, entry.event_id());
+                self.cursor_before_next = cursor_after;
+                continue;
+            };
             if self.in_flight() >= self.route.queue_cap {
                 self.phase = SessionPhase::Ended;
                 let error = SessionDelivery::Error(slow_consumer_error(
@@ -365,17 +383,10 @@ impl EntityStreamSession {
                 return Ok(Some(error));
             }
             let cursor_before = self.cursor_before_next.clone();
-            let cursor_after = EntityStreamCursorV1::after_global_sequence(
-                &self.subscription_id,
-                &self.route.entity,
-                &self.route.scope,
-                global_sequence,
-                entry.wall_ms(),
-            );
-            let envelope_bytes = EntityStreamEnvelopeV1::encode_for_entry(
-                self.store.inner.as_ref(),
+            let envelope_bytes = entity_stream_envelope_bytes_from_stored(
                 &self.subscription_id,
                 &entry,
+                &stored,
                 self.route.inner_event_payload_schema_ref.as_deref(),
             )?;
             let delivery_index = self.delivery_index;

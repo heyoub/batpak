@@ -105,6 +105,7 @@ fn shutdown_drain_limit_is_exclusive_upper_bound() {
         config.data_dir.clone(),
         config.fd_budget,
         &validated_cfg.clock_arc(),
+        Arc::clone(config.fs()),
     ));
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();
@@ -183,6 +184,7 @@ fn shutdown_drain_limit_zero_drains_no_commands_behind_shutdown() {
         config.data_dir.clone(),
         config.fd_budget,
         &validated_cfg.clock_arc(),
+        Arc::clone(config.fs()),
     ));
     let subscribers = SubscriberList::new();
     let reactor_subscribers = ReactorSubscriberList::new();

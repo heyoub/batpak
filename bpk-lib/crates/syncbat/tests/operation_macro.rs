@@ -112,6 +112,7 @@ fn operation_macro_effect_row_converges_with_hand_built_descriptor_bytes() {
 fn generated_register_function_invokes_successfully() {
     let mut builder = Core::builder();
     register_echo(&mut builder).expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
@@ -125,6 +126,7 @@ fn generated_effectful_register_function_invokes_successfully() {
     let mut builder = Core::builder();
     register_append_audit(&mut builder).expect("register");
     builder.effect_backend(NoopBackend);
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let result = core
@@ -139,6 +141,7 @@ fn generated_effectful_register_function_invokes_successfully() {
 fn generated_register_function_maps_handler_failure() {
     let mut builder = Core::builder();
     register_failing(&mut builder).expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let err = core

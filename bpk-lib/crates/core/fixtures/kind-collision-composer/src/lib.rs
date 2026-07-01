@@ -35,13 +35,19 @@ mod tests {
     }
 
     #[test]
-    fn default_warn_mode_does_not_fail_store_open() {
+    fn explicit_warn_mode_does_not_fail_store_open() {
         let _ = batpak_kind_collision_a::kind();
         let _ = batpak_kind_collision_b::kind();
         let _ = batpak_kind_feature_split::feature_kind();
 
+        // Warn is now an explicit opt-out: the default is FailFast, which would
+        // refuse to open this composed binary because its linked payload
+        // registry carries a real cross-crate collision. Requesting Warn keeps
+        // the log-and-proceed behavior reachable for callers who want it.
         let dir = tempfile::tempdir().expect("temp dir");
-        let store = Store::open(StoreConfig::new(dir.path())).expect("warn mode open");
+        let config =
+            StoreConfig::new(dir.path()).with_event_payload_validation(EventPayloadValidation::Warn);
+        let store = Store::open(config).expect("explicit warn mode open");
         store.close().expect("close store");
     }
 

@@ -1,16 +1,20 @@
 mod error;
 mod frame;
 mod hex;
+mod limiter;
 mod limits;
 mod stream_frame;
 mod stream_tcp;
 mod tcp;
+#[cfg(feature = "tls")]
+mod tls;
 
 pub use error::NetbatError;
 pub use frame::{
     decode_line, dispatch_frame, encode_request, encode_response, RequestFrame, ResponseFrame,
 };
 pub use hex::{decode_hex, decode_hex_str, encode_hex, encode_hex_into, encode_hex_str};
+pub use limiter::{ConnectionLimit, DEFAULT_MAX_CONNECTIONS};
 pub use limits::{
     IoTimeouts, Limits, CALL_VERB, DEFAULT_MAX_CURSOR_BYTES, DEFAULT_MAX_INPUT_BYTES,
     DEFAULT_MAX_LINE_BYTES, DEFAULT_MAX_OPERATION_NAME_BYTES, DEFAULT_MAX_OUTPUT_BYTES,
@@ -25,10 +29,13 @@ pub use stream_frame::{
     SubErrFrame, SubEventFrame, SubWatermarkFrame, SubscribeFrame, SubscriptionToken,
 };
 pub use stream_tcp::{
-    serve_subscription_stream, serve_tcp_subscription_listener, TcpSubscriptionServeStats,
+    serve_subscription_stream, serve_tcp_subscription_listener,
+    serve_tcp_subscription_listener_secured, SubscriptionDispatch, TcpSubscriptionServeStats,
     TcpSubscriptionServerConfig,
 };
 pub use tcp::{
-    serve_stream, serve_tcp_listener, ShutdownHandle, TcpServeStats, TcpServerConfig,
-    DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_REQUESTS_PER_CONNECTION,
+    serve_stream, serve_tcp_listener, serve_tcp_listener_secured, ShutdownHandle, TcpServeStats,
+    TcpServerConfig, TransportSecurity, DEFAULT_MAX_REQUESTS_PER_CONNECTION,
 };
+#[cfg(feature = "tls")]
+pub use tls::TlsServerConfig;

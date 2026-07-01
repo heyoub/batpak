@@ -9,7 +9,7 @@ use crate::receipt::{ReceiptEnvelope, SYNCBAT_RECEIPT_EVENT_KIND};
 
 use super::config::SubscriptionRuntimeConfig;
 use super::cursor::ReceiptStreamCursorV1;
-use super::envelope::ReceiptStreamEnvelopeV1;
+use super::envelope::{read_delivery_stored, receipt_envelope_from_stored, warn_shredded_delivery};
 use super::error::SubscriptionRuntimeError;
 use super::registry::{ReceiptStreamRouteBinding, SubscriptionRegistry, SubscriptionRoute};
 use super::session::{
@@ -349,7 +349,14 @@ impl ReceiptStreamSession {
         for entry in entries {
             let global_sequence = entry.global_sequence();
             self.scan_after_global_sequence = Some(global_sequence);
-            let stored = self.store.inner.read_raw(entry.event_id())?;
+            // Key-aware delivery read: decrypt at the core boundary. A crypto-shredded
+            // receipt yields `None` — skip it LOUDLY; the scan cursor already advanced
+            // past it above, so delivery stays coherent (never the ciphertext).
+            let Some(stored) = read_delivery_stored(self.store.inner.as_ref(), entry.event_id())?
+            else {
+                warn_shredded_delivery("receipt_stream", &self.subscription_id, entry.event_id());
+                continue;
+            };
             let receipt: ReceiptEnvelope =
                 match batpak::canonical::from_bytes(&stored.event.payload) {
                     Ok(receipt) => receipt,
@@ -384,11 +391,12 @@ impl ReceiptStreamSession {
                 global_sequence,
                 entry.wall_ms(),
             );
-            let (_envelope, envelope_bytes) = ReceiptStreamEnvelopeV1::encode_for_entry(
-                self.store.inner.as_ref(),
+            let (_envelope, envelope_bytes) = receipt_envelope_from_stored(
                 &self.subscription_id,
                 &self.route.receipt_kind,
                 &entry,
+                &stored,
+                &receipt,
                 self.route.inner_receipt_schema_ref.as_deref(),
             )?;
             let delivery_index = self.delivery_index;

@@ -84,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         INCREMENTED,
         &Delta {
             amount: 3,
-            reason: "signup".into(),
+            reason: "manual".into(),
         },
     )?;
     let _ = store.append(
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         INCREMENTED,
         &Delta {
             amount: 2,
-            reason: "bonus".into(),
+            reason: "batch".into(),
         },
     )?;
 

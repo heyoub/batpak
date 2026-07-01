@@ -111,6 +111,7 @@ fn parallel_sidx_footer_read_matches_sequential_footer_read() {
         16,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let (parallel, _) =
         read_sealed_sidx_entries_parallel(&reader, &sealed_segments, NO_FAULT_INJECTOR)
@@ -133,6 +134,7 @@ fn build_snapshot_plan_keeps_chunk_count_when_tail_is_empty() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let clock = crate::store::SystemClock::new();
     let planner = RestorePlanner {
@@ -202,6 +204,7 @@ fn build_snapshot_plan_rejects_snapshot_entries_without_backing_frames() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let clock = crate::store::SystemClock::new();
     let planner = RestorePlanner {
@@ -265,6 +268,7 @@ fn build_snapshot_plan_adds_chunk_when_tail_is_present() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     reader.set_active_segment(active_after_tail);
     let clock = crate::store::SystemClock::new();
@@ -327,6 +331,8 @@ fn entry_from_scan_normalizes_zero_causation() {
             flags: 0,
             content_hash: [0u8; 32],
             payload_version: 0,
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: None,
         },
         entity: "entity:test".to_string(),
         scope: "scope:test".to_string(),
@@ -363,6 +369,8 @@ fn entry_from_scan_preserves_nonzero_causation() {
             flags: 0,
             content_hash: [0u8; 32],
             payload_version: 0,
+            #[cfg(feature = "payload-encryption")]
+            payload_encryption: None,
         },
         entity: "entity:test".to_string(),
         scope: "scope:test".to_string(),
@@ -389,7 +397,8 @@ fn segment_paths_ignore_superseded_sources_when_merge_is_present() {
     std::fs::write(&superseded_path, []).expect("write superseded");
     std::fs::write(&untouched_path, []).expect("write untouched");
     std::fs::write(&temp_source_path, []).expect("write temp source");
-    write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+    write_pending_compaction(dir.path(), 1, &[1, 2], &crate::store::platform::fs::RealFs)
+        .expect("write marker");
 
     let paths = segment_paths(dir.path()).expect("segment paths");
     let ids: Vec<_> = paths.iter().map(|(segment_id, _)| *segment_id).collect();
@@ -415,7 +424,8 @@ fn segment_paths_restore_temp_source_when_merge_not_published() {
     std::fs::write(&temp_source_path, []).expect("write temp source");
     std::fs::write(&source_path, []).expect("write source");
     std::fs::write(&untouched_path, []).expect("write untouched");
-    write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+    write_pending_compaction(dir.path(), 1, &[1, 2], &crate::store::platform::fs::RealFs)
+        .expect("write marker");
 
     let paths = segment_paths(dir.path()).expect("segment paths");
     let ids: Vec<_> = paths.iter().map(|(segment_id, _)| *segment_id).collect();
@@ -438,7 +448,8 @@ fn segment_paths_reject_missing_sources_even_if_unrelated_segments_exist() {
     let unrelated_path = dir.path().join(segment::segment_filename(99));
 
     std::fs::write(&unrelated_path, []).expect("write unrelated segment");
-    write_pending_compaction(dir.path(), 1, &[1, 2]).expect("write marker");
+    write_pending_compaction(dir.path(), 1, &[1, 2], &crate::store::platform::fs::RealFs)
+        .expect("write marker");
 
     let err = segment_paths(dir.path()).expect_err(
         "PROPERTY: pending compaction must fail when a declared source segment is missing",
@@ -454,7 +465,7 @@ fn segment_paths_reject_missing_sources_even_if_unrelated_segments_exist() {
 fn clear_pending_compaction_is_idempotent_when_marker_is_absent() {
     let dir = TempDir::new().expect("temp dir");
 
-    clear_pending_compaction(dir.path())
+    clear_pending_compaction(dir.path(), &crate::store::platform::fs::RealFs)
         .expect("PROPERTY: clearing an absent pending-compaction marker must be idempotent");
 }
 
@@ -479,13 +490,20 @@ fn open_index_skips_fast_paths_when_pending_compaction_marker_exists() {
 
     let existing = segment_paths(dir.path()).expect("segment paths");
     let merged_id = existing.first().expect("segment id").0;
-    write_pending_compaction(dir.path(), merged_id, &[merged_id]).expect("write marker");
+    write_pending_compaction(
+        dir.path(),
+        merged_id,
+        &[merged_id],
+        &crate::store::platform::fs::RealFs,
+    )
+    .expect("write marker");
 
     let reader = Reader::new(
         dir.path().to_path_buf(),
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     let index = StoreIndex::new();
     let report = open_index(
@@ -539,6 +557,7 @@ fn collect_tail_entries_keeps_events_from_the_watermark_segment() {
         4,
         &(std::sync::Arc::new(crate::store::SystemClock::new())
             as std::sync::Arc<dyn crate::store::Clock>),
+        std::sync::Arc::new(crate::store::platform::fs::RealFs),
     );
     reader.set_active_segment(highest_segment_id + 1);
     let tail_entries = collect_tail_entries(

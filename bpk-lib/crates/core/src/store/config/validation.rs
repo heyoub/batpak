@@ -1,4 +1,4 @@
-use super::{Clock, MonotonicClock, StoreConfig, SystemClock};
+use super::{Clock, MonotonicClock, SigningPolicy, StoreConfig, SystemClock};
 use crate::store::cold_start::ColdStartPolicy;
 use crate::store::signing::ReceiptSigningRegistry;
 use crate::store::StoreError;
@@ -13,6 +13,17 @@ pub(crate) struct ValidatedStoreConfig {
     pub(crate) shutdown_drain_limit: usize,
     pub(crate) group_commit_drain_budget: u32,
     pub(crate) signing_registry: ReceiptSigningRegistry,
+    /// Shared crypto-shred keyset (opt-in `payload-encryption`).
+    ///
+    /// The SAME `Arc<Mutex<KeyStore>>` the [`Store`](crate::store::Store) holds:
+    /// stashed here purely so the background writer — which already carries the
+    /// runtime but not the store handle — can mint + seal + flush under the
+    /// append path while the store's read path opens under the identical live
+    /// keyset. Injected during `open` (see `open::open_components`); `None`
+    /// whenever encryption is not configured.
+    #[cfg(feature = "payload-encryption")]
+    pub(crate) key_store:
+        Option<std::sync::Arc<parking_lot::Mutex<crate::store::keyscope::KeyStore>>>,
     clock: Arc<dyn Clock>,
 }
 
@@ -62,6 +73,14 @@ impl StoreConfig {
                 "batch.max_bytes must be 1..=16MB".into(),
             ));
         }
+        if matches!(self.signing_policy, SigningPolicy::Required) && self.signing_keys.is_empty() {
+            return Err(StoreError::Configuration(
+                "SigningPolicy::Required but no signing key configured: add one with \
+                 StoreConfig::with_signing_key, or permit unsigned receipts with \
+                 StoreConfig::with_signing_policy(SigningPolicy::Optional)"
+                    .into(),
+            ));
+        }
         // group_commit_max_batch: 0 = unbounded drain (writer drains all pending
         // appends before syncing); 1 = per-event sync (default single-event behavior);
         // N > 1 = drain up to N-1 additional appends before syncing.
@@ -90,7 +109,14 @@ impl StoreConfig {
             ),
             shutdown_drain_limit: self.writer.shutdown_drain_limit,
             group_commit_drain_budget,
-            signing_registry: ReceiptSigningRegistry::from_keys(&self.signing_keys),
+            signing_registry: ReceiptSigningRegistry::from_keys(
+                &self.signing_keys,
+                self.signing_downgrade_allowed,
+            ),
+            // Populated during `open` once the durable keyset is rehydrated from
+            // disk; `validated()` runs before any disk access.
+            #[cfg(feature = "payload-encryption")]
+            key_store: None,
             clock: Arc::new(MonotonicClock::wrap(
                 self.clock
                     .clone()

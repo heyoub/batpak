@@ -117,6 +117,7 @@ impl Write for InterruptedThenData {
 fn core_with_ping() -> Core {
     let mut builder = Core::builder();
     builder.register(PING, PingHandler).expect("register");
+    builder.without_receipts();
     builder.build().expect("core builds")
 }
 
@@ -345,6 +346,7 @@ fn unknown_operation_maps_to_stable_error_response() {
 fn handler_failure_maps_without_losing_class_or_message() {
     let mut builder = Core::builder();
     builder.register(PING, FailingHandler).expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
     let mut stream = Cursor::new(fixture_bytes(
         "request_decode_input",
@@ -581,6 +583,7 @@ fn output_limit_fails_closed_after_dispatch() {
             },
         )
         .expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
     let limits = nb::Limits::default().with_max_output_bytes(1);
 

@@ -38,7 +38,7 @@ struct ParsedOperationArgs {
     appends_events: Vec<Lit>,
     queries_projections: Vec<Lit>,
     emits_receipts: Vec<Lit>,
-    uses_host_controls: bool,
+    uses_host_controls: Vec<Lit>,
     requires_capabilities: Vec<Lit>,
 }
 
@@ -57,7 +57,7 @@ struct OperationArgSlots {
     appends_events: Option<Vec<Lit>>,
     queries_projections: Option<Vec<Lit>>,
     emits_receipts: Option<Vec<Lit>>,
-    uses_host_controls: Option<bool>,
+    uses_host_controls: Option<Vec<Lit>>,
     requires_capabilities: Option<Vec<Lit>>,
 }
 
@@ -262,7 +262,7 @@ impl OperationArgSlots {
             }
             "emits_receipts" => set_string_list(&mut self.emits_receipts, "emits_receipts", pair)?,
             "uses_host_controls" => {
-                set_bool(&mut self.uses_host_controls, "uses_host_controls", pair)?
+                set_string_list(&mut self.uses_host_controls, "uses_host_controls", pair)?
             }
             "requires_capabilities" => set_string_list(
                 &mut self.requires_capabilities,
@@ -289,7 +289,7 @@ impl OperationArgSlots {
             appends_events: self.appends_events.unwrap_or_default(),
             queries_projections: self.queries_projections.unwrap_or_default(),
             emits_receipts: self.emits_receipts.unwrap_or_default(),
-            uses_host_controls: self.uses_host_controls.unwrap_or(false),
+            uses_host_controls: self.uses_host_controls.unwrap_or_default(),
             requires_capabilities: self.requires_capabilities.unwrap_or_default(),
         })
     }
@@ -301,7 +301,7 @@ impl ParsedOperationArgs {
             || !self.appends_events.is_empty()
             || !self.queries_projections.is_empty()
             || !self.emits_receipts.is_empty()
-            || self.uses_host_controls
+            || !self.uses_host_controls.is_empty()
             || !self.requires_capabilities.is_empty()
     }
 }
@@ -320,8 +320,8 @@ fn build_effect_row_expr(parsed: &ParsedOperationArgs) -> proc_macro2::TokenStre
     for target in &parsed.emits_receipts {
         row = quote! { #row.emits_receipt(#target) };
     }
-    if parsed.uses_host_controls {
-        row = quote! { #row.uses_host_control() };
+    for target in &parsed.uses_host_controls {
+        row = quote! { #row.uses_host_control(#target) };
     }
     for target in &parsed.requires_capabilities {
         row = quote! { #row.requires_capability(#target) };
@@ -394,27 +394,6 @@ fn set_string_list(target: &mut Option<Vec<Lit>>, key: &str, pair: &MetaNameValu
     }
     *target = Some(values);
     Ok(())
-}
-
-fn set_bool(target: &mut Option<bool>, key: &str, pair: &MetaNameValue) -> Result<()> {
-    if target.is_some() {
-        return Err(Error::new(
-            pair.path.span(),
-            format!("duplicate `{key}` key in #[syncbat::operation]"),
-        ));
-    }
-    if let Expr::Lit(ExprLit {
-        lit: Lit::Bool(value),
-        ..
-    }) = &pair.value
-    {
-        *target = Some(value.value);
-        return Ok(());
-    }
-    Err(Error::new(
-        pair.value.span(),
-        format!("`{key}` must be a bool literal"),
-    ))
 }
 
 fn set_effect(target: &mut Option<Ident>, pair: &MetaNameValue) -> Result<()> {

@@ -129,3 +129,60 @@ fn highest_index_hlc_reports_non_origin_point_for_appended_entry() {
 
     store.close().expect("close");
 }
+
+/// The at-open recompute DECISION is exercised directly: a default `Crc` store
+/// skips the rehash and a `Recompute` store over untampered data accepts. The
+/// fail-closed branch maps a non-intact report to
+/// [`StoreError::ChainVerificationFailed`] carrying both integrity counts.
+///
+/// Forging a CRC-valid-but-content-mismatched frame is not reachable through the
+/// public API (the per-frame CRC drops a torn frame before `verify_chain` ever
+/// sees it), so the fail-closed path is proven through the pure decision helper
+/// rather than on-disk tampering.
+#[test]
+fn run_open_chain_verification_decides_crc_skip_recompute_pass_and_fail_closed(
+) -> Result<(), StoreError> {
+    let dir = TempDir::new()?;
+    // Crc (default): the helper must be a no-op that never rejects the open.
+    {
+        let store = Store::open(StoreConfig::new(dir.path()))?;
+        run_open_chain_verification(&store)?;
+        let _ = store.append(
+            &Coordinate::new("alice", "scope")?,
+            EventKind::custom(0xF, 0x012),
+            &serde_json::json!({ "n": 1 }),
+        )?;
+        store.close()?;
+    }
+    // Recompute over the untampered store: the helper recomputes and accepts.
+    let store = Store::open(
+        StoreConfig::new(dir.path()).with_chain_verification(ChainVerification::Recompute),
+    )?;
+    run_open_chain_verification(&store)?;
+    store.close()?;
+
+    // Pure report -> error mapping: intact verifies, non-intact fails closed
+    // with both counts surfaced.
+    use crate::id::EventId;
+    assert!(
+        chain_verification_failure(&ChainVerificationReport::default()).is_none(),
+        "an intact report must not fail the open"
+    );
+    let tampered = ChainVerificationReport {
+        events_checked: 4,
+        content_hash_mismatches: vec![EventId::from_u128(1), EventId::from_u128(2)],
+        dangling_links: vec![EventId::from_u128(3)],
+    };
+    let failure = chain_verification_failure(&tampered);
+    assert!(
+        matches!(
+            failure,
+            Some(StoreError::ChainVerificationFailed {
+                content_hash_mismatches: 2,
+                dangling_links: 1,
+            })
+        ),
+        "a non-intact report must fail closed with both integrity counts, got {failure:?}"
+    );
+    Ok(())
+}

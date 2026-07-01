@@ -24,6 +24,8 @@
 
 use crate::event::{EventKind, EventPayload};
 use serde::de::DeserializeOwned;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 /// A single vN -> vN+1 migration for one [`EventKind`].
 ///
@@ -242,6 +244,161 @@ pub(crate) fn value_from_json(value: &serde_json::Value) -> Result<rmpv::Value, 
     let bytes = crate::encoding::to_bytes(value)
         .map_err(|e| UpcastError::ValueCodec(format!("encode json payload to msgpack: {e}")))?;
     value_from_msgpack(&bytes)
+}
+
+// ─── Open-time upcast-chain completeness validation ─────────────────────────
+//
+// A `#[batpak(version = N)]` payload with `N > 1` compiles fine, but if its
+// registered `Upcast` steps do not cover every `1 -> 2 -> ... -> N` hop, an
+// event written at any uncovered version becomes undecodable at READ time
+// (`run_chain` returns `UpcastError::MissingStep`). `Store::open` runs this scan
+// — mirroring the kind-collision check in `event::payload` — so that silent
+// read-time footgun fails closed at open instead.
+
+static UPCAST_CHAIN_OPEN_CACHE: Mutex<Option<Result<(), UpcastChainRegistryError>>> =
+    Mutex::new(None);
+static UPCAST_CHAIN_WARNED: AtomicBool = AtomicBool::new(false);
+
+/// A linked payload kind whose declared `PAYLOAD_VERSION > 1` is missing one or
+/// more upcast hops, so an event stored at an older version would hit
+/// [`UpcastError::MissingStep`] at read time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IncompleteUpcastChain {
+    /// The payload kind with the incomplete chain.
+    pub kind: EventKind,
+    /// The declared current payload version (always `> 1`).
+    pub current_version: u16,
+    /// The `from_version` hops in `1..current_version` with no registered step.
+    pub missing_from_versions: Vec<u16>,
+    /// A registered Rust type name for this kind.
+    pub type_name: &'static str,
+}
+
+impl IncompleteUpcastChain {
+    fn from_support(chain: batpak_macros_support::IncompleteUpcastChain) -> Self {
+        // `from_raw_u16` narrows the packed nibbles behind EventKind's own
+        // invariant, so no unchecked cast is needed here.
+        Self {
+            kind: EventKind::from_raw_u16(chain.kind_bits),
+            current_version: chain.current_version,
+            missing_from_versions: chain.missing_from_versions,
+            type_name: chain.type_name,
+        }
+    }
+}
+
+/// Error returned when a linked `version > 1` payload kind lacks a complete
+/// `1 -> ... -> N` upcast chain.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpcastChainRegistryError {
+    incomplete: Vec<IncompleteUpcastChain>,
+}
+
+impl UpcastChainRegistryError {
+    /// Create an error from a list of incomplete chains.
+    ///
+    /// [`validate_upcast_chain_registry`] only constructs this with a non-empty
+    /// list; the constructor stays total (no panic on empty) so tooling can
+    /// build sample values, and [`Display`](std::fmt::Display) renders an empty
+    /// list as a benign zero-count message rather than indexing out of bounds.
+    pub fn new(incomplete: Vec<IncompleteUpcastChain>) -> Self {
+        Self { incomplete }
+    }
+
+    /// The incomplete upcast chains found in the linked registry.
+    pub fn incomplete_chains(&self) -> &[IncompleteUpcastChain] {
+        &self.incomplete
+    }
+}
+
+impl std::fmt::Display for UpcastChainRegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "linked EventPayload registry has {} kind(s) declaring version > 1 \
+             without a complete upcast chain",
+            self.incomplete.len()
+        )?;
+        for chain in &self.incomplete {
+            write!(
+                f,
+                "; kind category=0x{:X} type_id=0x{:03X} (`{}`) declares version {} \
+                 but is missing upcast step(s) from version(s) {:?} — register an Upcast \
+                 for each missing hop (1 -> 2 -> ... -> {})",
+                chain.kind.category(),
+                chain.kind.type_id(),
+                chain.type_name,
+                chain.current_version,
+                chain.missing_from_versions,
+                chain.current_version,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for UpcastChainRegistryError {}
+
+/// Validate that every linked `version > 1` payload kind has a complete
+/// `1 -> ... -> N` upcast chain registered.
+///
+/// The chain is what lets the decode seam lift an event stored at an older
+/// version up to the current struct shape. A `version = N` kind with a gap in
+/// its registered [`Upcast`] steps lets any event written at a missing version
+/// silently become undecodable ([`UpcastError::MissingStep`]) at read time.
+/// Calling this at `Store::open` turns that read-time footgun into a fail-closed
+/// open-time error.
+///
+/// # Errors
+/// Returns [`UpcastChainRegistryError`] naming every kind whose declared version
+/// exceeds 1 but whose registered upcast steps do not cover every hop.
+pub fn validate_upcast_chain_registry() -> Result<(), UpcastChainRegistryError> {
+    let incomplete = batpak_macros_support::find_incomplete_upcast_chains()
+        .into_iter()
+        .map(IncompleteUpcastChain::from_support)
+        .collect::<Vec<_>>();
+    if incomplete.is_empty() {
+        Ok(())
+    } else {
+        Err(UpcastChainRegistryError::new(incomplete))
+    }
+}
+
+/// Re-scan the linked upcast registry and refresh the cached open-time result.
+///
+/// Mirrors
+/// [`revalidate_event_payload_registry`](crate::event::revalidate_event_payload_registry):
+/// registrations are static once linked, so most applications never need this;
+/// tests and tooling that intentionally exercise registry boundaries call it to
+/// force the next `Store::open` decision to use a fresh scan.
+///
+/// # Errors
+/// Returns [`UpcastChainRegistryError`] if any `version > 1` kind has an
+/// incomplete chain.
+pub fn revalidate_upcast_chain_registry() -> Result<(), UpcastChainRegistryError> {
+    let result = validate_upcast_chain_registry();
+    UPCAST_CHAIN_WARNED.store(false, Ordering::SeqCst);
+    let Ok(mut cached) = UPCAST_CHAIN_OPEN_CACHE.lock() else {
+        return result;
+    };
+    *cached = Some(result.clone());
+    result
+}
+
+pub(crate) fn cached_upcast_chain_registry_validation() -> Result<(), UpcastChainRegistryError> {
+    let Ok(mut cached) = UPCAST_CHAIN_OPEN_CACHE.lock() else {
+        return validate_upcast_chain_registry();
+    };
+    if let Some(result) = cached.as_ref() {
+        return result.clone();
+    }
+    let result = validate_upcast_chain_registry();
+    *cached = Some(result.clone());
+    result
+}
+
+pub(crate) fn mark_upcast_chain_registry_warning_emitted() -> bool {
+    !UPCAST_CHAIN_WARNED.swap(true, Ordering::SeqCst)
 }
 
 #[cfg(test)]

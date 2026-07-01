@@ -21,6 +21,23 @@ pub(super) struct WriterRuntime<'a> {
     pub(super) watermark_handle: super::WatermarkAdvanceHandle,
 }
 
+/// Next per-entity chain clock, or genesis `0`, failing closed on `u32`
+/// overflow. Lives here (re-exported from the parent `writer` module) so the
+/// writer file stays within its structural size budget.
+pub(in crate::store::write) fn checked_next_clock(
+    latest_clock: Option<u32>,
+    entity: &str,
+) -> Result<u32, StoreError> {
+    match latest_clock {
+        Some(clock) => clock
+            .checked_add(1)
+            .ok_or_else(|| StoreError::EntityClockOverflow {
+                entity: entity.to_string(),
+            }),
+        None => Ok(0),
+    }
+}
+
 pub(super) fn writer_thread_name(data_dir: &Path) -> String {
     const FNV_1A_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_1A_PRIME: u64 = 0x100000001b3;
@@ -103,6 +120,7 @@ pub(super) fn writer_thread_main(
                             if let Err(error) = crate::store::hidden_ranges::write_cancelled_ranges(
                                 &runtime.config.data_dir,
                                 &ranges,
+                                runtime.config.fs().as_ref(),
                             ) {
                                 tracing::error!(
                                     error = %error,
@@ -128,6 +146,7 @@ pub(super) fn writer_thread_main(
                         if let Err(error) = crate::store::hidden_ranges::write_cancelled_ranges(
                             &runtime.config.data_dir,
                             &ranges,
+                            runtime.config.fs().as_ref(),
                         ) {
                             tracing::error!(
                                 error = %error,
@@ -410,6 +429,7 @@ pub(crate) fn find_latest_segment_id(dir: &std::path::Path) -> Result<Option<u64
             | StoreFileKind::PendingCompactionMarker
             | StoreFileKind::CompactSource
             | StoreFileKind::CursorDirectory
+            | StoreFileKind::Keyset
             | StoreFileKind::Other => {}
         }
     }

@@ -38,6 +38,57 @@ pub enum SyncMode {
     SyncData,
 }
 
+/// Whether a store requires cryptographically signed receipts.
+///
+/// A keyless store cannot sign, so its receipts carry no cryptographic proof:
+/// they verify as valid for the store's own committed index but never report
+/// `is_signed`. This policy controls whether that keyless mode is permitted.
+///
+/// - `Optional` (the regular-store path): a keyless store is allowed; unsigned
+///   receipts are accepted as valid for this store.
+/// - `Required` (the regulated / rigor opt-in): the store refuses to open
+///   without a signing key, so an unsigned receipt can never be produced or
+///   accepted — verification returns `Invalid` for any unsigned receipt.
+///
+/// Set via `StoreConfig::with_signing_policy`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum SigningPolicy {
+    /// Permit a keyless store; unsigned receipts are accepted as valid.
+    Optional,
+    /// Refuse to open without a signing key; unsigned receipts are never valid.
+    Required,
+}
+
+/// Whether a store recomputes its full hash chain at open.
+///
+/// A plain open trusts each committed event's self-reported `event_hash`,
+/// guarded only by the per-frame CRC: corruption (or a forged stored hash) that
+/// survives the CRC is not detected until something calls
+/// [`Store::verify_chain`](crate::store::Store::verify_chain). This policy
+/// controls whether that full blake3 recompute runs automatically at open.
+///
+/// - `Crc` (the regular-store path, default): no rehash at open. The per-frame
+///   CRC already guarded every frame at read time, so the store pays nothing
+///   extra — current behavior.
+/// - `Recompute` (the regulated / rigor opt-in): run
+///   [`Store::verify_chain`](crate::store::Store::verify_chain) at open and
+///   refuse to open (fail closed with
+///   [`StoreError::ChainVerificationFailed`](crate::store::StoreError::ChainVerificationFailed))
+///   on any content-hash mismatch or dangling chain link — tamper-evidence at
+///   open, at `O(events)` cost.
+///
+/// Set via `StoreConfig::with_chain_verification`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ChainVerification {
+    /// Trust the CRC-guarded `event_hash`; do not recompute at open (default).
+    #[default]
+    Crc,
+    /// Recompute the full hash chain at open and fail closed on tamper.
+    Recompute,
+}
+
 /// Explicit in-memory scan topology.
 ///
 /// Base AoS maps are always present. This type controls which additional

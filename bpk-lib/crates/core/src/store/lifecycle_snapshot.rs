@@ -23,7 +23,10 @@ pub(crate) fn snapshot(
     let snapshot_fence = store.begin_visibility_fence()?;
     let fence_token = snapshot_fence.token();
     sync(store)?;
-    store.index.idemp.flush(&store.config.data_dir)?;
+    store
+        .index
+        .idemp
+        .flush(&store.config.data_dir, fs.as_ref())?;
     let (source_watermark_segment_id, source_watermark_offset) =
         latest_segment_watermark(&store.config.data_dir)?;
     fs.reject_symlink_leaf(dest, "snapshot destination")?;
@@ -98,11 +101,14 @@ fn snapshot_source_file_kind(file_kind: &StoreFileKind) -> Option<SnapshotFileKi
         StoreFileKind::VisibilityRanges => Some(SnapshotFileKind::VisibilityRanges),
         StoreFileKind::IdempotencyStore => Some(SnapshotFileKind::IdempotencyStore),
         StoreFileKind::PendingCompactionMarker => Some(SnapshotFileKind::PendingCompactionMarker),
+        // Keyset is excluded from `should_copy_into_snapshot` in Stage B, so the
+        // guard above already returned `None` for it; it stays in the None group.
         StoreFileKind::MalformedSegment(_)
         | StoreFileKind::Checkpoint
         | StoreFileKind::MmapIndex
         | StoreFileKind::CompactSource
         | StoreFileKind::CursorDirectory
+        | StoreFileKind::Keyset
         | StoreFileKind::Other => None,
     }
 }

@@ -1,5 +1,7 @@
+use super::super::fanout::CommittedEventEnvelope;
 use super::fence_runtime::FenceLedger;
 use super::publish::{CommitFrameView, CommitInternedIds};
+use super::Notification;
 use super::{
     segment, Coordinate, DagPosition, DiskPos, Event, EventKind, FramePayloadRef, HashChain,
     StoreError, WriterCore,
@@ -41,16 +43,7 @@ impl WriterCore {
 
         let latest = self.index.get_latest_committed(entity, guards.dag_lane);
 
-        if let Some(expected) = guards.expected_sequence {
-            let actual = latest.as_ref().map(|entry| entry.clock).unwrap_or(0);
-            if actual != expected {
-                return Err(StoreError::SequenceMismatch {
-                    entity: entity.to_string(),
-                    expected,
-                    actual,
-                });
-            }
-        }
+        Self::enforce_expected_sequence(latest.as_ref(), guards.expected_sequence, entity)?;
 
         if let Some(key) = guards.idempotency_key {
             if let Some(receipt) = self.try_idempotency_replay(key)? {
@@ -98,6 +91,12 @@ impl WriterCore {
             .filter(|&id| id != 0)
             .map(crate::id::CausationId::from);
 
+        // Encrypt-on-append (opt-in): seal the payload under its scope key and
+        // stamp the header BEFORE hashing, so `event_hash` covers the ciphertext.
+        // A no-op when encryption is not configured (plaintext path unchanged).
+        #[cfg(feature = "payload-encryption")]
+        self.encrypt_single_payload(coord, kind, &mut event)?;
+
         let event_hash = crate::event::hash::compute_hash(&event.payload);
 
         event.hash_chain = Some(HashChain {
@@ -121,7 +120,7 @@ impl WriterCore {
         };
         self.runtime
             .signing_registry
-            .sign_append_receipt(&mut receipt, coord, kind, prev_hash);
+            .sign_append_receipt(&mut receipt, coord, kind, prev_hash)?;
 
         let frame_payload = FramePayloadRef {
             event: &event,
@@ -205,6 +204,32 @@ impl WriterCore {
 
         debug!(event_id = %event.header.event_id, clock = clock, "append committed");
 
+        self.publish_single_commit(
+            fence,
+            global_seq,
+            frontier_point,
+            committed.notification,
+            committed.envelope,
+            #[cfg(feature = "dangerous-test-hooks")]
+            entity,
+        )?;
+
+        Ok(receipt)
+    }
+
+    /// Publish tail of [`Self::handle_append`]: fold the commit into the active
+    /// visibility fence, or publish-then-broadcast it unfenced. Extracted so
+    /// `handle_append` stays within its cyclomatic-complexity ratchet
+    /// (behavior-preserving).
+    fn publish_single_commit(
+        &mut self,
+        fence: Option<&mut FenceLedger>,
+        global_seq: u64,
+        frontier_point: HlcPoint,
+        notification: Notification,
+        envelope: Option<CommittedEventEnvelope>,
+        #[cfg(feature = "dangerous-test-hooks")] entity: &str,
+    ) -> Result<(), StoreError> {
         if let Some(fence) = fence {
             fence.record_publish_up_to(global_seq.saturating_add(1), frontier_point);
             self.index.note_visibility_fence_progress(
@@ -212,13 +237,13 @@ impl WriterCore {
                 global_seq,
                 global_seq.saturating_add(1),
             )?;
-            fence.extend_artifacts([committed.notification], committed.envelope);
+            fence.extend_artifacts([notification], envelope);
         } else {
             self.publish_then_broadcast_unfenced(
                 global_seq + 1,
                 frontier_point,
-                [committed.notification],
-                committed.envelope,
+                [notification],
+                envelope,
             )?;
 
             #[cfg(feature = "dangerous-test-hooks")]
@@ -229,8 +254,28 @@ impl WriterCore {
                 &self.config.fault_injector,
             )?;
         }
+        Ok(())
+    }
 
-        Ok(receipt)
+    /// CAS guard: a caller-supplied `expected_sequence` must equal the entity's
+    /// current committed clock. Extracted from `handle_append` to keep that
+    /// function under its complexity ratchet (behavior-preserving).
+    fn enforce_expected_sequence(
+        latest: Option<&crate::store::index::IndexEntry>,
+        expected: Option<u32>,
+        entity: &str,
+    ) -> Result<(), StoreError> {
+        if let Some(expected) = expected {
+            let actual = latest.map(|entry| entry.clock).unwrap_or(0);
+            if actual != expected {
+                return Err(StoreError::SequenceMismatch {
+                    entity: entity.to_string(),
+                    expected,
+                    actual,
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Record the SIDX index entry and, for a keyed append, the durable
@@ -293,7 +338,7 @@ impl WriterCore {
                 &coord,
                 durable.kind,
                 durable.prev_hash,
-            );
+            )?;
             return Ok(Some(receipt));
         }
         // Fall through to the live `by_id` path (covers entries recorded
@@ -313,7 +358,7 @@ impl WriterCore {
                 &entry.coord,
                 entry.kind,
                 entry.hash_chain.prev_hash,
-            );
+            )?;
             return Ok(Some(receipt));
         }
         // Genuinely new key: enforce the soft-cap overflow policy BEFORE we

@@ -474,7 +474,10 @@ impl CursorWorkerLoop {
         match action {
             CursorWorkerAction::Continue => {
                 let next_checkpoint = state.cursor.checkpoint();
-                if let Err(error) = state.cursor.persist_current() {
+                if let Err(error) = state
+                    .cursor
+                    .persist_current(self.store.config.fs().as_ref())
+                {
                     // G5: durable-cursor persist failure is a hard error. For
                     // in-memory cursors `persist_current` is a no-op, so this
                     // branch is only reached when `checkpoint_id: Some(_)` was
@@ -498,7 +501,10 @@ impl CursorWorkerLoop {
             }
             CursorWorkerAction::Stop => {
                 let final_checkpoint = state.cursor.checkpoint();
-                if let Err(error) = state.cursor.persist_current() {
+                if let Err(error) = state
+                    .cursor
+                    .persist_current(self.store.config.fs().as_ref())
+                {
                     // G5: same hard-error contract on clean stop — a durable
                     // cursor that cannot persist must surface the error rather
                     // than silently lose progress.

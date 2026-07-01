@@ -123,8 +123,15 @@ fn current_version_snapshot_restores_checkpoint_directly() {
         system_histogram: std::iter::once((0x000Au16, 2usize)).collect(),
         effect_histogram: std::iter::once((0x1001u16, 1usize)).collect(),
     };
-    write_checkpoint_with_reserved_kind_fallbacks(&idx, dir, 0, 4096, &reserved_kind_fallbacks)
-        .expect("write checkpoint");
+    write_checkpoint_with_reserved_kind_fallbacks(
+        &idx,
+        dir,
+        0,
+        4096,
+        &reserved_kind_fallbacks,
+        &crate::store::platform::fs::RealFs,
+    )
+    .expect("write checkpoint");
 
     let loaded = try_load_checkpoint_snapshot(dir).expect("load checkpoint snapshot");
 

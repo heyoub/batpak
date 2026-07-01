@@ -1,5 +1,7 @@
 use crate::coordinate::CoordinateError;
-use crate::event::{EventPayloadRegistryError, ProjectionStateContract, StateExtent};
+use crate::event::{
+    EventPayloadRegistryError, ProjectionStateContract, StateExtent, UpcastChainRegistryError,
+};
 use crate::store::delivery::observation::CheckpointIdError;
 use crate::store::stats::{HlcPoint, WatermarkKind};
 use std::path::PathBuf;
@@ -132,6 +134,13 @@ pub enum StoreError {
     },
     /// Linked typed payloads claimed duplicate EventKind assignments.
     EventPayloadRegistry(EventPayloadRegistryError),
+    /// A linked payload kind declares `PAYLOAD_VERSION > 1` but its registered
+    /// `Upcast` steps do not form a complete `1 -> ... -> N` chain, so events
+    /// stored at an uncovered version would be undecodable at read time. The
+    /// store refuses to open (fail closed) under the default
+    /// [`EventPayloadValidation::FailFast`](crate::event::EventPayloadValidation)
+    /// rather than letting those historical events silently strand.
+    UpcastChainIncomplete(UpcastChainRegistryError),
     /// Group commit (batch > 1) requires an idempotency key on every append.
     IdempotencyRequired,
     /// A visibility fence is already active on this store.
@@ -432,6 +441,108 @@ pub enum StoreError {
         /// Typed invariant failure.
         kind: StoreInvariant,
     },
+    /// An at-open hash-chain recompute (opted into via
+    /// [`ChainVerification::Recompute`](crate::store::ChainVerification)) found
+    /// the store is not intact, so the open failed closed. A plain `Crc` open
+    /// trusts the per-frame CRC and never produces this; only the regulated
+    /// recompute path — equivalently [`Store::verify_chain`](crate::store::Store::verify_chain)
+    /// — recomputes blake3 over every committed event and refuses to hand back a
+    /// tampered store.
+    ChainVerificationFailed {
+        /// Committed events whose recomputed blake3 content hash did NOT match
+        /// the stored `event_hash` (content no longer matches its identity).
+        content_hash_mismatches: usize,
+        /// Non-genesis events whose `prev_hash` referenced no verified event (a
+        /// dangling chain link).
+        dangling_links: usize,
+    },
+    /// The on-disk crypto-shred keyset (`keyset.fbatk`) is present but could not
+    /// be interpreted: wrong magic, truncated header, a bad CRC, an unsupported
+    /// (or future) format version, a decode failure, or a persisted key-scope
+    /// granularity that disagrees with the store's configured granularity.
+    ///
+    /// This is a HARD, fail-closed refusal — deliberately UNLIKE the durable
+    /// idempotency store, which degrades a corrupt sidecar to "absent". A keyset
+    /// is the sole means of recovering every payload sealed under it, so silently
+    /// starting from an empty key store would crypto-shred live data (every
+    /// scope's key would be re-minted fresh, and no prior ciphertext could ever
+    /// be opened again). Refusing to open preserves the operator's chance to
+    /// restore the real keyset from backup. justifies: INV-KEYSET-FAIL-CLOSED
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    KeysetCorrupt {
+        /// Human-readable reason the keyset could not be loaded (never contains
+        /// key material).
+        reason: String,
+    },
+    /// Sealing a payload on the encrypt-on-append path failed (the OS CSPRNG
+    /// could not produce a nonce, or the AEAD rejected the input). The append is
+    /// FAILED CLOSED — no frame is written and no receipt is acknowledged — so a
+    /// payload is never persisted unencrypted when encryption was requested. The
+    /// `detail` never contains key material.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    PayloadSealFailed {
+        /// Human-readable reason the seal failed (never contains key material).
+        detail: String,
+    },
+    /// The event is present in the chain but its payload key has been destroyed
+    /// (crypto-shred): the ciphertext survives on disk, its hash-chain identity
+    /// is intact, but the plaintext is permanently unrecoverable.
+    ///
+    /// This is deliberately NOT a corruption error — the frame is valid and its
+    /// `event_hash` still verifies. A caller that wants to handle this without
+    /// catching an error should use the disposition-returning read surface
+    /// ([`Store::get_shreddable`](crate::store::Store::get_shreddable)).
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    PayloadShredded {
+        /// Id of the event whose payload key has been shredded.
+        event_id: crate::id::EventId,
+    },
+    /// An encrypted payload failed authenticated decryption with its key
+    /// PRESENT: the ciphertext, nonce, or bound identity does not authenticate.
+    ///
+    /// This signals tampering (a mutated ciphertext, a swapped nonce, or a frame
+    /// relocated onto a different event so its bound AAD no longer matches) — it
+    /// is distinct from [`PayloadShredded`](Self::PayloadShredded) (key absent).
+    /// No detail beyond the event id is exposed, so it cannot serve as a
+    /// decryption oracle.
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    PayloadDecryptFailed {
+        /// Id of the event whose ciphertext failed to authenticate.
+        event_id: crate::id::EventId,
+    },
+    /// A [`Store::shred_scope`](crate::store::Store::shred_scope) selector did not
+    /// match the store's configured key-scope granularity — e.g. a
+    /// [`ShredScope::Kind`](crate::store::keyscope::ShredScope::Kind) selector on a
+    /// `PerEntity` store. The selector cannot address the configured granularity's
+    /// scope, so the erasure is REFUSED and nothing is shredded (the request is a
+    /// typed programming error, never a silent no-op or a mis-targeted shred).
+    #[cfg(feature = "payload-encryption")]
+    #[cfg_attr(
+        all(docsrs, not(batpak_stable_docs)),
+        doc(cfg(feature = "payload-encryption"))
+    )]
+    ShredSelectorMismatch {
+        /// The store's configured key-scope granularity.
+        granularity: crate::store::keyscope::KeyScopeGranularity,
+        /// Non-secret label of the selector variant supplied (never key material).
+        selector: &'static str,
+    },
 }
 
 impl std::error::Error for StoreError {
@@ -489,12 +600,20 @@ impl std::error::Error for StoreError {
             | Self::InvalidClock { .. }
             | Self::CursorCheckpointCorrupt { .. }
             | Self::CursorCheckpointRegionMismatch { .. }
-            | Self::InvariantViolation { .. } => None,
+            | Self::InvariantViolation { .. }
+            | Self::ChainVerificationFailed { .. } => None,
             Self::EventPayloadRegistry(error) => Some(error),
+            Self::UpcastChainIncomplete(error) => Some(error),
             Self::BatchFailed { source, .. } | Self::BatchSyncFailed { source, .. } => {
                 Some(source.as_ref())
             }
             Self::CheckpointWriteFailed { source, .. } => Some(source),
+            #[cfg(feature = "payload-encryption")]
+            Self::KeysetCorrupt { .. }
+            | Self::PayloadSealFailed { .. }
+            | Self::PayloadShredded { .. }
+            | Self::PayloadDecryptFailed { .. }
+            | Self::ShredSelectorMismatch { .. } => None,
             #[cfg(feature = "dangerous-test-hooks")]
             Self::FaultInjected(_) => None,
         }

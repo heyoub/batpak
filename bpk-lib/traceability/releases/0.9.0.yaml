@@ -237,6 +237,7 @@ rows:
       - crates/syncbat/tests/effect_enforcement.rs::use_host_control_without_a_bound_backend_is_denied
       - crates/syncbat/tests/effect_enforcement.rs::use_host_control_backend_reject_does_not_record_observation
       - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_host_control_without_declared_authority
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_host_control_outside_declared_row
       - crates/syncbat/tests/effect_enforcement.rs::declared_append_through_handle_completes_and_is_performed
       - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_append_outside_declared_row
       - crates/syncbat/tests/effect_enforcement.rs::append_without_a_bound_backend_is_denied
@@ -504,8 +505,8 @@ rows:
     terminal_required: true
     surface: batpak
     witness_tests:
-      - crates/core/src/store/platform/fs.rs::store_fs_fail_closed_boundary_lists_unrouted_tail_ops
-      - crates/core/src/store/platform/fs.rs::real_fs_delegates_routed_ops_like_the_platform_free_fns
+      - crates/core/src/store/platform/fs_tests.rs::store_fs_fail_closed_boundary_lists_unrouted_tail_ops
+      - crates/core/src/store/platform/fs_tests.rs::real_fs_delegates_routed_ops_like_the_platform_free_fns
     proof_commands:
       - just cargo test -p batpak store_fs_fail_closed
 

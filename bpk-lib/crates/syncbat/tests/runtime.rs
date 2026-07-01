@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use syncbat::{
-    CheckoutFrame, Core, EffectClass, Handler, HandlerError, HandlerResult, Module,
+    BuildError, CheckoutFrame, Core, EffectClass, Handler, HandlerError, HandlerResult, Module,
     OperationDescriptor, ReceiptEnvelope, ReceiptHash, ReceiptHashPolicy, ReceiptOutcome,
     ReceiptSink, ReceiptSinkError, RecordedReceipt, Register, RuntimeError,
 };
@@ -151,6 +151,7 @@ fn builder_mounts_module_data_and_invokes_handler() {
     builder
         .register_handler("echo", EchoHandler)
         .expect("handler registers");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
@@ -175,6 +176,7 @@ fn builder_rejects_missing_handler() {
 fn invoke_maps_handler_failure_to_runtime_error() {
     let mut builder = Core::builder();
     builder.register(ECHO, FailingHandler).expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let err = core
@@ -242,14 +244,36 @@ fn failed_receipt_is_recorded_once() {
 
 #[test]
 fn no_receipt_sink_preserves_current_success_behavior() {
+    // GREEN opt-out: `without_receipts()` is the explicit escape hatch that lets
+    // a core build with no sink and record nothing.
     let mut builder = Core::builder();
     builder.register(ECHO, EchoHandler).expect("register");
+    builder.without_receipts();
     let mut core = builder.build().expect("core builds");
 
     let result = core.invoke("echo", b"plain".to_vec()).expect("invoke");
 
     assert_eq!(result.output().as_slice(), b"plain:ok");
     assert!(result.recorded_receipt().is_none());
+}
+
+#[test]
+fn build_without_receipt_sink_or_optout_is_rejected() {
+    // RED FIXTURE (gap 2): forgetting to wire a receipt sink must fail closed at
+    // build time rather than silently dropping every runtime receipt. A core
+    // that registers a handler but neither configures a sink nor opts out is
+    // rejected with `MissingReceiptSink`.
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    let err = builder
+        .build()
+        .map(|_| ())
+        .expect_err("sinkless build without opt-out must be rejected");
+
+    assert!(
+        matches!(err, BuildError::MissingReceiptSink),
+        "unexpected error: {err:?}"
+    );
 }
 
 #[test]
@@ -375,11 +399,48 @@ fn register_resolved_checkout_records_failed_receipt_once() {
 }
 
 #[test]
-fn deferred_hash_policy_leaves_hashes_empty() {
+fn default_hash_policy_binds_receipt_to_blake3_of_bytes() {
+    // RED FIXTURE (gap 1): the DEFAULT (forgetful) hash policy must bind the
+    // receipt to the exact bytes it covers. With the old `Deferred` default this
+    // recorded `input_hash = None, output_hash = None` (the receipt bound to
+    // nothing); the safe `Blake3` default now records the Blake3 digest of the
+    // raw input and output bytes.
     let sink = RecordingReceiptSink::default();
     let mut builder = Core::builder();
     builder.register(ECHO, EchoHandler).expect("register");
     builder.receipt_sink(sink);
+    // No `receipt_hash_policy(..)` call: this exercises the safe default.
+    let mut core = builder.build().expect("core builds");
+
+    let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
+    let envelope = &result
+        .recorded_receipt()
+        .expect("recorded receipt")
+        .envelope;
+
+    // Pins the algorithm AND the covered bytes: Blake3 over the raw input, and
+    // Blake3 over the handler's raw output (`b"hello:ok"`).
+    assert_eq!(
+        envelope.input_hash,
+        Some(*blake3::hash(b"hello").as_bytes()),
+        "default policy must Blake3-hash the raw input bytes"
+    );
+    assert_eq!(
+        envelope.output_hash,
+        Some(*blake3::hash(b"hello:ok").as_bytes()),
+        "default policy must Blake3-hash the raw output bytes"
+    );
+}
+
+#[test]
+fn deferred_hash_policy_leaves_hashes_empty() {
+    // GREEN opt-out: `ReceiptHashPolicy::Deferred` is the explicit escape hatch
+    // for callers that truly want unhashed runtime receipts.
+    let sink = RecordingReceiptSink::default();
+    let mut builder = Core::builder();
+    builder.register(ECHO, EchoHandler).expect("register");
+    builder.receipt_sink(sink);
+    builder.receipt_hash_policy(ReceiptHashPolicy::Deferred);
     let mut core = builder.build().expect("core builds");
 
     let result = core.invoke("echo", b"hello".to_vec()).expect("invoke");
@@ -390,6 +451,16 @@ fn deferred_hash_policy_leaves_hashes_empty() {
 
     assert_eq!(envelope.input_hash, None);
     assert_eq!(envelope.output_hash, None);
+}
+
+#[test]
+fn default_hash_policy_is_blake3() {
+    // Names the new `ReceiptHashPolicy::Blake3` variant directly and pins it as
+    // the default, so a regression that restores an unhashed default is caught.
+    assert!(matches!(
+        ReceiptHashPolicy::default(),
+        ReceiptHashPolicy::Blake3
+    ));
 }
 
 #[test]

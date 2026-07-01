@@ -204,7 +204,7 @@ pub(super) fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
         const _: () = {
             ::batpak::__private::inventory::submit! {
                 ::batpak::__private::EventPayloadRegistration {
-                    kind_bits: #kind_bits,
+                    kind_bits: #kind_bits, payload_version: #payload_version,
                     type_name: concat!(module_path!(), "::", stringify!(#ident)),
                 }
             }

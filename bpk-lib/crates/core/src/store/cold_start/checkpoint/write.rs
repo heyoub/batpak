@@ -1,6 +1,7 @@
 use super::{checkpoint_entries_to_index_entries, format, CheckpointEntry};
 use crate::store::cold_start::ReservedKindFallbackStats;
 use crate::store::index::{recommended_restore_chunk_count, RoutingSummary, StoreIndex};
+use crate::store::platform::fs::StoreFs;
 use crate::store::StoreError;
 use std::path::Path;
 
@@ -28,6 +29,7 @@ pub(crate) fn write_checkpoint(
         watermark_segment_id,
         watermark_offset,
         &ReservedKindFallbackStats::default(),
+        &crate::store::platform::fs::RealFs,
     )
 }
 
@@ -37,6 +39,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
     watermark_segment_id: u64,
     watermark_offset: u64,
     reserved_kind_fallbacks: &ReservedKindFallbackStats,
+    fs: &dyn StoreFs,
 ) -> Result<(), StoreError> {
     // all_entries() is not a linearisable snapshot (DashMap limitation), but
     // checkpoints are written from orchestration points that quiesce the writer.
@@ -91,7 +94,7 @@ pub(crate) fn write_checkpoint_with_reserved_kind_fallbacks(
 
     let body = format::encode_checkpoint_body(&data)
         .map_err(|e| StoreError::Serialization(Box::new(e)))?;
-    format::write_checkpoint_file(data_dir, &body)?;
+    format::write_checkpoint_file(data_dir, &body, fs)?;
 
     tracing::debug!(
         target: "batpak::checkpoint",

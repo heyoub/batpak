@@ -6,12 +6,19 @@
 
 use std::io::Cursor;
 use std::net::{TcpListener, TcpStream};
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use netbat as nb;
 use syncbat::{
     SessionPoll, SubscriptionRuntimeError, SubscriptionSession, SubscriptionSessionFactory,
 };
+
+/// `Lifetime(value)` connection limit — the budget-exit semantics these listener
+/// tests assert (the pre-0.9 `max_connections` behavior, now opt-in).
+fn lifetime(value: usize) -> nb::ConnectionLimit {
+    nb::ConnectionLimit::Lifetime(NonZeroUsize::new(value).expect("nonzero connection limit"))
+}
 
 // ---------------------------------------------------------------------------
 // limits.rs: default byte budgets are products, not sums.
@@ -247,18 +254,22 @@ fn serve_subscription_stream_counts_malformed_pre_subscribe(
 
 #[test]
 fn listener_serves_one_connection_then_exits_on_budget() -> Result<(), Box<dyn std::error::Error>> {
-    // KILLS stream_tcp.rs:150 (fn -> Ok(Default)), 155 (`+=` on
-    // accepted_connections), 152 (the `while` guard: delete `!`, `&&` -> `||`,
-    // `<` -> `<=`/`==`/`>`), 181 (connection fn -> Ok(Default)), and the
-    // accept-error classifier's WouldBlock/Fatal arms (a `classify_accept_error`
-    // that returned Fatal would surface the first pre-connect WouldBlock as an
-    // error). The 30ms pre-connect delay guarantees the nonblocking accept loop
-    // spins on WouldBlock first. The classifier's Interrupted arm and the full
-    // mapping are pinned by `classify_accept_error_maps_each_kind` (inline).
+    // KILLS the `Lifetime` budget-exit path: the `while` guard via
+    // `Limiter::accepting` (delete `!`, `&&` -> `||`, the `<` -> `<=`/`==`/`>`
+    // inside `accepting`), the `accepted_connections += 1` count, the worker's
+    // served-subscription forwarding (fn -> Ok(Default)), and the accept-error
+    // classifier's WouldBlock/Fatal arms (a `classify_accept_error` returning
+    // Fatal would surface the first pre-connect WouldBlock as an error). The
+    // 30ms pre-connect delay guarantees the nonblocking accept loop spins on
+    // WouldBlock first. The classifier's Interrupted arm and full mapping are
+    // pinned by `classify_accept_error_maps_each_kind` (inline). With
+    // `Lifetime(1)` the listener must accept exactly one connection, serve it,
+    // and exit on budget — not the new `Concurrent` default, which only stops on
+    // shutdown.
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let mut config = nb::TcpSubscriptionServerConfig::default();
-    config.max_connections = 1;
+    config.connection_limit = lifetime(1);
     let shutdown = nb::ShutdownHandle::new();
     let server_shutdown = shutdown.clone();
     let (tx, rx) = flume::bounded(1);
@@ -267,7 +278,7 @@ fn listener_serves_one_connection_then_exits_on_budget() -> Result<(), Box<dyn s
         .spawn(move || {
             let result = nb::serve_tcp_subscription_listener(
                 listener,
-                &FakeRuntime(Mode::End),
+                FakeRuntime(Mode::End),
                 &config,
                 &server_shutdown,
             );
@@ -320,7 +331,7 @@ fn listener_counts_idle_read_timeout_as_io_failure() -> Result<(), Box<dyn std::
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let mut config = nb::TcpSubscriptionServerConfig::default();
-    config.max_connections = 1;
+    config.connection_limit = lifetime(1);
     config.timeouts = nb::IoTimeouts::default()
         .with_read(Some(Duration::from_millis(100)))
         .with_write(Some(Duration::from_secs(2)));
@@ -332,7 +343,7 @@ fn listener_counts_idle_read_timeout_as_io_failure() -> Result<(), Box<dyn std::
         .spawn(move || {
             let result = nb::serve_tcp_subscription_listener(
                 listener,
-                &FakeRuntime(Mode::End),
+                FakeRuntime(Mode::End),
                 &config,
                 &server_shutdown,
             );

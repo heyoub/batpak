@@ -298,6 +298,7 @@ pub const batpak::event::payload::EventPayload::KIND: batpak::event::kind::Event
 pub const batpak::event::payload::EventPayload::PAYLOAD_VERSION: u16
 pub fn batpak::event::payload::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::event::payload::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::payload::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub mod batpak::event::sourcing
 pub enum batpak::event::sourcing::MultiDispatchError<E: core::error::Error + core::marker::Send + core::marker::Sync + 'static>
 pub batpak::event::sourcing::MultiDispatchError::Decode(batpak::event::decode::TypedDecodeError)
@@ -392,10 +393,24 @@ impl core::error::Error for batpak::event::upcast::UpcastError
 pub fn batpak::event::upcast::UpcastError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for batpak::event::upcast::UpcastError
 pub fn batpak::event::upcast::UpcastError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct batpak::event::upcast::IncompleteUpcastChain
+pub batpak::event::upcast::IncompleteUpcastChain::current_version: u16
+pub batpak::event::upcast::IncompleteUpcastChain::kind: batpak::event::kind::EventKind
+pub batpak::event::upcast::IncompleteUpcastChain::missing_from_versions: alloc::vec::Vec<u16>
+pub batpak::event::upcast::IncompleteUpcastChain::type_name: &'static str
+pub struct batpak::event::upcast::UpcastChainRegistryError
+impl batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::incomplete_chains(&self) -> &[batpak::event::upcast::IncompleteUpcastChain]
+pub fn batpak::event::upcast::UpcastChainRegistryError::new(incomplete: alloc::vec::Vec<batpak::event::upcast::IncompleteUpcastChain>) -> Self
+impl core::error::Error for batpak::event::upcast::UpcastChainRegistryError
+impl core::fmt::Display for batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait batpak::event::upcast::Upcast
 pub const batpak::event::upcast::Upcast::FROM_VERSION: u16
 pub const batpak::event::upcast::Upcast::KIND: batpak::event::kind::EventKind
 pub fn batpak::event::upcast::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
+pub fn batpak::event::upcast::revalidate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
+pub fn batpak::event::upcast::validate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 #[non_exhaustive] pub enum batpak::event::DecodeSource
 pub batpak::event::DecodeSource::Json(serde_json::error::Error)
 pub batpak::event::DecodeSource::Msgpack(rmp_serde::decode::Error)
@@ -568,6 +583,11 @@ pub fn batpak::event::payload::EventPayloadRegistryError::fmt(&self, f: &mut cor
 pub struct batpak::event::HashChain
 pub batpak::event::HashChain::event_hash: [u8; 32]
 pub batpak::event::HashChain::prev_hash: [u8; 32]
+pub struct batpak::event::IncompleteUpcastChain
+pub batpak::event::IncompleteUpcastChain::current_version: u16
+pub batpak::event::IncompleteUpcastChain::kind: batpak::event::kind::EventKind
+pub batpak::event::IncompleteUpcastChain::missing_from_versions: alloc::vec::Vec<u16>
+pub batpak::event::IncompleteUpcastChain::type_name: &'static str
 pub struct batpak::event::JsonValueInput
 impl batpak::event::sourcing::ProjectionInput for batpak::event::sourcing::JsonValueInput
 pub type batpak::event::sourcing::JsonValueInput::Payload = serde_json::value::Value
@@ -586,6 +606,13 @@ pub const fn batpak::event::sourcing::StateExtent::unavailable() -> Self
 pub struct batpak::event::StoredEvent<P>
 pub batpak::event::StoredEvent::coordinate: batpak::coordinate::Coordinate
 pub batpak::event::StoredEvent::event: batpak::event::Event<P>
+pub struct batpak::event::UpcastChainRegistryError
+impl batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::incomplete_chains(&self) -> &[batpak::event::upcast::IncompleteUpcastChain]
+pub fn batpak::event::upcast::UpcastChainRegistryError::new(incomplete: alloc::vec::Vec<batpak::event::upcast::IncompleteUpcastChain>) -> Self
+impl core::error::Error for batpak::event::upcast::UpcastChainRegistryError
+impl core::fmt::Display for batpak::event::upcast::UpcastChainRegistryError
+pub fn batpak::event::upcast::UpcastChainRegistryError::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait batpak::event::DecodeTyped
 pub fn batpak::event::DecodeTyped::decode_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<T, batpak::event::decode::TypedDecodeError>
 pub fn batpak::event::DecodeTyped::route_typed<T: batpak::event::payload::EventPayload>(&self) -> core::result::Result<core::option::Option<T>, batpak::event::decode::TypedDecodeError>
@@ -630,7 +657,10 @@ pub const batpak::event::Upcast::FROM_VERSION: u16
 pub const batpak::event::Upcast::KIND: batpak::event::kind::EventKind
 pub fn batpak::event::Upcast::upcast(value: rmpv::Value) -> core::result::Result<rmpv::Value, batpak::event::upcast::UpcastError>
 pub fn batpak::event::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::revalidate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
 pub fn batpak::event::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::event::validate_upcast_chain_registry() -> core::result::Result<(), batpak::event::upcast::UpcastChainRegistryError>
+pub fn batpak::event::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub type batpak::event::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::event::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
 pub mod batpak::guard
@@ -1156,6 +1186,7 @@ pub batpak::prelude::ReceiptVerification::Signed
 pub batpak::prelude::ReceiptVerification::UnsignedAccepted
 impl batpak::prelude::ReceiptVerification
 pub fn batpak::prelude::ReceiptVerification::error(&self) -> core::option::Option<&batpak::prelude::ReceiptVerificationError>
+pub fn batpak::prelude::ReceiptVerification::is_signed(&self) -> bool
 pub fn batpak::prelude::ReceiptVerification::is_valid(&self) -> bool
 pub enum batpak::prelude::ReceiptVerificationError
 pub batpak::prelude::ReceiptVerificationError::ContentHashMismatch
@@ -1204,6 +1235,9 @@ pub batpak::prelude::StoreError::BatchSyncFailed
 pub batpak::prelude::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::prelude::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::prelude::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::prelude::StoreError::ChainVerificationFailed
+pub batpak::prelude::StoreError::ChainVerificationFailed::content_hash_mismatches: usize
+pub batpak::prelude::StoreError::ChainVerificationFailed::dangling_links: usize
 pub batpak::prelude::StoreError::CheckpointFutureVersion
 pub batpak::prelude::StoreError::CheckpointFutureVersion::found: u16
 pub batpak::prelude::StoreError::CheckpointFutureVersion::supported: u16
@@ -1324,6 +1358,7 @@ pub batpak::prelude::StoreError::Serialization(alloc::boxed::Box<(dyn core::erro
 pub batpak::prelude::StoreError::StoreLocked
 pub batpak::prelude::StoreError::StoreLocked::mode: batpak::store::StoreLockMode
 pub batpak::prelude::StoreError::StoreLocked::path: std::path::PathBuf
+pub batpak::prelude::StoreError::UpcastChainIncomplete(batpak::event::upcast::UpcastChainRegistryError)
 pub batpak::prelude::StoreError::VisibilityFenceActive
 pub batpak::prelude::StoreError::VisibilityFenceCancelled
 pub batpak::prelude::StoreError::VisibilityFenceNotActive
@@ -1664,8 +1699,10 @@ pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventI
 pub fn batpak::store::Store<State>::stream_lane(&self, entity: &str, lane: u32) -> alloc::vec::Vec<batpak::store::IndexEntry>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, event_id: batpak::id::EventId, global_sequence: u64, content_hash: [u8; 32], key_id: [u8; 32], signature: core::option::Option<[u8; 64]>, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> batpak::prelude::ReceiptVerification
+pub fn batpak::store::Store<State>::verify_chain(&self) -> core::result::Result<batpak::store::ChainVerificationReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors_outcome(&self, event_id: batpak::id::EventId, limit: usize) -> batpak::store::AncestorWalk
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
@@ -1700,6 +1737,7 @@ pub fn batpak::prelude::StoreConfig::sync(&self) -> &batpak::store::SyncConfig
 pub fn batpak::prelude::StoreConfig::with_batch_max_bytes(self, batch_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_batch_max_size(self, batch_max_size: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_broadcast_capacity(self, broadcast_capacity: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_chain_verification(self, chain_verification: batpak::store::ChainVerification) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Option<alloc::sync::Arc<dyn batpak::store::Clock>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock_fn<F>(self, clock: F) -> Self where F: core::ops::function::Fn() -> i64 + core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
@@ -1716,7 +1754,9 @@ pub fn batpak::prelude::StoreConfig::with_platform_profile_path(self, path: impl
 pub fn batpak::prelude::StoreConfig::with_restart_policy(self, restart_policy: batpak::store::RestartPolicy) -> Self
 pub fn batpak::prelude::StoreConfig::with_segment_max_bytes(self, segment_max_bytes: u64) -> Self
 pub fn batpak::prelude::StoreConfig::with_shutdown_drain_limit(self, shutdown_drain_limit: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_signing_downgrade_allowed(self, allow: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_signing_key(self, signing_key: batpak::store::SigningKey) -> Self
+pub fn batpak::prelude::StoreConfig::with_signing_policy(self, signing_policy: batpak::store::SigningPolicy) -> Self
 pub fn batpak::prelude::StoreConfig::with_single_append_max_bytes(self, single_append_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_sync_every_n_events(self, sync_every_n_events: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_sync_mode(self, sync_mode: batpak::prelude::SyncMode) -> Self
@@ -1764,6 +1804,7 @@ pub type batpak::event::sourcing::RawMsgpackInput::Payload = alloc::vec::Vec<u8>
 pub const batpak::event::sourcing::RawMsgpackInput::MODE: batpak::event::sourcing::ReplayLane
 pub fn batpak::prelude::revalidate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub fn batpak::prelude::validate_event_payload_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
+pub fn batpak::prelude::verify_registry() -> core::result::Result<(), batpak::event::payload::EventPayloadRegistryError>
 pub type batpak::prelude::ProjectionEvent<T> = batpak::event::Event<batpak::event::sourcing::ProjectionPayload<T>>
 pub type batpak::prelude::ProjectionPayload<T> = <<T as batpak::event::sourcing::EventSourced>::Input as batpak::event::sourcing::ProjectionInput>::Payload
 pub mod batpak::registry
@@ -2531,6 +2572,16 @@ pub batpak::store::ActiveSegmentReadEvidence::LockedSeekRead
 pub batpak::store::ActiveSegmentReadEvidence::ProbeFailed
 pub batpak::store::ActiveSegmentReadEvidence::UnixReadAt
 pub batpak::store::ActiveSegmentReadEvidence::Unknown
+#[non_exhaustive] pub enum batpak::store::AncestryBoundary
+pub batpak::store::AncestryBoundary::Cycle
+pub batpak::store::AncestryBoundary::Cycle::event_id: batpak::id::EventId
+pub batpak::store::AncestryBoundary::LimitReached
+pub batpak::store::AncestryBoundary::MissingParent
+pub batpak::store::AncestryBoundary::MissingParent::child: batpak::id::EventId
+pub batpak::store::AncestryBoundary::NoAnchor
+pub batpak::store::AncestryBoundary::ReachedGenesis
+pub batpak::store::AncestryBoundary::ReadFailure
+pub batpak::store::AncestryBoundary::ReadFailure::event_id: batpak::id::EventId
 pub enum batpak::store::CanalBatch<I>
 pub batpak::store::CanalBatch::Empty
 pub batpak::store::CanalBatch::Many(alloc::vec::Vec<I>)
@@ -2543,6 +2594,9 @@ pub batpak::store::CausationRef::None
 pub batpak::store::CausationRef::PriorItem(usize)
 impl batpak::store::CausationRef
 pub fn batpak::store::CausationRef::absolute_typed(id: batpak::id::CausationId) -> Self
+#[non_exhaustive] pub enum batpak::store::ChainVerification
+pub batpak::store::ChainVerification::Crc
+pub batpak::store::ChainVerification::Recompute
 pub enum batpak::store::ChainWalkFinding
 pub batpak::store::ChainWalkFinding::CycleDetected
 pub batpak::store::ChainWalkFinding::CycleDetected::event_id: u128
@@ -2873,6 +2927,7 @@ pub batpak::store::ReceiptVerification::Signed
 pub batpak::store::ReceiptVerification::UnsignedAccepted
 impl batpak::prelude::ReceiptVerification
 pub fn batpak::prelude::ReceiptVerification::error(&self) -> core::option::Option<&batpak::prelude::ReceiptVerificationError>
+pub fn batpak::prelude::ReceiptVerification::is_signed(&self) -> bool
 pub fn batpak::prelude::ReceiptVerification::is_valid(&self) -> bool
 pub enum batpak::store::ReceiptVerificationError
 pub batpak::store::ReceiptVerificationError::ContentHashMismatch
@@ -2897,6 +2952,9 @@ pub batpak::store::RestartPolicy::Once
 #[non_exhaustive] pub enum batpak::store::SigningDowngradeReason
 pub batpak::store::SigningDowngradeReason::CoverBuildFailed
 pub batpak::store::SigningDowngradeReason::CoverBuildFailed::encoding_error: alloc::string::String
+#[non_exhaustive] pub enum batpak::store::SigningPolicy
+pub batpak::store::SigningPolicy::Optional
+pub batpak::store::SigningPolicy::Required
 pub enum batpak::store::SnapshotFileKind
 pub batpak::store::SnapshotFileKind::IdempotencyStore
 pub batpak::store::SnapshotFileKind::PendingCompactionMarker
@@ -2931,6 +2989,9 @@ pub batpak::store::StoreError::BatchSyncFailed
 pub batpak::store::StoreError::BatchSyncFailed::item_count: usize
 pub batpak::store::StoreError::BatchSyncFailed::source: alloc::boxed::Box<batpak::prelude::StoreError>
 pub batpak::store::StoreError::CacheFailed(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>)
+pub batpak::store::StoreError::ChainVerificationFailed
+pub batpak::store::StoreError::ChainVerificationFailed::content_hash_mismatches: usize
+pub batpak::store::StoreError::ChainVerificationFailed::dangling_links: usize
 pub batpak::store::StoreError::CheckpointFutureVersion
 pub batpak::store::StoreError::CheckpointFutureVersion::found: u16
 pub batpak::store::StoreError::CheckpointFutureVersion::supported: u16
@@ -3051,6 +3112,7 @@ pub batpak::store::StoreError::Serialization(alloc::boxed::Box<(dyn core::error:
 pub batpak::store::StoreError::StoreLocked
 pub batpak::store::StoreError::StoreLocked::mode: batpak::store::StoreLockMode
 pub batpak::store::StoreError::StoreLocked::path: std::path::PathBuf
+pub batpak::store::StoreError::UpcastChainIncomplete(batpak::event::upcast::UpcastChainRegistryError)
 pub batpak::store::StoreError::VisibilityFenceActive
 pub batpak::store::StoreError::VisibilityFenceCancelled
 pub batpak::store::StoreError::VisibilityFenceNotActive
@@ -3170,6 +3232,12 @@ pub batpak::store::WatermarkKind::Durable
 pub batpak::store::WatermarkKind::Emitted
 pub batpak::store::WatermarkKind::Visible
 pub batpak::store::WatermarkKind::Written
+pub struct batpak::store::AncestorWalk
+pub batpak::store::AncestorWalk::ancestors: alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub batpak::store::AncestorWalk::boundary: batpak::store::AncestryBoundary
+impl batpak::store::AncestorWalk
+pub fn batpak::store::AncestorWalk::reached_genesis(&self) -> bool
+pub fn batpak::store::AncestorWalk::truncated_at(&self) -> core::option::Option<batpak::id::EventId>
 pub struct batpak::store::AppendOptions
 pub batpak::store::AppendOptions::causation_id: core::option::Option<batpak::id::CausationId>
 pub batpak::store::AppendOptions::correlation_id: core::option::Option<batpak::id::CorrelationId>
@@ -3257,6 +3325,12 @@ pub struct batpak::store::CanalClosed
 impl core::error::Error for batpak::store::delivery::canal::CanalClosed
 impl core::fmt::Display for batpak::store::delivery::canal::CanalClosed
 pub fn batpak::store::delivery::canal::CanalClosed::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct batpak::store::ChainVerificationReport
+pub batpak::store::ChainVerificationReport::content_hash_mismatches: alloc::vec::Vec<batpak::id::EventId>
+pub batpak::store::ChainVerificationReport::dangling_links: alloc::vec::Vec<batpak::id::EventId>
+pub batpak::store::ChainVerificationReport::events_checked: usize
+impl batpak::store::ChainVerificationReport
+pub fn batpak::store::ChainVerificationReport::is_intact(&self) -> bool
 pub struct batpak::store::ChainWalkEvidenceReport
 pub batpak::store::ChainWalkEvidenceReport::batpak_version: core::option::Option<alloc::string::String>
 pub batpak::store::ChainWalkEvidenceReport::body: batpak::store::ChainWalkReportBody
@@ -3820,8 +3894,10 @@ pub fn batpak::store::Store<State>::read_raw(&self, event_id: batpak::id::EventI
 pub fn batpak::store::Store<State>::stream_lane(&self, entity: &str, lane: u32) -> alloc::vec::Vec<batpak::store::IndexEntry>
 pub fn batpak::store::Store<State>::verify_append_receipt(&self, receipt: &batpak::prelude::AppendReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::verify_append_receipt_wire_detailed(&self, event_id: batpak::id::EventId, global_sequence: u64, content_hash: [u8; 32], key_id: [u8; 32], signature: core::option::Option<[u8; 64]>, extensions: alloc::collections::btree::map::BTreeMap<batpak::store::ExtensionKey, batpak::store::EncodedBytes>) -> batpak::prelude::ReceiptVerification
+pub fn batpak::store::Store<State>::verify_chain(&self) -> core::result::Result<batpak::store::ChainVerificationReport, batpak::prelude::StoreError>
 pub fn batpak::store::Store<State>::verify_denial_receipt(&self, receipt: &batpak::store::DenialReceipt) -> batpak::prelude::ReceiptVerification
 pub fn batpak::store::Store<State>::walk_ancestors(&self, event_id: batpak::id::EventId, limit: usize) -> alloc::vec::Vec<batpak::event::StoredEvent<serde_json::value::Value>>
+pub fn batpak::store::Store<State>::walk_ancestors_outcome(&self, event_id: batpak::id::EventId, limit: usize) -> batpak::store::AncestorWalk
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
 pub fn batpak::store::Store<State>::chain_walk_evidence(&self, request: &batpak::store::ChainWalkRequest) -> core::result::Result<batpak::store::ChainWalkEvidenceReport, batpak::store::ChainWalkReportError>
 impl<State: batpak::store::StoreState> batpak::store::Store<State>
@@ -3856,6 +3932,7 @@ pub fn batpak::prelude::StoreConfig::sync(&self) -> &batpak::store::SyncConfig
 pub fn batpak::prelude::StoreConfig::with_batch_max_bytes(self, batch_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_batch_max_size(self, batch_max_size: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_broadcast_capacity(self, broadcast_capacity: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_chain_verification(self, chain_verification: batpak::store::ChainVerification) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock(self, clock: core::option::Option<alloc::sync::Arc<dyn batpak::store::Clock>>) -> Self
 pub fn batpak::prelude::StoreConfig::with_clock_fn<F>(self, clock: F) -> Self where F: core::ops::function::Fn() -> i64 + core::marker::Send + core::marker::Sync + 'static
 pub fn batpak::prelude::StoreConfig::with_enable_checkpoint(self, enable_checkpoint: bool) -> Self
@@ -3872,7 +3949,9 @@ pub fn batpak::prelude::StoreConfig::with_platform_profile_path(self, path: impl
 pub fn batpak::prelude::StoreConfig::with_restart_policy(self, restart_policy: batpak::store::RestartPolicy) -> Self
 pub fn batpak::prelude::StoreConfig::with_segment_max_bytes(self, segment_max_bytes: u64) -> Self
 pub fn batpak::prelude::StoreConfig::with_shutdown_drain_limit(self, shutdown_drain_limit: usize) -> Self
+pub fn batpak::prelude::StoreConfig::with_signing_downgrade_allowed(self, allow: bool) -> Self
 pub fn batpak::prelude::StoreConfig::with_signing_key(self, signing_key: batpak::store::SigningKey) -> Self
+pub fn batpak::prelude::StoreConfig::with_signing_policy(self, signing_policy: batpak::store::SigningPolicy) -> Self
 pub fn batpak::prelude::StoreConfig::with_single_append_max_bytes(self, single_append_max_bytes: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_sync_every_n_events(self, sync_every_n_events: u32) -> Self
 pub fn batpak::prelude::StoreConfig::with_sync_mode(self, sync_mode: batpak::prelude::SyncMode) -> Self
