@@ -1,6 +1,6 @@
 [package]
 name = "hostbat"
-version = "0.8.3"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT OR Apache-2.0"
@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["event-sourcing", "runtime", "host", "module"]
 categories = ["database-implementations"]
 # Part of the decoupled bvisor admission-kernel track (its first real consumer is
-# bvisor, which is itself `publish = false`). Stays out of the 0.8.3 release
+# bvisor, which is itself `publish = false`). Stays out of the 0.9.0 release
 # surface until the owner promotes the whole kernel track. Mirrors bvisor.
 publish = false
 
@@ -23,11 +23,11 @@ default = []
 # The host composes a `syncbat::Core` and reuses its module/operation/admission/
 # receipt seams — hostbat adds content identity, multi-axis modules, lifecycle
 # hooks, and a generic supervisor ABOVE this, never reimplementing it.
-syncbat = { path = "../syncbat", version = "0.8.3" }
+syncbat = { path = "../syncbat", version = "0.9.0" }
 # The Spawn seam (the reviewed `batpak::store::Spawn`) backs the generic
 # supervisor, plus the canonical encoder + blake3 hash helpers that give modules
 # and the host composition their content identity.
-batpak = { path = "../core", version = "0.8.3", default-features = false }
+batpak = { path = "../core", version = "0.9.0", default-features = false }
 serde = { version = "1", features = ["derive"] }
 rmpv = "=1.3.1"
 

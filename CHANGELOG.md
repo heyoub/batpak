@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-01
+
 ### Removed
 - Retired the in-repo `bpk-ts` workspace and TypeScript client gates (`just
   verify-ts`, `just verify-all`, `cargo xtask verify-ts`). The 0.9/1.0 line is
