@@ -86,8 +86,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
-    // Our counter lives at this coordinate: entity "counter:hits", scope "example"
-    let coord = Coordinate::new("counter:hits", "example")?;
+    // Our counter lives at this coordinate: entity "counter:main", scope "example"
+    let coord = Coordinate::new("counter:main", "example")?;
 
     // -- Write some events --
     let _ = writeln!(out, "Writing events...\n");
@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &coord,
         &Incremented {
             amount: 1,
-            reason: "page view".into(),
+            reason: "manual".into(),
         },
     )?;
     let _ = store.append_typed(
@@ -116,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Project: replay events to get current state --
     let state: Option<CounterState> =
-        store.project::<CounterState>("counter:hits", &Freshness::Consistent)?;
+        store.project::<CounterState>("counter:main", &Freshness::Consistent)?;
 
     match state {
         Some(s) => {
@@ -136,7 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Query: browse the raw event log --
     let _ = writeln!(out, "\nRaw event log:");
-    let entries = store.by_entity("counter:hits");
+    let entries = store.by_entity("counter:main");
     for entry in &entries {
         let stored = store.get(entry.event_id())?;
         let _ = writeln!(

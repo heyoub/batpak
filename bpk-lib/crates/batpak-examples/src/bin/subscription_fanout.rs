@@ -1,42 +1,43 @@
-//! # chat_room
+//! # subscription_fanout
 //!
 //! **Teaches:** push subscriptions (lossy) vs pull cursors (ordered replay).
 //! Slow subscribers are dropped, not retained.
 //!
-//! A chat system demonstrating batpak's two consumption patterns:
+//! Opaque entities emit events into a shared scope, demonstrating batpak's two
+//! consumption patterns:
 //! 1. **Subscriptions** — push-based, lossy (slow subscribers dropped on Full)
-//! 2. **Cursors** — pull-based, ordered replay (like reading a transcript)
+//! 2. **Cursors** — pull-based, ordered replay of the full stream
 //!
 //! Plus: filtering, composable SubscriptionOps, and cross-thread event delivery.
 //!
 //! No async. No tokio. Just threads and flume channels.
 //!
-//! Run: `cargo run -p batpak-examples --bin chat_room`
+//! Run: `cargo run -p batpak-examples --bin subscription_fanout`
 
 use batpak::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-// Three event kinds, three payload types. Category 3 = chat;
-// type_id = 1/2/3 for sent/edited/deleted.
+// Three event kinds, three payload types. Category 3;
+// type_id = 1/2/3 for emit/amend/retract.
 #[derive(Serialize, Deserialize, Debug, EventPayload)]
 #[batpak(category = 3, type_id = 1)]
-struct MessageSent {
-    from: String,
-    text: String,
+struct Emitted {
+    source: String,
+    value: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, EventPayload)]
 #[batpak(category = 3, type_id = 2)]
-struct MessageEdited {
-    from: String,
-    text: String,
+struct Amended {
+    source: String,
+    value: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, EventPayload)]
 #[batpak(category = 3, type_id = 3)]
-struct MessageDeleted {
-    from: String,
+struct Retracted {
+    source: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,22 +51,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let store = Arc::new(Store::open(StoreConfig::new(dir.path()))?);
 
-    let _ = writeln!(out.lock(), "=== Chat Room: Subscriptions & Cursors ===\n");
+    let _ = writeln!(
+        out.lock(),
+        "=== Subscription Fanout: Subscriptions & Cursors ===\n"
+    );
 
-    // -- Set up a subscriber BEFORE any messages are sent --
+    // -- Set up a subscriber BEFORE any events are appended --
     // Subscriptions are push-based: you only see events that happen AFTER subscribing.
-    let general_region = Region::scope("chat:general");
-    let sub = store.subscribe_lossy(&general_region);
+    let main_region = Region::scope("scope:main");
+    let sub = store.subscribe_lossy(&main_region);
 
-    // -- Spawn a listener thread that collects messages via subscription --
+    // -- Spawn a listener thread that collects events via subscription --
     let store_clone = Arc::clone(&store);
     let listener = std::thread::Builder::new()
-        .name("chat-room-listener".into())
+        .name("fanout-listener".into())
         .spawn(move || {
             let mut listener_out = std::io::stdout().lock();
             let mut received = vec![];
-            // Use SubscriptionOps for composable filtering: only MessageSent, take 3
-            let mut ops = sub.ops().filter(|n| n.kind == MessageSent::KIND).take(3);
+            // Use SubscriptionOps for composable filtering: only Emitted, take 3
+            let mut ops = sub.ops().filter(|n| n.kind == Emitted::KIND).take(3);
             while let Some(notif) = ops.recv() {
                 received.push(format!(
                     "{}@{} (kind={})",
@@ -77,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Also demonstrate reading full events from notifications
             let _ = writeln!(
                 listener_out,
-                "  Subscriber received {} messages (via push)",
+                "  Subscriber received {} events (via push)",
                 received.len()
             );
             for r in &received {
@@ -89,56 +93,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             drop(store_clone);
         })
-        .expect("spawn chat room listener thread");
+        .expect("spawn fanout listener thread");
 
-    // -- Send messages from different users --
-    let alice = Coordinate::new("user:alice", "chat:general")?;
-    let bob = Coordinate::new("user:bob", "chat:general")?;
-    let charlie = Coordinate::new("user:charlie", "chat:general")?;
-
-    // A few small delays so the subscriber thread can keep up
-    let _ = store.append_typed(
-        &alice,
-        &MessageSent {
-            from: "alice".into(),
-            text: "Hey everyone!".into(),
-        },
-    )?;
-    let _ = writeln!(out.lock(), "Alice: Hey everyone!");
+    // -- Append events from different entities --
+    let a = Coordinate::new("entity:a", "scope:main")?;
+    let b = Coordinate::new("entity:b", "scope:main")?;
+    let c = Coordinate::new("entity:c", "scope:main")?;
 
     let _ = store.append_typed(
-        &bob,
-        &MessageSent {
-            from: "bob".into(),
-            text: "What's up?".into(),
+        &a,
+        &Emitted {
+            source: "a".into(),
+            value: "value-1".into(),
         },
     )?;
-    let _ = writeln!(out.lock(), "Bob: What's up?");
-
-    // Bob edits his message (different event kind — subscriber filter will skip this)
-    let _ = store.append_typed(
-        &bob,
-        &MessageEdited {
-            from: "bob".into(),
-            text: "What's up? (edited)".into(),
-        },
-    )?;
-    let _ = writeln!(out.lock(), "Bob: [edited his message]");
+    let _ = writeln!(out.lock(), "entity:a emitted value-1");
 
     let _ = store.append_typed(
-        &charlie,
-        &MessageSent {
-            from: "charlie".into(),
-            text: "Hey! Just joined.".into(),
+        &b,
+        &Emitted {
+            source: "b".into(),
+            value: "value-2".into(),
         },
     )?;
-    let _ = writeln!(out.lock(), "Charlie: Hey! Just joined.");
+    let _ = writeln!(out.lock(), "entity:b emitted value-2");
 
-    // Wait for listener to finish (it takes 3 MSG_SENT events then stops)
+    // entity:b amends its event (different event kind — subscriber filter will skip this)
+    let _ = store.append_typed(
+        &b,
+        &Amended {
+            source: "b".into(),
+            value: "value-2 (amended)".into(),
+        },
+    )?;
+    let _ = writeln!(out.lock(), "entity:b amended its event");
+
+    let _ = store.append_typed(
+        &c,
+        &Emitted {
+            source: "c".into(),
+            value: "value-3".into(),
+        },
+    )?;
+    let _ = writeln!(out.lock(), "entity:c emitted value-3");
+
+    // Wait for listener to finish (it takes 3 Emitted events then stops)
     let _ = writeln!(out.lock(), "\n--- Subscription Results ---");
     listener
         .join()
-        .map_err(|_| std::io::Error::other("chat room listener thread panicked"))?;
+        .map_err(|_| std::io::Error::other("fanout listener thread panicked"))?;
 
     // The listener thread has now joined, so this thread is the only writer.
     let mut out = out.lock();
@@ -150,7 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  (Cursors see ALL events, even ones before the cursor was created)\n"
     );
 
-    let mut cursor = store.cursor_guaranteed(&general_region);
+    let mut cursor = store.cursor_guaranteed(&main_region);
     let mut cursor_events = vec![];
     while let Some(entry) = cursor.poll() {
         cursor_events.push(entry);
@@ -158,9 +161,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = writeln!(out, "  Cursor found {} events total:", cursor_events.len());
     for entry in &cursor_events {
         let kind_label = match entry.event_kind() {
-            k if k == MessageSent::KIND => "SENT",
-            k if k == MessageEdited::KIND => "EDITED",
-            k if k == MessageDeleted::KIND => "DELETED",
+            k if k == Emitted::KIND => "EMIT",
+            k if k == Amended::KIND => "AMEND",
+            k if k == Retracted::KIND => "RETRACT",
             _ => "OTHER",
         };
         let _ = writeln!(
@@ -173,47 +176,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // -- Query: filter by entity --
-    let _ = writeln!(out, "\n--- Query: Bob's messages only ---");
-    let bob_events = store.by_entity("user:bob");
-    let _ = writeln!(out, "  Bob has {} events:", bob_events.len());
-    for entry in &bob_events {
+    let _ = writeln!(out, "\n--- Query: entity:b's events only ---");
+    let b_events = store.by_entity("entity:b");
+    let _ = writeln!(out, "  entity:b has {} events:", b_events.len());
+    for entry in &b_events {
         let _ = writeln!(out, "    kind={} seq={}", entry.event_kind(), entry.clock());
     }
 
     // -- Query: filter by event kind --
-    let _ = writeln!(out, "\n--- Query: All edits across all users ---");
-    let edits = store.by_fact_typed::<MessageEdited>();
-    let _ = writeln!(out, "  {} edit event(s) found", edits.len());
+    let _ = writeln!(out, "\n--- Query: All amendments across all entities ---");
+    let amendments = store.by_fact_typed::<Amended>();
+    let _ = writeln!(out, "  {} amend event(s) found", amendments.len());
 
-    // -- Batch append: efficient bulk messaging --
-    let _ = writeln!(out, "\n--- Batch: Bulk message import ---");
+    // -- Batch append: efficient bulk emission --
+    let _ = writeln!(out, "\n--- Batch: Bulk event import ---");
     use batpak::store::{BatchAppendItem, CausationRef};
 
-    // Simulate importing a batch of historical messages
+    // Simulate importing a batch of historical events
     let historical = vec![
         BatchAppendItem::typed(
-            Coordinate::new("user:alice", "chat:general")?,
-            &MessageSent {
-                from: "alice".into(),
-                text: "[Batch] Historical message 1".into(),
+            Coordinate::new("entity:a", "scope:main")?,
+            &Emitted {
+                source: "a".into(),
+                value: "[Batch] historical-1".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
         )?,
         BatchAppendItem::typed(
-            Coordinate::new("user:bob", "chat:general")?,
-            &MessageSent {
-                from: "bob".into(),
-                text: "[Batch] Historical message 2".into(),
+            Coordinate::new("entity:b", "scope:main")?,
+            &Emitted {
+                source: "b".into(),
+                value: "[Batch] historical-2".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
         )?,
         BatchAppendItem::typed(
-            Coordinate::new("user:charlie", "chat:general")?,
-            &MessageSent {
-                from: "charlie".into(),
-                text: "[Batch] Historical message 3".into(),
+            Coordinate::new("entity:c", "scope:main")?,
+            &Emitted {
+                source: "c".into(),
+                value: "[Batch] historical-3".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
@@ -221,25 +224,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     let batch_receipts = store.append_batch(historical)?;
-    let _ = writeln!(
-        out,
-        "  Imported {} messages atomically",
-        batch_receipts.len()
-    );
+    let _ = writeln!(out, "  Imported {} events atomically", batch_receipts.len());
     for (i, receipt) in batch_receipts.iter().enumerate() {
         let _ = writeln!(
             out,
-            "    Message {}: seq={}, event_id={}",
+            "    Event {}: seq={}, event_id={}",
             i, receipt.global_sequence, receipt.event_id
         );
     }
 
-    // Verify all batch messages are visible
-    let all_general = store
-        .cursor_guaranteed(&general_region)
-        .poll_batch(100)
-        .len();
-    let _ = writeln!(out, "  Total messages in #general: {}", all_general);
+    // Verify all batch events are visible
+    let all_main = store.cursor_guaranteed(&main_region).poll_batch(100).len();
+    let _ = writeln!(out, "  Total events in scope:main: {}", all_main);
 
     drop(store);
     let _ = writeln!(

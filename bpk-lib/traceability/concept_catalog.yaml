@@ -50,7 +50,7 @@ concepts:
 
   # --- Delivery: cursors, subscriptions, reactors. ---
   - concept_id: subscriptions-vs-cursors
-    canonical_example: crates/batpak-examples/src/bin/chat_room.rs
+    canonical_example: crates/batpak-examples/src/bin/subscription_fanout.rs
     summary: push subscriptions (lossy) vs pull cursors (ordered replay)
   - concept_id: cursor-worker
     canonical_example: crates/batpak-examples/src/bin/cursor_worker.rs
@@ -72,7 +72,7 @@ concepts:
 
   # --- Typestate / lifecycle / locking. ---
   - concept_id: typestate-state-machine
-    canonical_example: crates/batpak-examples/src/bin/dungeon_typestate.rs
+    canonical_example: crates/batpak-examples/src/bin/typestate_transitions.rs
     summary: compile-time state machine enforcement via typestate transitions
   - concept_id: read-only-reopen
     canonical_example: crates/batpak-examples/src/bin/read_only.rs

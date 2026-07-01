@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = tempfile::tempdir()?;
     let store = Store::open(StoreConfig::new(dir.path()))?;
 
-    let coord = Coordinate::new("player:submit", "room:pipeline")?;
+    let coord = Coordinate::new("entity:submit", "scope:pipeline")?;
 
     let first = store.submit_typed(&coord, &Tick { n: 1 })?;
     let second = store.submit_typed(&coord, &Tick { n: 2 })?;

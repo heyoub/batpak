@@ -28,13 +28,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let dir = tempfile::tempdir()?;
     let store = Arc::new(Store::open(StoreConfig::new(dir.path()))?);
-    let coord = Coordinate::new("player:cursor", "room:worker")?;
+    let coord = Coordinate::new("entity:cursor", "scope:worker")?;
     let processed = Arc::new(AtomicUsize::new(0));
     let mut worker_config = CursorWorkerConfig::default();
     worker_config.batch_size = 1;
     worker_config.idle_sleep = Duration::from_millis(5);
 
-    let worker = store.cursor_worker(&Region::entity("player:cursor"), worker_config, {
+    let worker = store.cursor_worker(&Region::entity("entity:cursor"), worker_config, {
         let processed = Arc::clone(&processed);
         move |_batch, _store, _witness| {
             // `_witness` is `Some(&AtLeastOnce)` only for checkpoint-backed workers.

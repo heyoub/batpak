@@ -13,15 +13,15 @@ use batpak::store::{BatchAppendItem, CausationRef};
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 1, type_id = 1)]
-struct ChatSent {
-    text: String,
+struct ThingHappened {
+    label: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, EventPayload)]
 #[batpak(category = 2, type_id = 1)]
-struct AuditLogged {
-    action: String,
-    participants: u32,
+struct Summarized {
+    note: String,
+    count: u32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -37,30 +37,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build a batch of related events across two entities.
     let items = vec![
-        // First event: Alice sends a message.
+        // First event: entity:a emits.
         BatchAppendItem::typed(
-            Coordinate::new("user:alice", "chat:general")?,
-            &ChatSent {
-                text: "Hello everyone!".into(),
+            Coordinate::new("entity:a", "scope:main")?,
+            &ThingHappened {
+                label: "first".into(),
             },
             AppendOptions::default(),
             CausationRef::None,
         )?,
-        // Second event: Bob replies, caused by Alice's message (item 0).
+        // Second event: entity:b emits, caused by item 0.
         BatchAppendItem::typed(
-            Coordinate::new("user:bob", "chat:general")?,
-            &ChatSent {
-                text: "Hi Alice!".into(),
+            Coordinate::new("entity:b", "scope:main")?,
+            &ThingHappened {
+                label: "second".into(),
             },
             AppendOptions::default(),
             CausationRef::PriorItem(0),
         )?,
-        // Third event: System audit log, caused by Bob's reply (item 1).
+        // Third event: a summary record, caused by item 1.
         BatchAppendItem::typed(
-            Coordinate::new("system:audit", "chat:general")?,
-            &AuditLogged {
-                action: "message_exchange".into(),
-                participants: 2,
+            Coordinate::new("entity:summary", "scope:main")?,
+            &Summarized {
+                note: "combined".into(),
+                count: 2,
             },
             AppendOptions::default(),
             CausationRef::PriorItem(1),
@@ -83,8 +83,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Verify all events are queryable.
-    let alice_events = store.query(&Region::entity("user:alice"));
-    let _ = writeln!(out, "\nalice has {} event(s)", alice_events.len());
+    let entity_a_events = store.query(&Region::entity("entity:a"));
+    let _ = writeln!(out, "\nentity:a has {} event(s)", entity_a_events.len());
 
     Ok(())
 }

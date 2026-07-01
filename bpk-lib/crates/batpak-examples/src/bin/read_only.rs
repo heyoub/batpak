@@ -22,12 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_enable_mmap_index(true);
 
     let store = Store::open(config.clone())?;
-    let coord = Coordinate::new("player:readonly", "room:archive")?;
+    let coord = Coordinate::new("entity:readonly", "scope:archive")?;
     let _ = store.append_typed(&coord, &Archived { n: 1 })?;
     store.close()?;
 
     let read_only = Store::<batpak::store::ReadOnly>::open_read_only(config)?;
-    let stream = read_only.by_entity("player:readonly");
+    let stream = read_only.by_entity("entity:readonly");
     let _ = writeln!(out, "read-only reopen recovered {} event(s)", stream.len());
 
     Ok(())
