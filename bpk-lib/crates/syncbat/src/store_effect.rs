@@ -71,10 +71,11 @@ impl EffectBackend for StoreEffectBackend {
 
     // `emit_receipt` and `use_host_control` intentionally fall through to the
     // trait's typed fail-closed defaults. The receipt sink is a Core-level
-    // concern (`Core::receipt_sink`) this store backend does not hold, and host
-    // controls are a host-layer (hostbat) authority a store backend has no way
-    // to perform. Backing either here would be a parallel, uncoordinated path;
-    // they are wired at their owning layer instead.
+    // concern (`Core::receipt_sink`) this store backend does not hold, and an
+    // identified host control is a host-layer (hostbat) authority a store
+    // backend has no way to perform — the store is not a host. Backing either
+    // here would be a parallel, uncoordinated path; they are wired at their
+    // owning layer instead.
 }
 
 /// Serializes a pre-encoded payload verbatim as a MessagePack `bin` so the

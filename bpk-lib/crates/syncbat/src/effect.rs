@@ -72,9 +72,9 @@ pub struct OperationEffectRow {
     /// Receipt kinds emitted by the operation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     emits_receipts: Vec<String>,
-    /// Whether the operation uses host-control authority.
-    #[serde(default, skip_serializing_if = "is_false")]
-    uses_host_controls: bool,
+    /// Host-control ids used by the operation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    uses_host_controls: Vec<String>,
     /// Capability tokens required or observed for this row.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     requires_capabilities: Vec<String>,
@@ -89,7 +89,7 @@ impl OperationEffectRow {
             appends_events: Vec::new(),
             queries_projections: Vec::new(),
             emits_receipts: Vec::new(),
-            uses_host_controls: false,
+            uses_host_controls: Vec::new(),
             requires_capabilities: Vec::new(),
         }
     }
@@ -124,10 +124,10 @@ impl OperationEffectRow {
         &self.emits_receipts
     }
 
-    /// Return true when host-control authority is declared or observed.
+    /// Host-control ids used by the operation.
     #[must_use]
-    pub const fn uses_host_controls(&self) -> bool {
-        self.uses_host_controls
+    pub fn uses_host_controls(&self) -> &[String] {
+        &self.uses_host_controls
     }
 
     /// Capability tokens required by the declaration or observed by handles.
@@ -143,7 +143,7 @@ impl OperationEffectRow {
             && self.appends_events.is_empty()
             && self.queries_projections.is_empty()
             && self.emits_receipts.is_empty()
-            && !self.uses_host_controls
+            && self.uses_host_controls.is_empty()
             && self.requires_capabilities.is_empty()
     }
 
@@ -167,9 +167,11 @@ impl OperationEffectRow {
             &self.queries_projections,
         )?;
         push_identities(&mut identities, "emits_receipts", &self.emits_receipts)?;
-        if self.uses_host_controls {
-            identities.push(EffectIdentity::new("uses_host_controls", "host")?);
-        }
+        push_identities(
+            &mut identities,
+            "uses_host_controls",
+            &self.uses_host_controls,
+        )?;
         push_identities(
             &mut identities,
             "requires_capabilities",
@@ -227,10 +229,10 @@ impl OperationEffectRow {
         self
     }
 
-    /// Declare that this operation uses host-control authority.
+    /// Declare that this operation uses the host control identified by `control`.
     #[must_use]
-    pub fn uses_host_control(mut self) -> Self {
-        self.uses_host_controls = true;
+    pub fn uses_host_control(mut self, control: impl Into<String>) -> Self {
+        insert_sorted(&mut self.uses_host_controls, control.into());
         insert_sorted(
             &mut self.requires_capabilities,
             HOST_CONTROL_CAPABILITY.to_owned(),
@@ -277,8 +279,8 @@ impl OperationEffectRow {
         );
     }
 
-    pub(crate) fn record_uses_host_control(&mut self) {
-        self.uses_host_controls = true;
+    pub(crate) fn record_uses_host_control(&mut self, control: impl Into<String>) {
+        insert_sorted(&mut self.uses_host_controls, control.into());
         insert_sorted(
             &mut self.requires_capabilities,
             HOST_CONTROL_CAPABILITY.to_owned(),
@@ -317,14 +319,11 @@ impl OperationEffectRow {
                 )
             })
             .or_else(|| {
-                if self.uses_host_controls && !declared.uses_host_controls {
-                    Some(ObservedEffectViolation::undeclared(
-                        "uses_host_controls",
-                        "host",
-                    ))
-                } else {
-                    None
-                }
+                first_missing(
+                    "uses_host_controls",
+                    &self.uses_host_controls,
+                    &declared.uses_host_controls,
+                )
             })
             .or_else(|| {
                 first_missing(
@@ -345,7 +344,7 @@ impl OperationEffectRow {
             EffectClass::Inspect => {
                 if !self.appends_events.is_empty()
                     || !self.emits_receipts.is_empty()
-                    || self.uses_host_controls
+                    || !self.uses_host_controls.is_empty()
                 {
                     return Err(DescriptorValidationError::new(
                         "effect_row",
@@ -371,7 +370,7 @@ impl OperationEffectRow {
                         "persist operations must declare event appends",
                     ));
                 }
-                if !self.emits_receipts.is_empty() || self.uses_host_controls {
+                if !self.emits_receipts.is_empty() || !self.uses_host_controls.is_empty() {
                     return Err(DescriptorValidationError::new(
                         "effect_row",
                         effect.as_str(),
@@ -387,7 +386,7 @@ impl OperationEffectRow {
                         "emit operations must declare their receipt kind",
                     ));
                 }
-                if !self.appends_events.is_empty() || self.uses_host_controls {
+                if !self.appends_events.is_empty() || !self.uses_host_controls.is_empty() {
                     return Err(DescriptorValidationError::new(
                         "effect_row",
                         effect.as_str(),
@@ -396,7 +395,7 @@ impl OperationEffectRow {
                 }
             }
             EffectClass::Control => {
-                if !self.uses_host_controls {
+                if self.uses_host_controls.is_empty() {
                     return Err(DescriptorValidationError::new(
                         "effect_row",
                         effect.as_str(),
@@ -414,6 +413,7 @@ impl OperationEffectRow {
             ("appends_events", self.appends_events.as_slice()),
             ("queries_projections", self.queries_projections.as_slice()),
             ("emits_receipts", self.emits_receipts.as_slice()),
+            ("uses_host_controls", self.uses_host_controls.as_slice()),
             (
                 "requires_capabilities",
                 self.requires_capabilities.as_slice(),
@@ -634,16 +634,17 @@ impl<'a> HostControlHandle<'a> {
         Self { row, backend }
     }
 
-    /// Use host-control authority through the runtime backend and record it as
-    /// an observed host-control effect.
+    /// Use the host control identified by `control` through the runtime backend
+    /// and record it as an observed host-control effect.
     ///
     /// # Errors
     /// Returns [`EffectError`] when no backend is bound for this invocation or
     /// the backend rejects the use.
-    pub fn use_host_control(&mut self) -> Result<(), EffectError> {
+    pub fn use_host_control(&mut self, control: impl Into<String>) -> Result<(), EffectError> {
+        let control = control.into();
         let backend = require_effect_backend(self.backend.as_deref_mut(), "use host controls")?;
-        backend.use_host_control()?;
-        self.row.record_uses_host_control();
+        backend.use_host_control(&control)?;
+        self.row.record_uses_host_control(control);
         Ok(())
     }
 }
@@ -735,8 +736,4 @@ fn validate_effect_target(
         ));
     }
     Ok(())
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }

@@ -280,7 +280,7 @@ fn store_backend_keeps_host_layer_axes_fail_closed() {
     );
 
     let host = backend
-        .use_host_control()
+        .use_host_control("ctrl.alpha")
         .expect_err("store backend must not back host control");
     assert!(
         host.message().contains("host controls are not supported"),

@@ -22,6 +22,8 @@ const PROJECTION_ALLOWED: &str = "proj.orders.v1";
 const PROJECTION_OTHER: &str = "proj.other.v1";
 const RECEIPT_KIND: &str = "receipt.audit.v1";
 const RECEIPT_OTHER: &str = "receipt.other.v1";
+const HOST_CONTROL_ALLOWED: &str = "ctrl.alpha";
+const HOST_CONTROL_OTHER: &str = "ctrl.beta";
 
 const SCHEMA_IN: &str = "schema.audit.input.v1";
 const SCHEMA_OUT: &str = "schema.audit.output.v1";
@@ -37,7 +39,6 @@ enum RejectAxis {
 
 type AppendLog = Arc<Mutex<Vec<(u16, Vec<u8>)>>>;
 type StringLog = Arc<Mutex<Vec<String>>>;
-type HostControlCount = Arc<Mutex<u32>>;
 
 #[derive(Clone, Default)]
 struct RecordingState {
@@ -45,7 +46,7 @@ struct RecordingState {
     read_events: StringLog,
     projections: StringLog,
     receipts: StringLog,
-    host_controls: HostControlCount,
+    host_controls: StringLog,
 }
 
 impl RecordingState {
@@ -55,7 +56,7 @@ impl RecordingState {
             read_events: Arc::new(Mutex::new(Vec::new())),
             projections: Arc::new(Mutex::new(Vec::new())),
             receipts: Arc::new(Mutex::new(Vec::new())),
-            host_controls: Arc::new(Mutex::new(0)),
+            host_controls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -131,11 +132,15 @@ impl EffectBackend for RecordingBackend {
         Ok(())
     }
 
-    fn use_host_control(&mut self) -> Result<(), EffectError> {
+    fn use_host_control(&mut self, control: &str) -> Result<(), EffectError> {
         if self.reject == Some(RejectAxis::HostControl) {
             return Err(EffectError::new("backend rejected use_host_control"));
         }
-        *self.state.host_controls.lock().expect("host lock") += 1;
+        self.state
+            .host_controls
+            .lock()
+            .expect("host lock")
+            .push(control.to_owned());
         Ok(())
     }
 }
@@ -224,12 +229,14 @@ impl Handler for EmitReceiptHandler {
     }
 }
 
-struct HostControlHandler;
+struct HostControlHandler {
+    control: String,
+}
 
 impl Handler for HostControlHandler {
     fn handle(&mut self, input: &[u8], cx: &mut Ctx<'_>) -> HandlerResult {
         cx.host_control_handle()
-            .use_host_control()
+            .use_host_control(self.control.clone())
             .map_err(|error| HandlerError::failed(error.message().to_owned()))?;
         Ok(input.to_vec())
     }
@@ -682,20 +689,27 @@ fn declared_host_control_through_handle_completes_and_is_performed() {
     let backend = RecordingBackend::new();
     let state = backend.state.clone();
     let mut core = build_core(
-        control_descriptor(OperationEffectRow::new().uses_host_control()),
-        HostControlHandler,
+        control_descriptor(OperationEffectRow::new().uses_host_control(HOST_CONTROL_ALLOWED)),
+        HostControlHandler {
+            control: HOST_CONTROL_ALLOWED.to_owned(),
+        },
         Some(backend),
     );
     core.invoke("audit.control", b"payload".to_vec())
         .expect("invoke");
-    assert_eq!(*state.host_controls.lock().expect("host lock"), 1);
+    assert_eq!(
+        state.host_controls.lock().expect("host lock").clone(),
+        vec![HOST_CONTROL_ALLOWED.to_owned()]
+    );
 }
 
 #[test]
 fn use_host_control_without_a_bound_backend_is_denied() -> Result<(), Box<dyn std::error::Error>> {
     let mut core = build_core(
-        control_descriptor(OperationEffectRow::new().uses_host_control()),
-        HostControlHandler,
+        control_descriptor(OperationEffectRow::new().uses_host_control(HOST_CONTROL_ALLOWED)),
+        HostControlHandler {
+            control: HOST_CONTROL_ALLOWED.to_owned(),
+        },
         None,
     );
     let err = match core.invoke("audit.control", b"payload".to_vec()) {
@@ -720,8 +734,10 @@ fn use_host_control_backend_reject_does_not_record_observation(
     let backend = RecordingBackend::rejecting(RejectAxis::HostControl);
     let state = backend.state.clone();
     let mut core = build_core(
-        control_descriptor(OperationEffectRow::new().uses_host_control()),
-        HostControlHandler,
+        control_descriptor(OperationEffectRow::new().uses_host_control(HOST_CONTROL_ALLOWED)),
+        HostControlHandler {
+            control: HOST_CONTROL_ALLOWED.to_owned(),
+        },
         Some(backend),
     );
     let err = match core.invoke("audit.control", b"payload".to_vec()) {
@@ -736,9 +752,8 @@ fn use_host_control_backend_reject_does_not_record_observation(
         err,
         RuntimeError::Handler { ref name, .. } if name == "audit.control"
     ));
-    assert_eq!(
-        *state.host_controls.lock().expect("host lock"),
-        0,
+    assert!(
+        state.host_controls.lock().expect("host lock").is_empty(),
         "backend rejection must not record host-control use"
     );
     Ok(())
@@ -751,7 +766,9 @@ fn dispatch_denies_host_control_without_declared_authority(
     let state = backend.state.clone();
     let mut core = build_core(
         inspect_descriptor(OperationEffectRow::new()),
-        HostControlHandler,
+        HostControlHandler {
+            control: HOST_CONTROL_ALLOWED.to_owned(),
+        },
         Some(backend),
     );
     let err = match core.invoke("audit.inspect", b"payload".to_vec()) {
@@ -768,6 +785,47 @@ fn dispatch_denies_host_control_without_declared_authority(
         RuntimeError::Denied { ref name, ref code, .. }
             if name == "audit.inspect" && code == "effect.violation"
     ));
-    assert_eq!(*state.host_controls.lock().expect("host lock"), 1);
+    assert_eq!(
+        state.host_controls.lock().expect("host lock").clone(),
+        vec![HOST_CONTROL_ALLOWED.to_owned()]
+    );
+    Ok(())
+}
+
+#[test]
+fn dispatch_denies_host_control_outside_declared_row() -> Result<(), Box<dyn std::error::Error>> {
+    // Subset check on the host-control axis: the op declares only `ctrl.alpha`
+    // but the handler performs `ctrl.beta` through the bound backend. The effect
+    // is performed and observed, then checkout fails closed because the observed
+    // control-id is not a subset of the declared row (mirrors the read/append
+    // axes). This is the fixture that would go GREEN if the axis were left a bare
+    // bool that records nothing and can't be subset-checked.
+    let backend = RecordingBackend::new();
+    let state = backend.state.clone();
+    let mut core = build_core(
+        control_descriptor(OperationEffectRow::new().uses_host_control(HOST_CONTROL_ALLOWED)),
+        HostControlHandler {
+            control: HOST_CONTROL_OTHER.to_owned(),
+        },
+        Some(backend),
+    );
+    let err = match core.invoke("audit.control", b"payload".to_vec()) {
+        Ok(_) => {
+            return Err(std::io::Error::other(
+                "PROPERTY: an undeclared host control id must be denied at checkout",
+            )
+            .into())
+        }
+        Err(error) => error,
+    };
+    assert!(matches!(
+        err,
+        RuntimeError::Denied { ref name, ref code, .. }
+            if name == "audit.control" && code == "effect.violation"
+    ));
+    assert_eq!(
+        state.host_controls.lock().expect("host lock").clone(),
+        vec![HOST_CONTROL_OTHER.to_owned()]
+    );
     Ok(())
 }

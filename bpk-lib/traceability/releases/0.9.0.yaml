@@ -237,6 +237,7 @@ rows:
       - crates/syncbat/tests/effect_enforcement.rs::use_host_control_without_a_bound_backend_is_denied
       - crates/syncbat/tests/effect_enforcement.rs::use_host_control_backend_reject_does_not_record_observation
       - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_host_control_without_declared_authority
+      - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_host_control_outside_declared_row
       - crates/syncbat/tests/effect_enforcement.rs::declared_append_through_handle_completes_and_is_performed
       - crates/syncbat/tests/effect_enforcement.rs::dispatch_denies_append_outside_declared_row
       - crates/syncbat/tests/effect_enforcement.rs::append_without_a_bound_backend_is_denied

@@ -54,7 +54,7 @@ fn valid_row_for(effect: EffectClass, target: &str, receipt_kind: &str) -> Opera
         EffectClass::Inspect => OperationEffectRow::new(),
         EffectClass::Compute => OperationEffectRow::new(),
         EffectClass::Emit => OperationEffectRow::new().emits_receipt(receipt_kind.to_owned()),
-        EffectClass::Control => OperationEffectRow::new().uses_host_control(),
+        EffectClass::Control => OperationEffectRow::new().uses_host_control("ctrl.alpha"),
         _ => OperationEffectRow::new(),
     }
 }
