@@ -61,6 +61,14 @@
 //!   tokens with [`CoreBuilder::grant_capability`] /
 //!   [`CoreBuilder::grant_capabilities`]. (Effect-axis tokens auto-declared by
 //!   the effect builders are ambient and need no explicit grant.)
+//! - Every effect axis is an enforced boundary: an operation reaches an effect
+//!   only through the matching `Ctx` capability handle, which records it into the
+//!   observed row in the same step, and `checkout` fails closed when the observed
+//!   row is not a subset of the declared row. `use_host_control` is a declared +
+//!   subset-checked target axis like the read/append/query axes (observed host
+//!   controls must be a subset of the declared targets), and `emit_receipt`
+//!   stamps its opaque payload as observed evidence into the invocation's single
+//!   banked receipt only after the backend mediates the emission.
 //!
 //! # Operation names
 //!
