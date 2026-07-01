@@ -11,12 +11,14 @@ documentation = "https://docs.rs/netbat"
 readme = "README.md"
 keywords = ["event-sourcing", "network", "sync", "server"]
 categories = ["network-programming"]
-# Keep dev-only test material OUT of the published crate. In particular the
-# self-signed TLS test fixtures (`tests/fixtures/tls_test_key.pem` is a real
-# `BEGIN PRIVATE KEY`) must never ship to crates.io — a published crate carrying
-# a private key is exactly what `cargo xtask package-leak-scan` refuses. Consumers
-# never run netbat's own tests, so excluding the whole `tests/` tree loses nothing
-# and keeps the thin crate's published surface to lib + docs.
+# Keep dev-only test material OUT of the published crate. netbat's self-signed TLS
+# test fixtures include a PEM private key (`tests/fixtures/tls_test_key.pem`), and a
+# published crate must never carry key material — exactly what
+# `cargo xtask package-leak-scan` refuses. That scanner greps the packaged tarball
+# INCLUDING `Cargo.toml.orig` (cargo's verbatim copy of this manifest) with a naive
+# substring match, so this note deliberately avoids the literal PEM header text.
+# Consumers never run netbat's own tests, so excluding the whole `tests/` tree loses
+# nothing and keeps the thin crate's published surface to lib + docs.
 exclude = ["tests/"]
 
 [features]
